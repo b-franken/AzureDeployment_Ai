@@ -99,7 +99,7 @@ def _dispose(clients: Clients) -> None:
 async def _build_clients(sid: str) -> tuple[Clients, int]:
     cred = _credential()
     token = await asyncio.to_thread(cred.get_token, _TOKEN_SCOPE)
-    expiry = token.expires_on
+    expiry = int(token.expires_on)
     return (
         Clients(
             subscription_id=sid,

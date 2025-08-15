@@ -161,7 +161,15 @@ _ALIAS_LOOKUP: dict[str, str] = {}
 
 _NORMALIZE_RE = re.compile(r"[^a-z0-9_]+")
 
-_VERBS_CREATE: list[str] = ["create", "make", "new", "provision", "ensure", "setup", "add"]
+_VERBS_CREATE: list[str] = [
+    "create",
+    "make",
+    "new",
+    "provision",
+    "ensure",
+    "setup",
+    "add",
+]
 _VERBS_SET: list[str] = ["set", "create", "add", "put", "update"]
 _VERBS_ASSIGN: list[str] = ["assign", "grant", "add", "attach"]
 
@@ -175,7 +183,12 @@ _OBJ_SYNONYMS: dict[str, list[str]] = {
     "public_ip": ["public_ip", "public ip", "pip"],
     "nsg": ["network_security_group", "network security group", "nsg"],
     "lb": ["load_balancer", "load balancer", "lb"],
-    "app_gateway": ["application_gateway", "application gateway", "app gateway", "appgw"],
+    "app_gateway": [
+        "application_gateway",
+        "application gateway",
+        "app gateway",
+        "appgw",
+    ],
     "plan": ["app_service_plan", "app service plan", "plan"],
     "webapp": ["webapp", "web app", "app service", "website"],
     "acr": ["container_registry", "container registry", "acr"],

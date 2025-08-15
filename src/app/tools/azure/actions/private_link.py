@@ -9,7 +9,9 @@ from ..validators import validate_name
 _PCall = Callable[..., Any]
 
 
-async def _safe_get(pcall: _PCall, *args: Any, clients: Clients, **kwargs: Any) -> tuple[bool, Any]:
+async def _safe_get(
+    pcall: _PCall, *args: Any, clients: Clients, **kwargs: Any
+) -> tuple[bool, Any]:
     try:
         res = await clients.run(pcall, *args, **kwargs)
         return True, res
@@ -50,8 +52,16 @@ async def create_private_endpoint(
     )
     if ok and existing and not force:
         return "exists", existing.as_dict()
-    subnet = await clients.run(clients.net.subnets.get, resource_group, vnet_name, subnet_name)
-    conn = [{"name": "default", "private_link_service_id": target_resource_id, "group_ids": gids}]
+    subnet = await clients.run(
+        clients.net.subnets.get, resource_group, vnet_name, subnet_name
+    )
+    conn = [
+        {
+            "name": "default",
+            "private_link_service_id": target_resource_id,
+            "group_ids": gids,
+        }
+    ]
     params = {
         "location": location,
         "subnet": {"id": subnet.id},
@@ -59,7 +69,10 @@ async def create_private_endpoint(
         "tags": tags or {},
     }
     poller = await clients.run(
-        clients.net.private_endpoints.begin_create_or_update, resource_group, name, params
+        clients.net.private_endpoints.begin_create_or_update,
+        resource_group,
+        name,
+        params,
     )
     pe = await clients.run(poller.result)
     return "created", pe.as_dict()

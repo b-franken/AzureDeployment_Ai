@@ -15,4 +15,6 @@ def require_bearer_token(request: Request) -> None:
     auth = request.headers.get("authorization", "")
     provided = auth.split(None, 1)[1] if auth.lower().startswith("bearer ") else None
     if provided is None or provided != expected:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized"
+        )

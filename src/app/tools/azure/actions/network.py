@@ -101,7 +101,10 @@ async def create_public_ip(
             "location": location,
         }
     ok, existing = await _safe_get(
-        clients.net.public_ip_addresses.get, resource_group, public_ip_name, clients=clients
+        clients.net.public_ip_addresses.get,
+        resource_group,
+        public_ip_name,
+        clients=clients,
     )
     if ok and existing and not force:
         return "exists", existing.as_dict()
@@ -133,9 +136,16 @@ async def create_nsg(
     if not validate_name("generic", nsg_name):
         return "error", {"message": "invalid nsg name"}
     if dry_run:
-        return "plan", {"name": nsg_name, "resource_group": resource_group, "location": location}
+        return "plan", {
+            "name": nsg_name,
+            "resource_group": resource_group,
+            "location": location,
+        }
     ok, existing = await _safe_get(
-        clients.net.network_security_groups.get, resource_group, nsg_name, clients=clients
+        clients.net.network_security_groups.get,
+        resource_group,
+        nsg_name,
+        clients=clients,
     )
     if ok and existing and not force:
         return "exists", existing.as_dict()
@@ -174,7 +184,9 @@ async def create_lb(
     )
     if ok and existing and not force:
         return "exists", existing.as_dict()
-    pip = await clients.run(clients.net.public_ip_addresses.get, resource_group, public_ip_name)
+    pip = await clients.run(
+        clients.net.public_ip_addresses.get, resource_group, public_ip_name
+    )
     feip_cfg: list[dict[str, object]] = [
         {"name": "LoadBalancerFrontEnd", "public_ip_address": {"id": pip.id}}
     ]
@@ -188,7 +200,10 @@ async def create_lb(
         "tags": tags or {},
     }
     poller = await clients.run(
-        clients.net.load_balancers.begin_create_or_update, resource_group, lb_name, params
+        clients.net.load_balancers.begin_create_or_update,
+        resource_group,
+        lb_name,
+        params,
     )
     lb = await clients.run(poller.result)
     return "created", lb.as_dict()
@@ -210,18 +225,28 @@ async def create_app_gateway(
     if not validate_name("generic", name):
         return "error", {"message": "invalid application gateway name"}
     if dry_run:
-        return "plan", {"name": name, "resource_group": resource_group, "location": location}
+        return "plan", {
+            "name": name,
+            "resource_group": resource_group,
+            "location": location,
+        }
     ok, existing = await _safe_get(
         clients.net.application_gateways.get, resource_group, name, clients=clients
     )
     if ok and existing and not force:
         return "exists", existing.as_dict()
-    subnet = await clients.run(clients.net.subnets.get, resource_group, vnet_name, subnet_name)
-    pip = await clients.run(clients.net.public_ip_addresses.get, resource_group, public_ip_name)
+    subnet = await clients.run(
+        clients.net.subnets.get, resource_group, vnet_name, subnet_name
+    )
+    pip = await clients.run(
+        clients.net.public_ip_addresses.get, resource_group, public_ip_name
+    )
     params: dict[str, object] = {
         "location": location,
         "sku": {"name": "WAF_v2", "tier": "WAF_v2", "capacity": 1},
-        "gateway_ip_configurations": [{"name": "appGwIpConfig", "subnet": {"id": subnet.id}}],
+        "gateway_ip_configurations": [
+            {"name": "appGwIpConfig", "subnet": {"id": subnet.id}}
+        ],
         "frontend_ip_configurations": [
             {"name": "appGwFrontendIP", "public_ip_address": {"id": pip.id}}
         ],
@@ -255,7 +280,10 @@ async def create_app_gateway(
         "tags": tags or {},
     }
     poller = await clients.run(
-        clients.net.application_gateways.begin_create_or_update, resource_group, name, params
+        clients.net.application_gateways.begin_create_or_update,
+        resource_group,
+        name,
+        params,
     )
     ag = await clients.run(poller.result)
     return "created", ag.as_dict()

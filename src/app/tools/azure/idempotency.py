@@ -5,7 +5,9 @@ from collections.abc import Callable
 from typing import Any
 
 
-async def safe_get(callable_obj: Callable[..., Any], *args: Any, **kwargs: Any) -> tuple[bool, Any]:
+async def safe_get(
+    callable_obj: Callable[..., Any], *args: Any, **kwargs: Any
+) -> tuple[bool, Any]:
     try:
         res = await asyncio.to_thread(callable_obj, *args, **kwargs)
         return True, res

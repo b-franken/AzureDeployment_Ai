@@ -48,7 +48,10 @@ async def create_plan(
         location=location, reserved=bool(linux), sku=SkuDescription(name=sku), tags=tags
     )
     poller = await clients.run(
-        clients.web.app_service_plans.begin_create_or_update, resource_group, name, plan_obj
+        clients.web.app_service_plans.begin_create_or_update,
+        resource_group,
+        name,
+        plan_obj,
     )
     created = await clients.run(poller.result)
     return "created", created.as_dict()
@@ -126,7 +129,9 @@ async def create_webapp(
             "tags": tags or {},
         }
 
-    ok, existing = await _safe_get(clients.web.web_apps.get, resource_group, name, clients=clients)
+    ok, existing = await _safe_get(
+        clients.web.web_apps.get, resource_group, name, clients=clients
+    )
     if ok and existing and not force:
         return "exists", existing.as_dict()
 
@@ -157,7 +162,9 @@ async def create_webapp(
     return "created", final.as_dict()
 
 
-async def _safe_get(pcall: _PCall, *args: Any, clients: Clients, **kwargs: Any) -> tuple[bool, Any]:
+async def _safe_get(
+    pcall: _PCall, *args: Any, clients: Clients, **kwargs: Any
+) -> tuple[bool, Any]:
     try:
         res = await clients.run(pcall, *args, **kwargs)
         return True, res

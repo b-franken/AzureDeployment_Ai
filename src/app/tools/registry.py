@@ -69,7 +69,11 @@ async def run_cmd(
     cwd: str | None = None,
 ) -> ToolResult:
     if not args or shutil.which(args[0]) is None:
-        return {"ok": False, "summary": "executable not found", "output": args[0] if args else ""}
+        return {
+            "ok": False,
+            "summary": "executable not found",
+            "output": args[0] if args else "",
+        }
 
     def _run() -> subprocess.CompletedProcess[bytes]:
         return subprocess.run(
@@ -85,7 +89,11 @@ async def run_cmd(
     try:
         cp = await asyncio.to_thread(_run)
         out = (cp.stdout or b"").decode(errors="replace")
-        return {"ok": cp.returncode == 0, "summary": f"exit {cp.returncode}", "output": out}
+        return {
+            "ok": cp.returncode == 0,
+            "summary": f"exit {cp.returncode}",
+            "output": out,
+        }
     except subprocess.TimeoutExpired as e:
         out = (e.stdout or b"").decode(errors="replace")
         return {"ok": False, "summary": "timeout", "output": out}

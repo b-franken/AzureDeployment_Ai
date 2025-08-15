@@ -9,7 +9,9 @@ from ..validators import validate_name
 _PCall = Callable[..., Any]
 
 
-async def _safe_get(pcall: _PCall, *args: Any, clients: Clients, **kwargs: Any) -> tuple[bool, Any]:
+async def _safe_get(
+    pcall: _PCall, *args: Any, clients: Clients, **kwargs: Any
+) -> tuple[bool, Any]:
     try:
         res = await clients.run(pcall, *args, **kwargs)
         return True, res
@@ -62,7 +64,11 @@ async def create_sql(
     db_out = None
     if db_name:
         okd, existing_db = await _safe_get(
-            clients.sql.databases.get, resource_group, server_name, db_name, clients=clients
+            clients.sql.databases.get,
+            resource_group,
+            server_name,
+            db_name,
+            clients=clients,
         )
         if okd and existing_db and not force:
             db_out = existing_db.as_dict()

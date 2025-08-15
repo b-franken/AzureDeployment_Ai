@@ -22,7 +22,11 @@ async def create_resource_group(
         return "error", f"Invalid location. Use one of: {', '.join(available)}"
 
     if dry_run:
-        return "plan", {"resource_group": resource_group, "location": location, "tags": tags}
+        return "plan", {
+            "resource_group": resource_group,
+            "location": location,
+            "tags": tags,
+        }
 
     _, existing = await safe_get(clients.res.resource_groups.get, resource_group)
     if existing and not force:

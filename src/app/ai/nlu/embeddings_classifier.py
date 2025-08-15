@@ -28,7 +28,9 @@ class EmbeddingsClassifierService:
     def predict_proba(self, texts: list[str]) -> torch.Tensor:
         if not texts:
             return torch.empty(0, self.head.out_features)
-        emb = self.encoder.encode(list(texts), convert_to_tensor=True, device=str(self.device))
+        emb = self.encoder.encode(
+            list(texts), convert_to_tensor=True, device=str(self.device)
+        )
         logits = self.head(emb)
         return self.softmax(logits)
 
@@ -46,7 +48,9 @@ class EmbeddingsClassifierService:
         self.head.train()
         opt = torch.optim.AdamW(self.head.parameters(), lr=lr)
         loss_fn = nn.CrossEntropyLoss()
-        X = self.encoder.encode(list(texts), convert_to_tensor=True, device=str(self.device))
+        X = self.encoder.encode(
+            list(texts), convert_to_tensor=True, device=str(self.device)
+        )
         y = torch.tensor(labels, dtype=torch.long, device=self.device)
         n = X.size(0)
         for _ in range(epochs):

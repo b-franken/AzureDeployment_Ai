@@ -18,7 +18,9 @@ def configure() -> None:
         return
 
     handler = logging.StreamHandler(sys.stdout)
-    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(name)s - %(message)s")
+    formatter = logging.Formatter(
+        "%(asctime)s - %(levelname)s - %(name)s - %(message)s"
+    )
     handler.setFormatter(formatter)
     root.addHandler(handler)
     root.setLevel(logging.INFO)

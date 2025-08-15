@@ -12,7 +12,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer
 
 from app.api.v2.model import auth_request, token_data
-from app.platform.audit.logger import AuditEvent, AuditEventType, AuditLogger, AuditSeverity
+from app.platform.audit.logger import (
+    AuditEvent,
+    AuditEventType,
+    AuditLogger,
+    AuditSeverity,
+)
 
 router = APIRouter()
 security = HTTPBearer(auto_error=False)
@@ -47,9 +52,13 @@ async def _validate_credentials(email: str, password: str) -> bool:
 async def auth_required(request: Request) -> token_data:
     creds = await security(request)
     if not creds or not creds.credentials:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="auth required")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="auth required"
+        )
     try:
-        raw: dict[str, Any] = jwt.decode(creds.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        raw: dict[str, Any] = jwt.decode(
+            creds.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM]
+        )
     except jwt.PyJWTError as err:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid token"
@@ -57,12 +66,16 @@ async def auth_required(request: Request) -> token_data:
     td = token_data(
         user_id=str(raw["user_id"]),
         email=str(raw["email"]),
-        subscription_id=(str(raw["subscription_id"]) if raw.get("subscription_id") else None),
+        subscription_id=(
+            str(raw["subscription_id"]) if raw.get("subscription_id") else None
+        ),
         roles=list(raw.get("roles", [])),
         expires_at=datetime.utcfromtimestamp(int(raw["exp"])),
     )
     if datetime.utcnow() > td.expires_at:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="token expired")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="token expired"
+        )
     return td
 
 
@@ -90,7 +103,9 @@ async def login(req: Request, body: auth_request) -> dict[str, Any]:
                 user_agent=req.headers.get("user-agent"),
             )
         )
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials"
+        )
     user: dict[str, Any] = {
         "user_id": str(uuid.uuid4()),
         "email": body.email,

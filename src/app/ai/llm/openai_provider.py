@@ -60,7 +60,9 @@ class OpenAIProvider(LLMProvider):
         async def _call() -> dict[str, object]:
             async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
                 r = await client.post(
-                    f"{self._base}/chat/completions", headers=self._headers, json=payload
+                    f"{self._base}/chat/completions",
+                    headers=self._headers,
+                    json=payload,
                 )
                 r.raise_for_status()
                 return r.json()

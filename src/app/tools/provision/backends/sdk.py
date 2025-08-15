@@ -136,7 +136,12 @@ class SdkBackend:
                     return False, results
             except Exception as e:
                 results["steps"].append(
-                    {"action": a["action"], "ok": False, "summary": "exception", "output": str(e)}
+                    {
+                        "action": a["action"],
+                        "ok": False,
+                        "summary": "exception",
+                        "output": str(e),
+                    }
                 )
                 return False, results
 

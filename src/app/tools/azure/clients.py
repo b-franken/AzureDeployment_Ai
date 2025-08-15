@@ -29,7 +29,9 @@ from azure.mgmt.web import WebSiteManagementClient
 def _sub_id(explicit: str | None) -> str:
     sid = explicit or os.getenv("AZURE_SUBSCRIPTION_ID", "")
     if not sid:
-        raise RuntimeError("AZURE_SUBSCRIPTION_ID missing and no subscription_id provided")
+        raise RuntimeError(
+            "AZURE_SUBSCRIPTION_ID missing and no subscription_id provided"
+        )
     return sid
 
 

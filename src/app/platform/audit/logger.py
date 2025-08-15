@@ -136,10 +136,18 @@ class AuditLogger:
             """
             )
 
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON audit_events(timestamp)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_event_type ON audit_events(event_type)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_user_id ON audit_events(user_id)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_resource_id ON audit_events(resource_id)")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_timestamp ON audit_events(timestamp)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_event_type ON audit_events(event_type)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_user_id ON audit_events(user_id)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_resource_id ON audit_events(resource_id)"
+            )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_correlation_id ON audit_events(correlation_id)"
             )
@@ -300,7 +308,9 @@ class AuditLogger:
 
             return events
 
-    async def get_statistics(self, start_time: datetime, end_time: datetime) -> dict[str, Any]:
+    async def get_statistics(
+        self, start_time: datetime, end_time: datetime
+    ) -> dict[str, Any]:
         with self._lock:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -411,7 +421,8 @@ class AuditLogger:
             "data_access_events": [
                 asdict(e)
                 for e in events
-                if e.event_type in [AuditEventType.ACCESS_GRANTED, AuditEventType.ACCESS_DENIED]
+                if e.event_type
+                in [AuditEventType.ACCESS_GRANTED, AuditEventType.ACCESS_DENIED]
             ],
             "data_modification_events": [
                 asdict(e)
@@ -432,7 +443,9 @@ class AuditLogger:
                 asdict(e) for e in events if "phi" in e.tags or "healthcare" in e.tags
             ],
             "security_events": [
-                asdict(e) for e in events if e.event_type == AuditEventType.SECURITY_ALERT
+                asdict(e)
+                for e in events
+                if e.event_type == AuditEventType.SECURITY_ALERT
             ],
             "audit_control_events": [asdict(e) for e in events],
         }
@@ -446,12 +459,14 @@ class AuditLogger:
             "network_security_events": [
                 asdict(e)
                 for e in events
-                if "network" in (e.resource_type or "") or "firewall" in (e.resource_type or "")
+                if "network" in (e.resource_type or "")
+                or "firewall" in (e.resource_type or "")
             ],
             "access_control_events": [
                 asdict(e)
                 for e in events
-                if e.event_type in [AuditEventType.ACCESS_GRANTED, AuditEventType.ACCESS_DENIED]
+                if e.event_type
+                in [AuditEventType.ACCESS_GRANTED, AuditEventType.ACCESS_DENIED]
             ],
         }
 
@@ -459,15 +474,20 @@ class AuditLogger:
         return {
             "framework": "sox",
             "financial_system_events": [
-                asdict(e) for e in events if "financial" in e.tags or "accounting" in e.tags
+                asdict(e)
+                for e in events
+                if "financial" in e.tags or "accounting" in e.tags
             ],
             "change_management_events": [
-                asdict(e) for e in events if e.event_type == AuditEventType.CONFIGURATION_CHANGED
+                asdict(e)
+                for e in events
+                if e.event_type == AuditEventType.CONFIGURATION_CHANGED
             ],
             "access_control_events": [
                 asdict(e)
                 for e in events
-                if e.event_type in [AuditEventType.ACCESS_GRANTED, AuditEventType.ACCESS_DENIED]
+                if e.event_type
+                in [AuditEventType.ACCESS_GRANTED, AuditEventType.ACCESS_DENIED]
             ],
         }
 
@@ -557,7 +577,11 @@ class AuditMiddleware:
         user_agent: str | None = None,
     ) -> None:
         event = AuditEvent(
-            event_type=AuditEventType.ACCESS_GRANTED if granted else AuditEventType.ACCESS_DENIED,
+            event_type=(
+                AuditEventType.ACCESS_GRANTED
+                if granted
+                else AuditEventType.ACCESS_DENIED
+            ),
             severity=AuditSeverity.INFO if granted else AuditSeverity.WARNING,
             user_id=user_id,
             resource_id=resource_id,

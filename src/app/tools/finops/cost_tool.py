@@ -10,9 +10,7 @@ from .analyzer import CostAnalyzer, CostManagementSystem, CostOptimizationStrate
 
 class AzureCosts(Tool):
     name = "azure_costs"
-    description = (
-        "Analyze Azure resource costs, detect anomalies, create budgets, and suggest optimizations."
-    )
+    description = "Analyze Azure resource costs, detect anomalies, create budgets, and suggest optimizations."
     schema = {
         "type": "object",
         "properties": {
@@ -22,7 +20,10 @@ class AzureCosts(Tool):
                 "enum": ["analyze", "budget_status", "optimize", "report"],
             },
             "resource": {"type": "object"},
-            "level": {"type": "string", "enum": ["aggressive", "balanced, conservative"]},
+            "level": {
+                "type": "string",
+                "enum": ["aggressive", "balanced, conservative"],
+            },
             "format": {"type": "string", "enum": ["json", "csv"]},
         },
         "required": ["action"],
@@ -82,7 +83,9 @@ class AzureCosts(Tool):
 
         if act == "report":
             fmt = (kwargs.get("format") or "json").lower()
-            insights = await self.cms.get_cost_insights(kwargs.get("subscription_id", ""))
+            insights = await self.cms.get_cost_insights(
+                kwargs.get("subscription_id", "")
+            )
             if fmt == "csv":
                 text = self._insights_to_csv(insights)
                 return {"ok": True, "summary": "report csv", "output": text}

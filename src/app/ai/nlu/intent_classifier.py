@@ -85,7 +85,9 @@ class EnterpriseNLPParser:
                 ),
             ],
             DeploymentIntent.BACKUP: [
-                r"\b(" r"backup|snapshot|archive|preserve|save state|create backup" r")\b"
+                r"\b("
+                r"backup|snapshot|archive|preserve|save state|create backup"
+                r")\b"
             ],
             DeploymentIntent.RESTORE: [r"\b(restore|recover|rollback|revert|undo)\b"],
             DeploymentIntent.MIGRATE: [r"\b(migrate|move|transfer|relocate|shift)\b"],
@@ -103,7 +105,9 @@ class EnterpriseNLPParser:
                     r")\b"
                 )
             ],
-            DeploymentIntent.VALIDATE: [r"\b(validate|check|verify|test|ensure|confirm)\b"],
+            DeploymentIntent.VALIDATE: [
+                r"\b(validate|check|verify|test|ensure|confirm)\b"
+            ],
             DeploymentIntent.COST_ANALYZE: [
                 (
                     r"\b("
@@ -115,7 +119,9 @@ class EnterpriseNLPParser:
             DeploymentIntent.DRIFT_CHECK: [
                 r"\b(drift|configuration drift|check drift|detect changes)\b"
             ],
-            DeploymentIntent.ROLLBACK: [r"\b(rollback|revert|undo deployment|previous version)\b"],
+            DeploymentIntent.ROLLBACK: [
+                r"\b(rollback|revert|undo deployment|previous version)\b"
+            ],
         }
 
         self.resource_patterns: dict[str, list[str]] = {
@@ -128,14 +134,22 @@ class EnterpriseNLPParser:
                 (r"\b(" r"container cluster|k8s cluster|managed kubernetes" r")\b"),
             ],
             "container_registry": [
-                (r"\b(" r"container registry|docker registry|acr|image repository" r")\b"),
+                (
+                    r"\b("
+                    r"container registry|docker registry|acr|image repository"
+                    r")\b"
+                ),
                 (r"\b(" r"docker hub alternative|private registry" r")\b"),
             ],
             "webapp": [
                 (r"\b(" r"web app|webapp|app service|website|web application" r")\b"),
             ],
             "function_app": [
-                (r"\b(" r"function app|serverless function|azure function|lambda" r")\b"),
+                (
+                    r"\b("
+                    r"function app|serverless function|azure function|lambda"
+                    r")\b"
+                ),
             ],
             "storage_account": [
                 (r"\b(" r"storage account|blob storage|file storage|data lake" r")\b"),
@@ -147,7 +161,11 @@ class EnterpriseNLPParser:
                 (r"\b(" r"virtual machine|vm|server|compute instance|compute" r")\b"),
             ],
             "network": [
-                (r"\b(" r"network|vnet|subnet|firewall|load balancer|application gateway" r")\b"),
+                (
+                    r"\b("
+                    r"network|vnet|subnet|firewall|load balancer|application gateway"
+                    r")\b"
+                ),
             ],
             "keyvault": [
                 (
@@ -161,7 +179,11 @@ class EnterpriseNLPParser:
                 (r"\b(" r"api orchestration|api facade" r")\b"),
             ],
             "service_bus": [
-                (r"\b(" r"service bus|message queue|messaging|enterprise messaging" r")\b"),
+                (
+                    r"\b("
+                    r"service bus|message queue|messaging|enterprise messaging"
+                    r")\b"
+                ),
                 r"\b(queue service|topic subscription)\b",
             ],
             "event_hub": [
@@ -216,10 +238,18 @@ class EnterpriseNLPParser:
                 ),
             ],
             "container_instances": [
-                (r"\b(" r"container instances|aci|containers without orchestration" r")\b"),
+                (
+                    r"\b("
+                    r"container instances|aci|containers without orchestration"
+                    r")\b"
+                ),
             ],
             "batch": [
-                (r"\b(" r"batch|batch processing|hpc|high performance computing" r")\b"),
+                (
+                    r"\b("
+                    r"batch|batch processing|hpc|high performance computing"
+                    r")\b"
+                ),
             ],
         }
 
@@ -291,7 +321,9 @@ class EnterpriseNLPParser:
                 "default": None,
             },
             "cost_limit": {
-                "patterns": [r"(?:cost limit|budget|max cost|spend limit)\s*(?:of\s+)?\$?(\d+)"],
+                "patterns": [
+                    r"(?:cost limit|budget|max cost|spend limit)\s*(?:of\s+)?\$?(\d+)"
+                ],
                 "default": None,
             },
         }
@@ -355,7 +387,9 @@ class EnterpriseNLPParser:
         validation_rules = self._determine_validation_rules(
             resource_type, context, attributes, cost_constraints, compliance
         )
-        deployment_strategy = self._determine_deployment_strategy(intent, context, attributes)
+        deployment_strategy = self._determine_deployment_strategy(
+            intent, context, attributes
+        )
         confidence = self._calculate_confidence(t, intent, resource_type, context)
         return ParsedIntent(
             intent=intent,
@@ -444,7 +478,8 @@ class EnterpriseNLPParser:
         if re.search(r"\b(private endpoint|private link|internal only)\b", text):
             a["private_endpoints"] = True
         if re.search(
-            r"\b(with backup|backup enabled|enable backup|daily backup|automated backup)\b", text
+            r"\b(with backup|backup enabled|enable backup|daily backup|automated backup)\b",
+            text,
         ):
             a["backup"] = True
         if re.search(
@@ -552,15 +587,19 @@ class EnterpriseNLPParser:
         deps: list[str] = []
         patterns: dict[str, str] = {
             "active_directory": (
-                r"\b(active directory|azure ad|aad|identity provider|" r"authentication)\b"
+                r"\b(active directory|azure ad|aad|identity provider|"
+                r"authentication)\b"
             ),
             "dns": (r"\b(dns|domain|custom domain|hostname|a record|cname)\b"),
             "certificate": (r"\b(certificate|ssl|tls|https|cert manager)\b"),
             "monitoring": (
-                r"\b(monitoring|application insights|log analytics|" r"alerts|metrics)\b"
+                r"\b(monitoring|application insights|log analytics|"
+                r"alerts|metrics)\b"
             ),
             "backup": (r"\b(backup|restore|recovery|snapshot|disaster recovery)\b"),
-            "networking": (r"\b(existing network|vnet|subnet|network integration|peering)\b"),
+            "networking": (
+                r"\b(existing network|vnet|subnet|network integration|peering)\b"
+            ),
             "storage": (r"\b(storage account|blob|file share|data lake)\b"),
             "database": (r"\b(database|sql|cosmos|postgresql|mysql)\b"),
             "container_registry": (r"\b(container registry|acr|docker registry)\b"),
@@ -598,11 +637,17 @@ class EnterpriseNLPParser:
     def _extract_cost_constraints(self, text: str) -> dict[str, Any]:
         c: dict[str, Any] = {}
         m = re.search(
-            r"(?:cost limit|budget|max cost|spend limit)\s*(?:of\s+)?\$?(\d+)", text, re.IGNORECASE
+            r"(?:cost limit|budget|max cost|spend limit)\s*(?:of\s+)?\$?(\d+)",
+            text,
+            re.IGNORECASE,
         )
         if m:
             c["monthly_limit"] = float(m.group(1))
-        if "minimize cost" in text or "cost optimization" in text or "reduce cost" in text:
+        if (
+            "minimize cost" in text
+            or "cost optimization" in text
+            or "reduce cost" in text
+        ):
             c["optimize"] = True
         if "spot" in text or "preemptible" in text:
             c["use_spot_instances"] = True
@@ -683,7 +728,9 @@ class EnterpriseNLPParser:
         if env == "production":
             if intent == DeploymentIntent.UPDATE:
                 return "blue_green"
-            if intent == DeploymentIntent.CREATE and attributes.get("high_availability"):
+            if intent == DeploymentIntent.CREATE and attributes.get(
+                "high_availability"
+            ):
                 return "canary"
             return "rolling"
         if env in ["staging", "uat"]:
@@ -711,7 +758,9 @@ class EnterpriseNLPParser:
             c += 0.2
         if context.get("resource_group") and context.get("subscription_id"):
             c += 0.15
-        if re.search(r"\b(please|must|need to|have to|required|urgent)\b", text, re.IGNORECASE):
+        if re.search(
+            r"\b(please|must|need to|have to|required|urgent)\b", text, re.IGNORECASE
+        ):
             c += 0.1
         if len(text.split()) > 15:
             c += 0.05

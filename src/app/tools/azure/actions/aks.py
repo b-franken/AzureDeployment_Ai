@@ -9,7 +9,12 @@ ACR_PULL_ROLE_ID = "7f951dda-4ed3-4680-a7ca-43fe172d538d"
 
 
 async def _assign_acr_pull(
-    *, clients: Clients, subscription_id: str, resource_group: str, acr_name: str, principal_id: str
+    *,
+    clients: Clients,
+    subscription_id: str,
+    resource_group: str,
+    acr_name: str,
+    principal_id: str,
 ) -> None:
     scope = (
         f"/subscriptions/{clients.subscription_id}"
@@ -91,7 +96,9 @@ async def create_aks(
             "azure_policy_enabled": apol,
             "tags": tags,
         }
-    ok, existing = await safe_get(clients.aks.managed_clusters.get, resource_group, name)
+    ok, existing = await safe_get(
+        clients.aks.managed_clusters.get, resource_group, name
+    )
     if ok and existing and not force:
         return "exists", existing.as_dict()
     mc = {

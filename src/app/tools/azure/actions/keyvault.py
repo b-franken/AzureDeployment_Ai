@@ -46,7 +46,9 @@ async def create_keyvault(
         access_policies=[],
         enable_rbac_authorization=bool(enable_rbac),
     )
-    params = VaultCreateOrUpdateParameters(location=location, properties=props, tags=tags or {})
+    params = VaultCreateOrUpdateParameters(
+        location=location, properties=props, tags=tags or {}
+    )
     poller = await clients.run(
         clients.kv.vaults.begin_create_or_update, resource_group, vault_name, params
     )

@@ -15,7 +15,11 @@ Env = Literal["dev", "tst", "acc", "prod"]
 
 
 def _to_str(obj: Any) -> str:
-    return obj if isinstance(obj, str) else json.dumps(obj, default=str, ensure_ascii=False)
+    return (
+        obj
+        if isinstance(obj, str)
+        else json.dumps(obj, default=str, ensure_ascii=False)
+    )
 
 
 def _ok(summary: str, obj: Any) -> ToolResult:
@@ -38,7 +42,11 @@ class ProvisionOrchestrator(Tool):
                 "enum": ["auto", "terraform", "bicep", "sdk"],
                 "default": "auto",
             },
-            "env": {"type": "string", "enum": ["dev", "tst", "acc", "prod"], "default": "dev"},
+            "env": {
+                "type": "string",
+                "enum": ["dev", "tst", "acc", "prod"],
+                "default": "dev",
+            },
             "plan_only": {"type": "boolean", "default": True},
             "parameters": {"type": "object", "additionalProperties": True},
         },
@@ -65,7 +73,9 @@ class ProvisionOrchestrator(Tool):
         except Exception as e:
             return _err("Invalid specification", str(e))
 
-        chosen = cast(Backend, pick_backend(spec["product"], spec["env"], spec["backend"]))
+        chosen = cast(
+            Backend, pick_backend(spec["product"], spec["env"], spec["backend"])
+        )
 
         if chosen == "sdk":
             be: SdkBackend | TerraformBackend | BicepBackend = SdkBackend()
@@ -85,7 +95,8 @@ class ProvisionOrchestrator(Tool):
 
         if isinstance(be, TerraformBackend):
             return _err(
-                "terraform apply is not supported", "enable plan_only or choose sdk or bicep"
+                "terraform apply is not supported",
+                "enable plan_only or choose sdk or bicep",
             )
 
         ok, outputs = await be.apply(spec)

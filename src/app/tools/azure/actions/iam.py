@@ -68,7 +68,9 @@ async def assign_role(
     if not role_id and role_name:
         safe_name = role_name.replace("'", "''")
         defs = await clients.run(
-            clients.auth.role_definitions.list, scope, filter=f"roleName eq '{safe_name}'"
+            clients.auth.role_definitions.list,
+            scope,
+            filter=f"roleName eq '{safe_name}'",
         )
         defs_list = list(defs)
         if len(defs_list) == 0:
@@ -86,7 +88,11 @@ async def assign_role(
         )
     )
     for ra in existing:
-        rid = ra.properties.role_definition_id if getattr(ra, "properties", None) else None
+        rid = (
+            ra.properties.role_definition_id
+            if getattr(ra, "properties", None)
+            else None
+        )
         if rid and rid.endswith(role_id.split("/")[-1]):
             return "exists", ra.as_dict()
     assign_id = str(uuid.uuid4())
@@ -94,6 +100,11 @@ async def assign_role(
         clients.auth.role_assignments.create,
         scope,
         assign_id,
-        {"properties": {"role_definition_id": role_id, "principal_id": principal_object_id}},
+        {
+            "properties": {
+                "role_definition_id": role_id,
+                "principal_id": principal_object_id,
+            }
+        },
     )
     return "created", ra.as_dict()

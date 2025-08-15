@@ -16,7 +16,9 @@ def _ok(summary: str, obj: dict | str = "") -> ToolResult:
     return {
         "ok": True,
         "summary": summary,
-        "output": obj if isinstance(obj, str) else json.dumps(obj, default=str, indent=2),
+        "output": (
+            obj if isinstance(obj, str) else json.dumps(obj, default=str, indent=2)
+        ),
     }
 
 
@@ -230,7 +232,17 @@ class EnhancedNaturalLanguageParser:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 candidate = match.group(1)
-                if candidate not in ["in", "at", "to", "from", "with", "for", "the", "and", "or"]:
+                if candidate not in [
+                    "in",
+                    "at",
+                    "to",
+                    "from",
+                    "with",
+                    "for",
+                    "the",
+                    "and",
+                    "or",
+                ]:
                     return candidate
 
         return None
@@ -389,7 +401,13 @@ def _validate_and_suggest(action: str, params: dict[str, Any]) -> tuple[bool, st
         "create_storage_account": ["resource_group", "location", "name"],
         "create_webapp": ["resource_group", "name", "plan"],
         "create_web_app": ["resource_group", "name", "plan"],
-        "create_vm": ["resource_group", "location", "name", "vm_size", "admin_username"],
+        "create_vm": [
+            "resource_group",
+            "location",
+            "name",
+            "vm_size",
+            "admin_username",
+        ],
         "create_keyvault": ["resource_group", "location", "vault_name", "tenant_id"],
         "create_aks": ["resource_group", "location", "name", "dns_prefix"],
         "create_acr": ["resource_group", "location", "name"],
@@ -406,7 +424,9 @@ def _validate_and_suggest(action: str, params: dict[str, Any]) -> tuple[bool, st
     if action not in required_by_action:
         return True, ""
 
-    missing = [p for p in required_by_action[action] if p not in params or not params[p]]
+    missing = [
+        p for p in required_by_action[action] if p not in params or not params[p]
+    ]
     if missing:
         suggestions = []
         for param in missing:
@@ -419,10 +439,16 @@ def _validate_and_suggest(action: str, params: dict[str, Any]) -> tuple[bool, st
             else:
                 suggestions.append(f"{param}: required parameter")
 
-        return False, f"Missing: {', '.join(missing)}. Suggestions: {'; '.join(suggestions)}"
+        return (
+            False,
+            f"Missing: {', '.join(missing)}. Suggestions: {'; '.join(suggestions)}",
+        )
 
     if params.get("location") and not validate_location(params["location"]):
-        return False, "Invalid location. Use: westeurope, eastus, northeurope, or uksouth"
+        return (
+            False,
+            "Invalid location. Use: westeurope, eastus, northeurope, or uksouth",
+        )
 
     validation_rules = {
         "storage": ("name", 3, 24, "lowercase letters and numbers only"),
@@ -434,7 +460,10 @@ def _validate_and_suggest(action: str, params: dict[str, Any]) -> tuple[bool, st
     for resource_type, (field, min_len, max_len, desc) in validation_rules.items():
         if action.endswith(resource_type) and field in params:
             if not validate_name(resource_type, params[field]):
-                return False, f"Invalid {field}: must be {min_len}-{max_len} characters, {desc}"
+                return (
+                    False,
+                    f"Invalid {field}: must be {min_len}-{max_len} characters, {desc}",
+                )
 
     return True, ""
 
@@ -449,11 +478,15 @@ def _provide_helpful_suggestions(original_input: str) -> list[str]:
         suggestions.append("create storage mydata in eastus with sku Standard_GRS")
 
     if "web" in original_input.lower() or "app" in original_input.lower():
-        suggestions.append("create web app mywebapp in westeurope resource group myapp-dev-rg")
+        suggestions.append(
+            "create web app mywebapp in westeurope resource group myapp-dev-rg"
+        )
         suggestions.append("create webapp mysite with runtime python|3.9")
 
     if "kubernetes" in original_input.lower() or "aks" in original_input.lower():
-        suggestions.append("create aks cluster mycluster in westeurope resource group myapp-dev-rg")
+        suggestions.append(
+            "create aks cluster mycluster in westeurope resource group myapp-dev-rg"
+        )
         suggestions.append("create kubernetes myk8s with 3 nodes")
 
     if not suggestions:
@@ -568,7 +601,10 @@ class AzureProvision(Tool):
 
             _, action_func = resolve_action(canonical_action)
             if not action_func:
-                return _err("Action not implemented", f"Action {canonical_action} is not available")
+                return _err(
+                    "Action not implemented",
+                    f"Action {canonical_action} is not available",
+                )
 
             status, payload = await action_func(clients=clients, tags=tags, **params)
 
@@ -578,7 +614,9 @@ class AzureProvision(Tool):
                 return _ok(f"{canonical_action} {status}", payload)
             else:
                 error_msg = (
-                    payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False)
+                    payload
+                    if isinstance(payload, str)
+                    else json.dumps(payload, ensure_ascii=False)
                 )
                 if "AccountKey" in error_msg:
                     error_msg = "[Account credentials redacted]"

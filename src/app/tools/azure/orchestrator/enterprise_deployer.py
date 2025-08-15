@@ -97,7 +97,9 @@ class EnterpriseAzureDeployer:
         self, parsed: Any, context: DeploymentContext
     ) -> DeploymentPlan:
         resources = await self._determine_resources(parsed, context)
-        dependencies = await self.dependency_resolver.resolve(resources, parsed.dependencies)
+        dependencies = await self.dependency_resolver.resolve(
+            resources, parsed.dependencies
+        )
         validations = await self._validate_deployment(resources, context)
         cost_estimate = await self.cost_calculator.estimate(resources, context)
         compliance_checks = await self.compliance_validator.check(
@@ -109,7 +111,8 @@ class EnterpriseAzureDeployer:
         )
         approval_required = (
             risk_level in ["high", "critical"]
-            or cost_estimate.get("monthly_total", 0.0) > (context.cost_threshold or 1000.0)
+            or cost_estimate.get("monthly_total", 0.0)
+            > (context.cost_threshold or 1000.0)
             or context.environment == "production"
         )
         return DeploymentPlan(
@@ -159,7 +162,9 @@ class EnterpriseAzureDeployer:
                 results.append(result)
                 if not result["success"]:
                     if deployed_resources:
-                        await self._rollback_deployment(deployed_resources, clients, context)
+                        await self._rollback_deployment(
+                            deployed_resources, clients, context
+                        )
                     return {
                         "success": False,
                         "error": result["error"],
@@ -231,7 +236,10 @@ class EnterpriseAzureDeployer:
                             "mode": "System",
                         }
                     ],
-                    "network_profile": {"network_plugin": "azure", "load_balancer_sku": "standard"},
+                    "network_profile": {
+                        "network_plugin": "azure",
+                        "load_balancer_sku": "standard",
+                    },
                     "identity": {"type": "SystemAssigned"},
                     "enable_rbac": True,
                     "addon_profiles": {
@@ -251,7 +259,9 @@ class EnterpriseAzureDeployer:
             },
         }
 
-    def _extract_context_from_parsed(self, parsed: Any, request: str) -> DeploymentContext:
+    def _extract_context_from_parsed(
+        self, parsed: Any, request: str
+    ) -> DeploymentContext:
         context = DeploymentContext(
             subscription_id="",
             resource_group="",
@@ -345,12 +355,18 @@ class EnterpriseAzureDeployer:
         if context.subscription_id:
             validations.append({"check": "subscription_id", "status": "ok"})
         else:
-            validations.append({"check": "subscription_id", "status": "fail", "message": "missing"})
+            validations.append(
+                {"check": "subscription_id", "status": "fail", "message": "missing"}
+            )
         if context.resource_group:
             validations.append({"check": "resource_group", "status": "ok"})
         else:
-            validations.append({"check": "resource_group", "status": "fail", "message": "missing"})
-        validations.append({"check": "resource_count", "status": "ok", "details": len(resources)})
+            validations.append(
+                {"check": "resource_group", "status": "fail", "message": "missing"}
+            )
+        validations.append(
+            {"check": "resource_count", "status": "ok", "details": len(resources)}
+        )
         return validations
 
     def _create_rollback_plan(self, resources: list[dict[str, Any]]) -> dict[str, Any]:
@@ -372,7 +388,9 @@ class EnterpriseAzureDeployer:
             base["name"] = parsed.attributes["name"]
         base["type"] = template.get("type", parsed.resource_type)
         base["base_config"] = base_config
-        if parsed.attributes.get("tags") and isinstance(parsed.attributes["tags"], dict):
+        if parsed.attributes.get("tags") and isinstance(
+            parsed.attributes["tags"], dict
+        ):
             context.tags.update(parsed.attributes["tags"])
         return base
 
@@ -381,14 +399,18 @@ class EnterpriseAzureDeployer:
     ) -> list[dict[str, Any]]:
         base_name = base_config.get("name", "res")
         base_type = base_config.get("type", "generic")
-        return [{"type": base_type, "name": f"{base_name}-ha", "high_availability": True}]
+        return [
+            {"type": base_type, "name": f"{base_name}-ha", "high_availability": True}
+        ]
 
     def _add_dr_resources(
         self, base_config: dict[str, Any], context: DeploymentContext
     ) -> list[dict[str, Any]]:
         base_name = base_config.get("name", "res")
         base_type = base_config.get("type", "generic")
-        return [{"type": base_type, "name": f"{base_name}-dr", "properties": {"dr": True}}]
+        return [
+            {"type": base_type, "name": f"{base_name}-dr", "properties": {"dr": True}}
+        ]
 
     def _add_monitoring_resources(
         self, base_config: dict[str, Any], context: DeploymentContext
@@ -409,12 +431,18 @@ class EnterpriseAzureDeployer:
         return [{"type": "backup_vault", "name": f"{base_name}-backup"}]
 
     async def _rollback_deployment(
-        self, deployed: list[dict[str, Any]], clients: Clients, context: DeploymentContext
+        self,
+        deployed: list[dict[str, Any]],
+        clients: Clients,
+        context: DeploymentContext,
     ) -> None:
         return None
 
     async def _execute_post_deployment(
-        self, deployed: list[dict[str, Any]], clients: Clients, context: DeploymentContext
+        self,
+        deployed: list[dict[str, Any]],
+        clients: Clients,
+        context: DeploymentContext,
     ) -> dict[str, Any]:
         return {"status": "completed", "items": [r.get("name") for r in deployed]}
 
@@ -471,7 +499,9 @@ class CostCalculator:
 
 
 class ComplianceValidator:
-    async def check(self, resources: list[dict[str, Any]], requirements: list[str]) -> list[str]:
+    async def check(
+        self, resources: list[dict[str, Any]], requirements: list[str]
+    ) -> list[str]:
         checks: list[str] = []
         for requirement in requirements:
             if requirement == "gdpr":
@@ -490,7 +520,9 @@ class ComplianceValidator:
 
 
 class DependencyResolver:
-    async def resolve(self, resources: list[dict[str, Any]], dependencies: list[str]) -> list[str]:
+    async def resolve(
+        self, resources: list[dict[str, Any]], dependencies: list[str]
+    ) -> list[str]:
         resolved: list[str] = []
         for dep in dependencies:
             if dep == "active_directory":
@@ -545,7 +577,9 @@ class AKSDeployer:
             name=resource.get("name", "aks-cluster"),
             dns_prefix=resource.get("dns_prefix", resource.get("name", "aks")),
             node_count=config.get("node_pools", [{}])[0].get("count", 2),
-            network_plugin=config.get("network_profile", {}).get("network_plugin", "azure"),
+            network_plugin=config.get("network_profile", {}).get(
+                "network_plugin", "azure"
+            ),
             tags=context.tags,
             dry_run=context.dry_run,
             force=context.force,
@@ -661,7 +695,9 @@ class SynapseDeployer:
                 filesystem=resource.get("filesystem", "synapse"),
             ),
             sql_administrator_login=resource.get("sql_admin", "sqladmin"),
-            sql_administrator_login_password=resource.get("sql_password", "P@ssw0rd123!"),
+            sql_administrator_login_password=resource.get(
+                "sql_password", "P@ssw0rd123!"
+            ),
             tags=context.tags,
         )
         if not context.dry_run:
@@ -688,7 +724,9 @@ class CognitiveServicesDeployer:
         from azure.mgmt.cognitiveservices import CognitiveServicesManagementClient
         from azure.mgmt.cognitiveservices.models import Account, Sku
 
-        cognitive_client = CognitiveServicesManagementClient(clients.cred, context.subscription_id)
+        cognitive_client = CognitiveServicesManagementClient(
+            clients.cred, context.subscription_id
+        )
         account_params = Account(
             location=context.location,
             sku=Sku(name=resource.get("sku", "S0")),
@@ -721,7 +759,9 @@ class EventHubDeployer:
         from azure.mgmt.eventhub.models import EHNamespace
         from azure.mgmt.eventhub.models import Sku as EventHubSku
 
-        eventhub_client = EventHubManagementClient(clients.cred, context.subscription_id)
+        eventhub_client = EventHubManagementClient(
+            clients.cred, context.subscription_id
+        )
         namespace_params = EHNamespace(
             location=context.location,
             sku=EventHubSku(
@@ -757,10 +797,15 @@ class ServiceBusDeployer:
         from azure.mgmt.servicebus import ServiceBusManagementClient
         from azure.mgmt.servicebus.models import SBNamespace, SBSku
 
-        servicebus_client = ServiceBusManagementClient(clients.cred, context.subscription_id)
+        servicebus_client = ServiceBusManagementClient(
+            clients.cred, context.subscription_id
+        )
         namespace_params = SBNamespace(
             location=context.location,
-            sku=SBSku(name=resource.get("sku", "Standard"), tier=resource.get("tier", "Standard")),
+            sku=SBSku(
+                name=resource.get("sku", "Standard"),
+                tier=resource.get("tier", "Standard"),
+            ),
             tags=context.tags,
         )
         if not context.dry_run:
@@ -831,16 +876,22 @@ class FrontDoorDeployer:
             RoutingRule,
         )
 
-        frontdoor_client = FrontDoorManagementClient(clients.cred, context.subscription_id)
+        frontdoor_client = FrontDoorManagementClient(
+            clients.cred, context.subscription_id
+        )
         frontdoor_name = resource.get("name", "frontdoor")
         frontdoor_id_base = (
             f"/subscriptions/{context.subscription_id}/resourceGroups/"
             f"{context.resource_group}/providers/"
             f"Microsoft.Network/frontDoors/{frontdoor_name}"
         )
-        frontend_endpoint_id = f"{frontdoor_id_base}/frontendEndpoints/frontendEndpoint1"
+        frontend_endpoint_id = (
+            f"{frontdoor_id_base}/frontendEndpoints/frontendEndpoint1"
+        )
         backend_pool_id = f"{frontdoor_id_base}/backendPools/backendPool1"
-        forwarding_odata_type = "#Microsoft.Azure.FrontDoor.Models.FrontdoorForwardingConfiguration"
+        forwarding_odata_type = (
+            "#Microsoft.Azure.FrontDoor.Models.FrontdoorForwardingConfiguration"
+        )
         frontdoor_params = FrontDoor(
             location="global",
             frontend_endpoints=[

@@ -30,7 +30,10 @@ async def create_cosmos_account(
             "tags": tags or {},
         }
     ok, existing = await _safe_get(
-        clients.cosmos.database_accounts.get, resource_group, account_name, clients=clients
+        clients.cosmos.database_accounts.get,
+        resource_group,
+        account_name,
+        clients=clients,
     )
     if ok and existing and not force:
         return "exists", existing.as_dict()

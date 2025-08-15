@@ -56,7 +56,9 @@ def get_provider_and_model(
     if selected_provider not in available_providers():
         selected_provider = "ollama"
 
-    def select_model(available: list[str], configured: str, requested: str | None) -> str:
+    def select_model(
+        available: list[str], configured: str, requested: str | None
+    ) -> str:
         if requested in available:
             return requested
         if configured in available:

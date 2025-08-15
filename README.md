@@ -1,6 +1,6 @@
-# DevOps AI: Azure and Azure DevOps Copilot
+# Azure AI: Azure Copilot
 
-Natural‑language provisioning and policy management for Azure and Azure DevOps. Describe the desired state (for example, "create a web app in westeurope") and the tool produces a safe plan with sensible defaults. Apply when ready.
+Natural‑language provisioning and policy management for Azure. Describe the desired state (for example, "create a web app in westeurope") and the tool produces a safe plan with sensible defaults. Apply when ready.
 
 ---
 
@@ -12,7 +12,6 @@ Natural‑language provisioning and policy management for Azure and Azure DevOps
 
   * [Core](#core)
   * [Azure authentication](#azure-authentication)
-  * [Azure DevOps](#azure-devops)
   * [LLM providers](#llm-providers)
   * [Discord bot integration (optional)](#discord-bot-integration-optional)
 * [Examples](#examples)
@@ -31,7 +30,6 @@ Natural‑language provisioning and policy management for Azure and Azure DevOps
 * Plan and dry‑run by default with clear, structured outputs
 * Idempotent ensure flows with safe lookup helpers
 * Azure actions via SDK: App Service Plan, Web App, Storage Account, SQL Server and DB, Redis, VNet and Private DNS, Private Endpoint and Private Link
-* Azure DevOps managers: repository policies and environment checks (approvals, business hours, branch controls)
 * Consistent typing, redaction of secrets in errors, and standard tags (owner, env)
 
 > Goal: a professional MVP that internal teams can use with safe defaults and clear plans.
@@ -44,7 +42,7 @@ Natural‑language provisioning and policy management for Azure and Azure DevOps
 
 * Python 3.11+
 * Azure access using Azure CLI (`az login`) or a Service Principal
-* Azure DevOps organization and a Personal Access Token (PAT)
+
 
 ### Install
 

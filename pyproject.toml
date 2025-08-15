@@ -52,7 +52,12 @@ dependencies = [
   "Pygments",
   "reportlab",
   "asyncpg",
-  "redis"
+  "redis",
+  "azure-mgmt-apimanagement",
+  "azure-mgmt-datafactory",
+  "azure-mgmt-synapse",
+  "azure-mgmt-cognitiveservices",
+  "azure-mgmt-frontdoor"
 ]
 
 [project.urls]

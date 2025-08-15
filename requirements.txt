@@ -27,6 +27,11 @@ azure-storage-blob
 azure-storage-file-share
 azure-mgmt-costmanagement
 azure-mgmt-consumption
+azure-mgmt-apimanagement
+azure-mgmt-datafactory
+azure-mgmt-synapse
+azure-mgmt-cognitiveservices
+azure-mgmt-frontdoor
 httpx
 discord.py
 streamlit

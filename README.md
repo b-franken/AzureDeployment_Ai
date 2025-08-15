@@ -88,10 +88,7 @@ Use one of:
 
 > Production tip: prefer Managed Identity and Key Vault for secret storage where possible.
 
-### Azure DevOps
 
-* `AZDO_ORG_URL` — for example, `https://dev.azure.com/<org>`
-* `AZDO_PAT` — PAT with the minimal scopes required for your operations
 
 ### LLM providers
 
@@ -140,15 +137,6 @@ AZURE_TENANT_ID=
 AZURE_CLIENT_ID=
 AZURE_CLIENT_SECRET=
 AZURE_SUBSCRIPTION_ID=
-
-# Azure DevOps
-AZDO_ORG_URL=https://dev.azure.com/<org>
-AZDO_PAT=
-
-# Discord (optional)
-DISCORD_TOKEN=
-DISCORD_CLIENT_ID=
-DISCORD_CLIENT_SECRET=
 
 # LLM selection
 LLM_PROVIDER=openai
@@ -206,48 +194,6 @@ res = await tool.run(
     dry_run=False,
     env="dev",
     owner="team-devops",
-)
-```
-
-### Azure DevOps policies
-
-```python
-import asyncio
-from app.tools.azdo.clients import AzdoClients
-from app.tools.azdo.repos.policies import PolicyManager
-
-async def main():
-    clients = AzdoClients()  # uses AZDO_ORG_URL and AZDO_PAT
-    pm = PolicyManager(clients, project="my-project")
-
-    out = await pm.create_minimum_reviewers_policy(
-        repository_id="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-        branch="main",
-        minimum_approver_count=2,
-        reset_on_source_push=True,
-    )
-    print(out)
-
-asyncio.run(main())
-```
-
-### Azure DevOps environments and checks
-
-```python
-from app.tools.azdo.releases.environments import EnvironmentManager
-
-em = EnvironmentManager(clients, project="my-project")
-env = await em.create_environment(
-    "prod-env",
-    resource_type="Kubernetes",
-    resource_name="aks-prod"
-)
-await em.add_approval_check(env["id"], approvers=["user@contoso.com"], timeout_hours=12)
-await em.add_business_hours_check(
-    env["id"],
-    start_time="08:00",
-    end_time="18:00",
-    time_zone="Europe/Amsterdam"
 )
 ```
 
@@ -328,7 +274,6 @@ jobs:
 * `app/tools/azure/*` — Azure clients, validators, and actions
 * `app/tools/azure/tool.py` — natural‑language parser and action orchestration
 * `app/tools/provision/*` — provisioning orchestrator and backends (SDK, Terraform, Bicep)
-* `app/tools/azdo/*` — Azure DevOps clients and managers
 * `app/ai/*` — NLU intent parsing and tool registration
 
 ---

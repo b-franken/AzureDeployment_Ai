@@ -20,7 +20,7 @@ export default function Header() {
                     <div className="flex items-center gap-2">
                         <Button variant="ghost" size="icon" className="glass-hover" asChild>
                             <a
-                                href="https://github.com/b-franken/DevOps_AI"
+                                href="https://github.com/b-franken/AzureDeployment_Ai"
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 aria-label="Open GitHub repository"

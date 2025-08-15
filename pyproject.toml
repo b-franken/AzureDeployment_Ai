@@ -50,7 +50,9 @@ dependencies = [
   "azure-mgmt-privatedns",
   "numpy",
   "Pygments",
-  "reportlab"
+  "reportlab",
+  "asyncpg",
+  "redis"
 ]
 
 [project.urls]

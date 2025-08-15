@@ -40,9 +40,7 @@ async def create_vm(
     )
     if ok and existing and not force:
         return "exists", {"vmId": existing.vm_id, "id": existing.id}
-    subnet = await clients.run(
-        clients.net.subnets.get, resource_group, vnet_name, subnet_name
-    )
+    subnet = await clients.run(clients.net.subnets.get, resource_group, vnet_name, subnet_name)
     nic_name = f"{name}-nic"
     nic_ok, nic_existing = await _safe_get(
         clients.net.network_interfaces.get, resource_group, nic_name, clients=clients
@@ -54,9 +52,7 @@ async def create_vm(
             nic_name,
             {
                 "location": location,
-                "ip_configurations": [
-                    {"name": "ipconfig1", "subnet": {"id": subnet.id}}
-                ],
+                "ip_configurations": [{"name": "ipconfig1", "subnet": {"id": subnet.id}}],
                 "tags": tags or {},
             },
         )
@@ -96,9 +92,7 @@ async def create_vm(
             if not image_id
             else {"image_reference": {"id": image_id}}
         ),
-        "network_profile": {
-            "network_interfaces": [{"id": nic_existing.id, "primary": True}]
-        },
+        "network_profile": {"network_interfaces": [{"id": nic_existing.id, "primary": True}]},
         "tags": tags or {},
     }
     poller = await clients.run(

@@ -96,9 +96,7 @@ async def create_aks(
             "azure_policy_enabled": apol,
             "tags": tags,
         }
-    ok, existing = await safe_get(
-        clients.aks.managed_clusters.get, resource_group, name
-    )
+    ok, existing = await safe_get(clients.aks.managed_clusters.get, resource_group, name)
     if ok and existing and not force:
         return "exists", existing.as_dict()
     mc = {

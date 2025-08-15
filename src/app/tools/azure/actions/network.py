@@ -184,9 +184,7 @@ async def create_lb(
     )
     if ok and existing and not force:
         return "exists", existing.as_dict()
-    pip = await clients.run(
-        clients.net.public_ip_addresses.get, resource_group, public_ip_name
-    )
+    pip = await clients.run(clients.net.public_ip_addresses.get, resource_group, public_ip_name)
     feip_cfg: list[dict[str, object]] = [
         {"name": "LoadBalancerFrontEnd", "public_ip_address": {"id": pip.id}}
     ]
@@ -235,18 +233,12 @@ async def create_app_gateway(
     )
     if ok and existing and not force:
         return "exists", existing.as_dict()
-    subnet = await clients.run(
-        clients.net.subnets.get, resource_group, vnet_name, subnet_name
-    )
-    pip = await clients.run(
-        clients.net.public_ip_addresses.get, resource_group, public_ip_name
-    )
+    subnet = await clients.run(clients.net.subnets.get, resource_group, vnet_name, subnet_name)
+    pip = await clients.run(clients.net.public_ip_addresses.get, resource_group, public_ip_name)
     params: dict[str, object] = {
         "location": location,
         "sku": {"name": "WAF_v2", "tier": "WAF_v2", "capacity": 1},
-        "gateway_ip_configurations": [
-            {"name": "appGwIpConfig", "subnet": {"id": subnet.id}}
-        ],
+        "gateway_ip_configurations": [{"name": "appGwIpConfig", "subnet": {"id": subnet.id}}],
         "frontend_ip_configurations": [
             {"name": "appGwFrontendIP", "public_ip_address": {"id": pip.id}}
         ],

@@ -9,9 +9,7 @@ from ..validators import validate_name
 _PCall = Callable[..., Any]
 
 
-async def _safe_get(
-    pcall: _PCall, *args: Any, clients: Clients, **kwargs: Any
-) -> tuple[bool, Any]:
+async def _safe_get(pcall: _PCall, *args: Any, clients: Clients, **kwargs: Any) -> tuple[bool, Any]:
     try:
         res = await clients.run(pcall, *args, **kwargs)
         return True, res

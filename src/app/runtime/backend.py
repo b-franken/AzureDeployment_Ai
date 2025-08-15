@@ -53,11 +53,7 @@ async def review(
     model: str | None = None,
 ) -> str:
     if USE_API:
-        return await api_review(
-            user_input, assistant_reply, provider=provider, model=model
-        )
+        return await api_review(user_input, assistant_reply, provider=provider, model=model)
     from app.ai.reviewer import senior_review
 
-    return await senior_review(
-        user_input, assistant_reply, provider=provider, model=model
-    )
+    return await senior_review(user_input, assistant_reply, provider=provider, model=model)

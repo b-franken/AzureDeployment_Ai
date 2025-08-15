@@ -8,9 +8,7 @@ from app.tools.registry import list_tools
 def _to_openai_tool_schema(
     name: str, description: str, json_schema: dict[str, object]
 ) -> dict[str, object]:
-    params: dict[str, object] = (
-        copy.deepcopy(json_schema) if isinstance(json_schema, dict) else {}
-    )
+    params: dict[str, object] = copy.deepcopy(json_schema) if isinstance(json_schema, dict) else {}
     if params.get("type") != "object":
         params = {
             "type": "object",
@@ -20,13 +18,9 @@ def _to_openai_tool_schema(
     if name == "azure_provision":
         try:
             props_in = params.get("properties")
-            props: dict[str, object] = (
-                dict(props_in) if isinstance(props_in, dict) else {}
-            )
+            props: dict[str, object] = dict(props_in) if isinstance(props_in, dict) else {}
             action_in = props.get("action")
-            action: dict[str, object] = (
-                dict(action_in) if isinstance(action_in, dict) else {}
-            )
+            action: dict[str, object] = dict(action_in) if isinstance(action_in, dict) else {}
             action.pop("enum", None)
             props["action"] = action
             params["properties"] = props

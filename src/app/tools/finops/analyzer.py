@@ -235,14 +235,10 @@ class CostManagementSystem:
             "month_over_month_change": change_percentage,
             "projected_month_end_spend": await self._project_month_end(subscription_id),
             "unused_resources": await self._identify_unused_resources(subscription_id),
-            "overprovisioned_resources": await self._identify_overprovisioned(
-                subscription_id
-            ),
+            "overprovisioned_resources": await self._identify_overprovisioned(subscription_id),
             "reserved_instance_coverage": await self._get_ri_coverage(subscription_id),
             "spot_instance_usage": await self._get_spot_usage(subscription_id),
-            "cost_saving_opportunities": await self._identify_quick_wins(
-                subscription_id
-            ),
+            "cost_saving_opportunities": await self._identify_quick_wins(subscription_id),
         }
 
         return insights
@@ -263,9 +259,7 @@ class CostManagementSystem:
     def _group_by_resource_type(self, costs: list[ResourceCost]) -> dict[str, float]:
         grouped: dict[str, float] = {}
         for cost in costs:
-            grouped[cost.resource_type] = (
-                grouped.get(cost.resource_type, 0) + cost.monthly_cost
-            )
+            grouped[cost.resource_type] = grouped.get(cost.resource_type, 0) + cost.monthly_cost
         return grouped
 
     def _group_by_tags(self, costs: list[ResourceCost]) -> dict[str, dict[str, float]]:
@@ -274,9 +268,7 @@ class CostManagementSystem:
             for tag_key, tag_value in cost.tags.items():
                 if tag_key not in grouped:
                     grouped[tag_key] = {}
-                grouped[tag_key][tag_value] = (
-                    grouped[tag_key].get(tag_value, 0) + cost.monthly_cost
-                )
+                grouped[tag_key][tag_value] = grouped[tag_key].get(tag_value, 0) + cost.monthly_cost
         return grouped
 
     def _group_by_department(self, costs: list[ResourceCost]) -> dict[str, float]:
@@ -293,9 +285,7 @@ class CostManagementSystem:
             grouped[project] = grouped.get(project, 0) + cost.monthly_cost
         return grouped
 
-    def _get_top_expensive(
-        self, costs: list[ResourceCost], limit: int
-    ) -> list[dict[str, Any]]:
+    def _get_top_expensive(self, costs: list[ResourceCost], limit: int) -> list[dict[str, Any]]:
         sorted_costs = sorted(costs, key=lambda c: c.monthly_cost, reverse=True)
         return [
             {
@@ -316,9 +306,7 @@ class CostManagementSystem:
     ) -> list[dict[str, Any]]:
         return []
 
-    async def _fetch_recent_costs(
-        self, subscription_id: str, days: int
-    ) -> list[ResourceCost]:
+    async def _fetch_recent_costs(self, subscription_id: str, days: int) -> list[ResourceCost]:
         return []
 
     async def _fetch_costs_for_period(
@@ -337,14 +325,10 @@ class CostManagementSystem:
     async def _project_month_end(self, subscription_id: str) -> float:
         return 0.0
 
-    async def _identify_unused_resources(
-        self, subscription_id: str
-    ) -> list[dict[str, Any]]:
+    async def _identify_unused_resources(self, subscription_id: str) -> list[dict[str, Any]]:
         return []
 
-    async def _identify_overprovisioned(
-        self, subscription_id: str
-    ) -> list[dict[str, Any]]:
+    async def _identify_overprovisioned(self, subscription_id: str) -> list[dict[str, Any]]:
         return []
 
     async def _get_ri_coverage(self, subscription_id: str) -> float:
@@ -385,9 +369,7 @@ class CostAnalyzer:
                         "resource_id": cost.resource_id,
                         "resource_name": cost.resource_name,
                         "anomaly_type": "cost_spike",
-                        "severity": (
-                            "high" if cost.monthly_cost > threshold * 2 else "medium"
-                        ),
+                        "severity": ("high" if cost.monthly_cost > threshold * 2 else "medium"),
                         "details": {
                             "current_cost": cost.monthly_cost,
                             "expected_range": (threshold * 0.8, threshold * 1.2),
@@ -404,9 +386,7 @@ class CostAnalyzer:
         end_date: datetime,
     ) -> ResourceCost:
         base_cost = self._get_base_cost(resource["type"])
-        location_multiplier = self._get_location_multiplier(
-            resource.get("location", "westeurope")
-        )
+        location_multiplier = self._get_location_multiplier(resource.get("location", "westeurope"))
 
         daily_cost = base_cost * location_multiplier
         days = (end_date - start_date).days or 1
@@ -477,15 +457,11 @@ class CostAnalyzer:
         recommendations: list[str] = []
 
         if resource.get("type") == "Microsoft.Compute/virtualMachines":
-            recommendations.append(
-                "Consider using Reserved Instances for 1-3 year commitment"
-            )
+            recommendations.append("Consider using Reserved Instances for 1-3 year commitment")
             recommendations.append("Enable auto-shutdown for non-production VMs")
             recommendations.append("Review VM sizing potential for downsizing")
         elif resource.get("type") == "Microsoft.Storage/storageAccounts":
-            recommendations.append(
-                "Move infrequently accessed data to Cool or Archive tier"
-            )
+            recommendations.append("Move infrequently accessed data to Cool or Archive tier")
             recommendations.append("Enable lifecycle management policies")
             recommendations.append("Review and delete unused blob containers")
 
@@ -681,9 +657,7 @@ class CostForecaster:
             "outliers": [],
         }
 
-    def _calculate_base_prediction(
-        self, historical_data: list[dict[str, Any]]
-    ) -> float:
+    def _calculate_base_prediction(self, historical_data: list[dict[str, Any]]) -> float:
         if not historical_data:
             return 100.0
 

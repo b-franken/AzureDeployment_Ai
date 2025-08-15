@@ -15,9 +15,7 @@ class TerraformBackend:
         loc = p.get("location", "undefined")
         name = p.get("name", "undefined")
 
-        plan = (
-            f"Terraform plan for {product} '{name}' in '{loc}' (resource group: {rg})"
-        )
+        plan = f"Terraform plan for {product} '{name}' in '{loc}' (resource group: {rg})"
         return True, plan
 
     async def apply(self, spec: dict[str, Any]) -> tuple[bool, dict[str, Any]]:

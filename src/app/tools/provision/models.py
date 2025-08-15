@@ -37,9 +37,7 @@ class ProvisionSpec(BaseModel):
     parameters: dict[str, Any]
 
     @validator("parameters", pre=True)
-    def validate_parameters(
-        cls: Any, v: dict[str, Any], values: dict[str, Any]
-    ) -> dict[str, Any]:
+    def validate_parameters(cls: Any, v: dict[str, Any], values: dict[str, Any]) -> dict[str, Any]:
         product = values.get("product")
         if product == "web_app":
             WebAppParameters(**v)

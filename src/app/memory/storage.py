@@ -17,9 +17,7 @@ class MemoryStore:
         max_memory: int = MAX_MEMORY,
         max_total_memory: int = MAX_TOTAL_MEMORY,
     ) -> None:
-        self.path = db_path or os.path.join(
-            os.path.dirname(__file__), "assistant_memory.db"
-        )
+        self.path = db_path or os.path.join(os.path.dirname(__file__), "assistant_memory.db")
         self.max_memory = int(max_memory)
         self.max_total_memory = int(max_total_memory)
         self._lock = threading.RLock()
@@ -61,9 +59,7 @@ class MemoryStore:
         )
         self.trim_user_memory(user_id)
 
-    def get_user_memory(
-        self, user_id: str, limit: int = MAX_MEMORY
-    ) -> list[dict[str, str]]:
+    def get_user_memory(self, user_id: str, limit: int = MAX_MEMORY) -> list[dict[str, str]]:
         lim = max(1, int(limit))
         cur = self._execute(
             """

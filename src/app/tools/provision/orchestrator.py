@@ -15,11 +15,7 @@ Env = Literal["dev", "tst", "acc", "prod"]
 
 
 def _to_str(obj: Any) -> str:
-    return (
-        obj
-        if isinstance(obj, str)
-        else json.dumps(obj, default=str, ensure_ascii=False)
-    )
+    return obj if isinstance(obj, str) else json.dumps(obj, default=str, ensure_ascii=False)
 
 
 def _ok(summary: str, obj: Any) -> ToolResult:
@@ -73,9 +69,7 @@ class ProvisionOrchestrator(Tool):
         except Exception as e:
             return _err("Invalid specification", str(e))
 
-        chosen = cast(
-            Backend, pick_backend(spec["product"], spec["env"], spec["backend"])
-        )
+        chosen = cast(Backend, pick_backend(spec["product"], spec["env"], spec["backend"]))
 
         if chosen == "sdk":
             be: SdkBackend | TerraformBackend | BicepBackend = SdkBackend()

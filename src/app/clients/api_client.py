@@ -32,9 +32,7 @@ async def chat(
             r = await client.post("/chat", json=payload)
             r.raise_for_status()
             return r.json()["output"]
-        async with client.stream(
-            "POST", "/chat", json=payload, params={"stream": "true"}
-        ) as resp:
+        async with client.stream("POST", "/chat", json=payload, params={"stream": "true"}) as resp:
             resp.raise_for_status()
             chunks: list[str] = []
             async for line in resp.aiter_lines():

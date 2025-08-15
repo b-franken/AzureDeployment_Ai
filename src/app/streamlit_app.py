@@ -111,10 +111,7 @@ def _wrap_text_for_pdf(text: str, width: int = 95) -> list[str]:
         else:
             lines.append(f"[code:{lang or 'text'}]")
             for code_line in chunk.splitlines():
-                lines.extend(
-                    textwrap.wrap(code_line, width=width, break_long_words=False)
-                    or [""]
-                )
+                lines.extend(textwrap.wrap(code_line, width=width, break_long_words=False) or [""])
             lines.extend(["[/code]", ""])
     return lines
 
@@ -126,9 +123,7 @@ def download_buttons(text: str) -> None:
     _, height = letter
     y = height - 40
     for line in _wrap_text_for_pdf(text):
-        pdf.drawString(
-            40, y, line.encode("ascii", errors="replace").decode("ascii")[:200]
-        )
+        pdf.drawString(40, y, line.encode("ascii", errors="replace").decode("ascii")[:200])
         y -= 14
         if y < 40:
             pdf.showPage()
@@ -148,13 +143,9 @@ with st.sidebar:
     st.session_state.selected_provider = st.selectbox(
         "Provider",
         providers,
-        index=_safe_index(
-            providers, st.session_state.get("selected_provider") or DEFAULT_PROVIDER
-        ),
+        index=_safe_index(providers, st.session_state.get("selected_provider") or DEFAULT_PROVIDER),
     )
-    models = available_models(st.session_state.selected_provider) or [
-        "<no models available>"
-    ]
+    models = available_models(st.session_state.selected_provider) or ["<no models available>"]
     if st.session_state.get("selected_model") not in models:
         st.session_state.selected_model = models[0] if models else DEFAULT_MODEL
     st.session_state.selected_model = st.selectbox(
@@ -171,17 +162,12 @@ with st.sidebar:
         review_providers,
         index=_safe_index(
             review_providers,
-            st.session_state.get("review_provider")
-            or st.session_state.selected_provider,
+            st.session_state.get("review_provider") or st.session_state.selected_provider,
         ),
     )
-    review_models = available_models(st.session_state.review_provider) or [
-        "<no models available>"
-    ]
+    review_models = available_models(st.session_state.review_provider) or ["<no models available>"]
     if st.session_state.get("review_model") not in review_models:
-        st.session_state.review_model = (
-            review_models[0] if review_models else DEFAULT_MODEL
-        )
+        st.session_state.review_model = review_models[0] if review_models else DEFAULT_MODEL
     st.session_state.review_model = st.selectbox(
         "Review Model",
         review_models,
@@ -189,14 +175,10 @@ with st.sidebar:
     )
 
     st.divider()
-    st.session_state.enable_tools = st.toggle(
-        "Enable tools for this request", value=False
-    )
+    st.session_state.enable_tools = st.toggle("Enable tools for this request", value=False)
     ensure_tools_loaded()
     tool_names = ["<auto>"] + [t.name for t in list_tools()]
-    st.session_state.preferred_tool = st.selectbox(
-        "Preferred tool", tool_names, index=0
-    )
+    st.session_state.preferred_tool = st.selectbox("Preferred tool", tool_names, index=0)
     st.caption(
         "Keep tools off for normal chat. Turn on to allow CLI tool invocation. "
         "Reviewer can use a different provider and model."
@@ -269,9 +251,7 @@ with tab1:
                 st.subheader("Assistant Response")
                 render_response_with_code(ai_reply)
                 download_buttons(ai_reply)
-    if st.session_state.get("last_cmd_output") and st.button(
-        "Run Reviewer", key="review_cmd_btn"
-    ):
+    if st.session_state.get("last_cmd_output") and st.button("Run Reviewer", key="review_cmd_btn"):
         with st.spinner("Reviewing assistant response…"):
             reviewed_text = _review(
                 st.session_state["last_cmd_input"], st.session_state["last_cmd_output"]
@@ -299,12 +279,8 @@ with tab2:
             st.session_state.last_chat_input = user_input_chat
             st.session_state.last_chat_output = ai_reply
             st.session_state.last_chat_reviewed = None
-            st.session_state.chat_history.append(
-                {"role": "user", "content": user_input_chat}
-            )
-            st.session_state.chat_history.append(
-                {"role": "assistant", "content": ai_reply}
-            )
+            st.session_state.chat_history.append({"role": "user", "content": user_input_chat})
+            st.session_state.chat_history.append({"role": "assistant", "content": ai_reply})
             st.subheader("Assistant Response")
             render_response_with_code(ai_reply)
             download_buttons(ai_reply)

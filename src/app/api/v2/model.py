@@ -33,9 +33,7 @@ class chat_request_v2(BaseModel):
     def validate_environment(cls, v: str) -> str:
         allowed = ["development", "staging", "production"]
         if v not in allowed:
-            raise ValueError(
-                "environment must be one of development, staging, production"
-            )
+            raise ValueError("environment must be one of development, staging, production")
         return v
 
 
@@ -53,9 +51,7 @@ class deploy_request_v2(BaseModel):
     def validate_environment(cls, v: str) -> str:
         allowed = ["development", "staging", "production"]
         if v not in allowed:
-            raise ValueError(
-                "environment must be one of development, staging, production"
-            )
+            raise ValueError("environment must be one of development, staging, production")
         return v
 
 

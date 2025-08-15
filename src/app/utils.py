@@ -4,9 +4,7 @@ import discord
 def strip_bot_mention(content: str, message: discord.Message, bot_id: int) -> str:
     for mention in message.mentions:
         if mention.id == bot_id:
-            content = content.replace(f"<@{mention.id}>", "").replace(
-                f"<@!{mention.id}>", ""
-            )
+            content = content.replace(f"<@{mention.id}>", "").replace(f"<@!{mention.id}>", "")
     return content.strip()
 
 

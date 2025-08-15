@@ -9,9 +9,7 @@ from ..validators import validate_name
 _PCall = Callable[..., Any]
 
 
-async def _safe_get(
-    pcall: _PCall, *args: Any, clients: Clients, **kwargs: Any
-) -> tuple[bool, Any]:
+async def _safe_get(pcall: _PCall, *args: Any, clients: Clients, **kwargs: Any) -> tuple[bool, Any]:
     try:
         res = await clients.run(pcall, *args, **kwargs)
         return True, res
@@ -73,9 +71,7 @@ async def link_private_dns_zone(
             "vnet": f"{vnet_resource_group}/{vnet_name}",
             "registration_enabled": bool(registration_enabled),
         }
-    vnet = await clients.run(
-        clients.net.virtual_networks.get, vnet_resource_group, vnet_name
-    )
+    vnet = await clients.run(clients.net.virtual_networks.get, vnet_resource_group, vnet_name)
     ok, existing = await _safe_get(
         clients.pdns.virtual_network_links.get,
         resource_group,

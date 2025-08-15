@@ -88,11 +88,7 @@ async def assign_role(
         )
     )
     for ra in existing:
-        rid = (
-            ra.properties.role_definition_id
-            if getattr(ra, "properties", None)
-            else None
-        )
+        rid = ra.properties.role_definition_id if getattr(ra, "properties", None) else None
         if rid and rid.endswith(role_id.split("/")[-1]):
             return "exists", ra.as_dict()
     assign_id = str(uuid.uuid4())

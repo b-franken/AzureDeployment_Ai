@@ -137,9 +137,7 @@ def maybe_map_provision(text: str) -> dict[str, object] | None:
             "args": {
                 "action": "create_storage",
                 "name": params.get("name"),
-                "resource_group": params.get(
-                    "resource_group", f"{params.get('name')}-rg"
-                ),
+                "resource_group": params.get("resource_group", f"{params.get('name')}-rg"),
                 "location": params["location"],
                 "sku": params.get("sku", "Standard_LRS"),
                 "access_tier": params.get("access_tier", "Hot"),
@@ -153,9 +151,7 @@ def maybe_map_provision(text: str) -> dict[str, object] | None:
             "args": {
                 "action": "create_webapp",
                 "name": params.get("name"),
-                "resource_group": params.get(
-                    "resource_group", f"{params.get('name')}-rg"
-                ),
+                "resource_group": params.get("resource_group", f"{params.get('name')}-rg"),
                 "location": params["location"],
                 "plan": params.get("plan", f"{params.get('name')}-plan"),
                 "dry_run": False,

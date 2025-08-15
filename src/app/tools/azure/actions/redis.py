@@ -9,9 +9,7 @@ from ..validators import validate_name
 _PCall = Callable[..., Any]
 
 
-async def _safe_get(
-    pcall: _PCall, *args: Any, clients: Clients, **kwargs: Any
-) -> tuple[bool, Any]:
+async def _safe_get(pcall: _PCall, *args: Any, clients: Clients, **kwargs: Any) -> tuple[bool, Any]:
     try:
         res = await clients.run(pcall, *args, **kwargs)
         return True, res
@@ -48,9 +46,7 @@ async def create_redis(
             "minimum_tls_version": minimum_tls_version,
             "tags": tags or {},
         }
-    ok, existing = await _safe_get(
-        clients.redis.redis.get, resource_group, name, clients=clients
-    )
+    ok, existing = await _safe_get(clients.redis.redis.get, resource_group, name, clients=clients)
     if ok and existing and not force:
         return "exists", existing.as_dict()
     params = {
@@ -60,8 +56,6 @@ async def create_redis(
         "minimum_tls_version": minimum_tls_version,
         "tags": tags or {},
     }
-    poller = await clients.run(
-        clients.redis.redis.begin_create, resource_group, name, params
-    )
+    poller = await clients.run(clients.redis.redis.begin_create, resource_group, name, params)
     cache = await clients.run(poller.result)
     return "created", cache.as_dict()

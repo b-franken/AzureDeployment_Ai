@@ -16,9 +16,7 @@ def _ok(summary: str, obj: dict | str = "") -> ToolResult:
     return {
         "ok": True,
         "summary": summary,
-        "output": (
-            obj if isinstance(obj, str) else json.dumps(obj, default=str, indent=2)
-        ),
+        "output": (obj if isinstance(obj, str) else json.dumps(obj, default=str, indent=2)),
     }
 
 
@@ -424,9 +422,7 @@ def _validate_and_suggest(action: str, params: dict[str, Any]) -> tuple[bool, st
     if action not in required_by_action:
         return True, ""
 
-    missing = [
-        p for p in required_by_action[action] if p not in params or not params[p]
-    ]
+    missing = [p for p in required_by_action[action] if p not in params or not params[p]]
     if missing:
         suggestions = []
         for param in missing:
@@ -478,15 +474,11 @@ def _provide_helpful_suggestions(original_input: str) -> list[str]:
         suggestions.append("create storage mydata in eastus with sku Standard_GRS")
 
     if "web" in original_input.lower() or "app" in original_input.lower():
-        suggestions.append(
-            "create web app mywebapp in westeurope resource group myapp-dev-rg"
-        )
+        suggestions.append("create web app mywebapp in westeurope resource group myapp-dev-rg")
         suggestions.append("create webapp mysite with runtime python|3.9")
 
     if "kubernetes" in original_input.lower() or "aks" in original_input.lower():
-        suggestions.append(
-            "create aks cluster mycluster in westeurope resource group myapp-dev-rg"
-        )
+        suggestions.append("create aks cluster mycluster in westeurope resource group myapp-dev-rg")
         suggestions.append("create kubernetes myk8s with 3 nodes")
 
     if not suggestions:
@@ -614,9 +606,7 @@ class AzureProvision(Tool):
                 return _ok(f"{canonical_action} {status}", payload)
             else:
                 error_msg = (
-                    payload
-                    if isinstance(payload, str)
-                    else json.dumps(payload, ensure_ascii=False)
+                    payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False)
                 )
                 if "AccountKey" in error_msg:
                     error_msg = "[Account credentials redacted]"

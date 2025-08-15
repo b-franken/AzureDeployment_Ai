@@ -1,0 +1,90 @@
+from __future__ import annotations
+
+from collections.abc import Callable
+from typing import Any
+
+from ..clients import Clients
+from ..validators import validate_name
+
+_PCall = Callable[..., Any]
+
+
+async def _safe_get(pcall: _PCall, *args: Any, clients: Clients, **kwargs: Any) -> tuple[bool, Any]:
+    try:
+        res = await clients.run(pcall, *args, **kwargs)
+        return True, res
+    except Exception:
+        return False, None
+
+
+async def create_private_dns_zone(
+    *,
+    clients: Clients,
+    resource_group: str,
+    zone_name: str,
+    tags: dict[str, str] | None = None,
+    dry_run: bool = False,
+    force: bool = False,
+) -> tuple[str, Any]:
+    if not validate_name("generic", zone_name):
+        return "error", {"message": "invalid private dns zone name"}
+    if dry_run:
+        return "plan", {"zone": zone_name, "resource_group": resource_group, "tags": tags or {}}
+    ok, existing = await _safe_get(
+        clients.pdns.private_zones.get, resource_group, zone_name, clients=clients
+    )
+    if ok and existing and not force:
+        return "exists", existing.as_dict()
+    params = {"location": "global", "tags": tags or {}}
+    poller = await clients.run(
+        clients.pdns.private_zones.begin_create_or_update, resource_group, zone_name, params
+    )
+    zone = await clients.run(poller.result)
+    return "created", zone.as_dict()
+
+
+async def link_private_dns_zone(
+    *,
+    clients: Clients,
+    resource_group: str,
+    zone_name: str,
+    vnet_resource_group: str,
+    vnet_name: str,
+    link_name: str,
+    registration_enabled: bool = False,
+    dry_run: bool = False,
+    force: bool = False,
+) -> tuple[str, Any]:
+    if not validate_name("generic", link_name):
+        return "error", {"message": "invalid link name"}
+    if dry_run:
+        return "plan", {
+            "zone": zone_name,
+            "link_name": link_name,
+            "vnet": f"{vnet_resource_group}/{vnet_name}",
+            "registration_enabled": bool(registration_enabled),
+        }
+    vnet = await clients.run(clients.net.virtual_networks.get, vnet_resource_group, vnet_name)
+    ok, existing = await _safe_get(
+        clients.pdns.virtual_network_links.get,
+        resource_group,
+        zone_name,
+        link_name,
+        clients=clients,
+    )
+    if ok and existing and not force:
+        return "exists", existing.as_dict()
+    params = {
+        "location": "global",
+        "virtual_network": {"id": vnet.id},
+        "registration_enabled": bool(registration_enabled),
+    }
+    poller = await clients.run(
+        clients.pdns.virtual_network_links.begin_create_or_update,
+        resource_group,
+        zone_name,
+        link_name,
+        params,
+    )
+    link = await clients.run(poller.result)
+    return "created", link.as_dict()

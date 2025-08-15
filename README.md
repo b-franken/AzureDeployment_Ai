@@ -13,7 +13,7 @@ Natural‑language provisioning and policy management for Azure. Describe the de
   * [Core](#core)
   * [Azure authentication](#azure-authentication)
   * [LLM providers](#llm-providers)
-  * [Discord bot integration (optional)](#discord-bot-integration-optional)
+
 * [Examples](#examples)
 * [Safety](#safety)
 * [Development](#development)

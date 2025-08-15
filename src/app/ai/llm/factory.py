@@ -31,9 +31,14 @@ def _ollama_models() -> list[str]:
             resp = client.get(f"{OLLAMA_BASE_URL.rstrip('/')}/api/tags")
             resp.raise_for_status()
             data = resp.json()
-            return [
-                m["name"] for m in data.get("models", []) if "name" in m
-            ] or _FALLBACK_OLLAMA_MODELS
+            models = data.get("models", [])
+            if models and isinstance(models, list):
+                model_names = []
+                for m in models:
+                    if isinstance(m, dict) and "name" in m:
+                        model_names.append(m["name"])
+                return model_names if model_names else _FALLBACK_OLLAMA_MODELS
+            return _FALLBACK_OLLAMA_MODELS
     except Exception:
         return _FALLBACK_OLLAMA_MODELS
 
@@ -57,11 +62,11 @@ def get_provider_and_model(
         selected_provider = "ollama"
 
     def select_model(available: list[str], configured: str, requested: str | None) -> str:
-        if requested in available:
+        if requested and requested in available:
             return requested
         if configured in available:
             return configured
-        return available[0]
+        return available[0] if available else configured
 
     if selected_provider == "openai":
         return OpenAIProvider(), select_model(_OPENAI_MODELS, OPENAI_MODEL, model)

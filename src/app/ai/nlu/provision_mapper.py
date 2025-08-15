@@ -118,13 +118,15 @@ def maybe_map_provision(text: str) -> dict[str, object] | None:
     if not params.get("location"):
         params["location"] = "westeurope"
 
+    action = detect_action(text)
+
     if resource_type == "resource_group":
         if not params.get("resource_group"):
             params["resource_group"] = params.get("name", "")
         return {
             "tool": "azure_provision",
             "args": {
-                "action": "create_rg",
+                "action": f"{action}_rg" if action else "create_rg",
                 "resource_group": params["resource_group"],
                 "location": params["location"],
                 "dry_run": False,
@@ -135,7 +137,7 @@ def maybe_map_provision(text: str) -> dict[str, object] | None:
         return {
             "tool": "azure_provision",
             "args": {
-                "action": "create_storage",
+                "action": (f"{action}_storage" if action else "create_storage"),
                 "name": params.get("name"),
                 "resource_group": params.get("resource_group", f"{params.get('name')}-rg"),
                 "location": params["location"],
@@ -149,7 +151,7 @@ def maybe_map_provision(text: str) -> dict[str, object] | None:
         return {
             "tool": "azure_provision",
             "args": {
-                "action": "create_webapp",
+                "action": f"{action}_webapp" if action else "create_webapp",
                 "name": params.get("name"),
                 "resource_group": params.get("resource_group", f"{params.get('name')}-rg"),
                 "location": params["location"],

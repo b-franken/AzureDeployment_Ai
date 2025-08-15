@@ -31,8 +31,22 @@ class BaseRepository(ABC, Generic[T]):
         return self._to_model(dict(record)) if record else None
 
     async def find_all(
-        self, limit: int = 100, offset: int = 0, order_by: str = "created_at DESC"
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        order_by: str = "created_at DESC",
     ) -> list[T]:
+        allowed_order_by = [
+            "created_at DESC",
+            "created_at ASC",
+            "updated_at DESC",
+            "updated_at ASC",
+            "id DESC",
+            "id ASC",
+        ]
+        if order_by not in allowed_order_by:
+            order_by = "created_at DESC"
+
         query = f"""
             SELECT * FROM {self.table_name}
             ORDER BY {order_by}

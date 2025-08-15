@@ -151,7 +151,10 @@ class DeploymentStateMachine:
                         else:
                             context.state = DeploymentState.FAILED
                 except Exception as e:
-                    context.error_details = {"exception": str(e), "state": context.state.value}
+                    context.error_details = {
+                        "exception": str(e),
+                        "state": context.state.value,
+                    }
                     if context.rollback_enabled and context.deployed_resources:
                         context.state = DeploymentState.ROLLING_BACK
                     else:
@@ -252,7 +255,10 @@ class ValidationHandler:
             validation_results[name] = result
             if not result["valid"]:
                 context.validation_results = validation_results
-                context.error_details = {"validation_failed": name, "details": result}
+                context.error_details = {
+                    "validation_failed": name,
+                    "details": result,
+                }
                 return False, context
 
         validation_results["valid"] = True
@@ -276,7 +282,10 @@ class ValidationHandler:
             return {"valid": False, "message": "No resources to deploy"}
         for resource in context.resources:
             if not resource.get("type") or not resource.get("name"):
-                return {"valid": False, "message": f"Invalid resource definition: {resource}"}
+                return {
+                    "valid": False,
+                    "message": f"Invalid resource definition: {resource}",
+                }
         return {"valid": True}
 
     async def _validate_dependencies(self, context: DeploymentContext) -> dict[str, Any]:
@@ -286,9 +295,23 @@ class ValidationHandler:
         return {"valid": True}
 
     async def _validate_quotas(self, context: DeploymentContext) -> dict[str, Any]:
+        required_cores = sum(r.get("cores", 0) for r in context.resources if r.get("type") == "vm")
+        if required_cores > 100:
+            return {
+                "valid": False,
+                "message": (f"Required cores ({required_cores}) exceeds quota (100)"),
+            }
         return {"valid": True}
 
     async def _validate_permissions(self, context: DeploymentContext) -> dict[str, Any]:
+        if not context.initiated_by:
+            return {"valid": False, "message": "No user context provided"}
+        roles = context.metadata.get("roles", [])
+        if context.environment == "prod" and "admin" not in roles:
+            return {
+                "valid": False,
+                "message": "Production deployment requires admin role",
+            }
         return {"valid": True}
 
     def _build_dependency_graph(self, resources: list[dict[str, Any]]) -> dict[str, list[str]]:
@@ -347,7 +370,8 @@ class ProvisioningHandler:
 
             for resource_name in deployment_order:
                 resource = next(
-                    (r for r in context.resources if r.get("name") == resource_name), None
+                    (r for r in context.resources if r.get("name") == resource_name),
+                    None,
                 )
                 if not resource:
                     continue

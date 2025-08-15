@@ -3,10 +3,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
-from app.api.v2.auth import require_role
+from app.api.v2.auth import require_role, token_data
 from app.platform.audit.logger import AuditLogger, AuditQuery
 
 router = APIRouter()
@@ -26,6 +26,7 @@ async def get_audit_logs(
     user_id: Annotated[str | None, Query(description="Filter by user id")] = None,
     _page: Annotated[int, Query(ge=1, alias="page")] = 1,
     page_size: Annotated[int, Query(ge=1, le=1000)] = 100,
+    td: Annotated[token_data, Depends(audit_role_dependency)] = None,
 ) -> logs_response:
     q = AuditQuery(start_time=start_date, end_time=end_date, user_id=user_id, limit=page_size)
     items = await alog.query_events(q)

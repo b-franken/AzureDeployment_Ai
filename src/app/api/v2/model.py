@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class token_data(BaseModel):
@@ -29,7 +29,8 @@ class chat_request_v2(BaseModel):
     environment: str = "development"
     correlation_id: str | None = None
 
-    @validator("environment")
+    @field_validator("environment")
+    @classmethod
     def validate_environment(cls, v: str) -> str:
         allowed = ["development", "staging", "production"]
         if v not in allowed:
@@ -47,7 +48,8 @@ class deploy_request_v2(BaseModel):
     cost_limit: float | None = Field(default=None, ge=0)
     tags: dict[str, str] = Field(default_factory=dict)
 
-    @validator("environment")
+    @field_validator("environment")
+    @classmethod
     def validate_environment(cls, v: str) -> str:
         allowed = ["development", "staging", "production"]
         if v not in allowed:

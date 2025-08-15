@@ -19,27 +19,35 @@ class RateLimitConfig:
 
 @dataclass
 class RequestTracker:
-    timestamps: list[float] = field(default_factory=list)
-    burst_tokens: int = 10
+    tokens: float | None = None
+    capacity: int | None = None
+    last_refill: float = field(default_factory=time.time)
+    last_seen: float = field(default_factory=time.time)
 
-    def is_allowed(self, current_time: float, limit: int, window: float, burst: int) -> bool:
-        self.timestamps = [t for t in self.timestamps if current_time - t < window]
+    def is_allowed(self, now: float, limit: int, window: float, burst: int) -> bool:
+        cap = int(limit) + int(max(burst, 0))
+        rate = float(limit) / float(window)
 
-        if len(self.timestamps) >= limit:
-            return False
+        if self.capacity != cap:
+            self.capacity = cap
+            if self.tokens is None:
+                self.tokens = float(cap)
+            else:
+                self.tokens = min(float(cap), float(self.tokens))
 
-        if len(self.timestamps) >= limit - burst and self.burst_tokens <= 0:
-            return False
+        elapsed = max(0.0, now - self.last_refill)
+        if self.tokens is None:
+            self.tokens = float(cap)
+        if elapsed > 0.0:
+            self.tokens = min(float(self.capacity), float(self.tokens) + rate * elapsed)
+            self.last_refill = now
 
-        if len(self.timestamps) >= limit - burst:
-            self.burst_tokens -= 1
+        self.last_seen = now
 
-        self.timestamps.append(current_time)
-
-        if current_time - self.timestamps[0] > window and self.burst_tokens < burst:
-            self.burst_tokens = min(burst, self.burst_tokens + 1)
-
-        return True
+        if self.tokens >= 1.0:
+            self.tokens -= 1.0
+            return True
+        return False
 
 
 class RateLimiter:
@@ -49,13 +57,13 @@ class RateLimiter:
         self.user_trackers: dict[str, RequestTracker] = defaultdict(RequestTracker)
 
     async def check_rate_limit(self, request: Request, user_id: str | None = None) -> None:
-        current_time = time.time()
+        now = time.time()
         client_ip = request.client.host if request.client else "unknown"
 
         if self.config.enable_ip_tracking:
             ip_tracker = self.ip_trackers[client_ip]
             if not ip_tracker.is_allowed(
-                current_time, self.config.requests_per_minute, 60.0, self.config.burst_size
+                now, self.config.requests_per_minute, 60.0, self.config.burst_size
             ):
                 raise HTTPException(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -65,7 +73,7 @@ class RateLimiter:
         if self.config.enable_user_tracking and user_id:
             user_tracker = self.user_trackers[user_id]
             if not user_tracker.is_allowed(
-                current_time, self.config.requests_per_hour, 3600.0, self.config.burst_size * 2
+                now, self.config.requests_per_hour, 3600.0, self.config.burst_size * 2
             ):
                 raise HTTPException(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -77,16 +85,10 @@ class RateLimiter:
                 )
 
     def cleanup_old_trackers(self, max_age: float = 7200.0) -> None:
-        current_time = time.time()
-
+        now = time.time()
         self.ip_trackers = {
-            ip: tracker
-            for ip, tracker in self.ip_trackers.items()
-            if tracker.timestamps and current_time - tracker.timestamps[-1] < max_age
+            ip: tr for ip, tr in self.ip_trackers.items() if now - tr.last_seen < max_age
         }
-
         self.user_trackers = {
-            user: tracker
-            for user, tracker in self.user_trackers.items()
-            if tracker.timestamps and current_time - tracker.timestamps[-1] < max_age
+            uid: tr for uid, tr in self.user_trackers.items() if now - tr.last_seen < max_age
         }

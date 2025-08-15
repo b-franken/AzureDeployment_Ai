@@ -3,27 +3,23 @@ from __future__ import annotations
 import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Any, Generic, TypeVar
+from typing import Any
 
 from pydantic import BaseModel
 
 from app.database.connection import DatabasePool
 
-T = TypeVar("T", bound=BaseModel)
 
-
-class BaseRepository(ABC, Generic[T]):
+class BaseRepository[T: BaseModel](ABC):
     def __init__(self, pool: DatabasePool, table_name: str):
         self.pool = pool
         self.table_name = table_name
 
     @abstractmethod
-    def _to_model(self, record: dict[str, Any]) -> T:
-        pass
+    def _to_model(self, record: dict[str, Any]) -> T: ...
 
     @abstractmethod
-    def _from_model(self, model: T) -> dict[str, Any]:
-        pass
+    def _from_model(self, model: T) -> dict[str, Any]: ...
 
     async def find_by_id(self, id: str) -> T | None:
         query = f"SELECT * FROM {self.table_name} WHERE id = $1"
@@ -47,11 +43,7 @@ class BaseRepository(ABC, Generic[T]):
         if order_by not in allowed_order_by:
             order_by = "created_at DESC"
 
-        query = f"""
-            SELECT * FROM {self.table_name}
-            ORDER BY {order_by}
-            LIMIT $1 OFFSET $2
-        """
+        query = f"SELECT * FROM {self.table_name} ORDER BY {order_by} LIMIT $1 OFFSET $2"
         records = await self.pool.fetch(query, limit, offset)
         return [self._to_model(dict(record)) for record in records]
 
@@ -72,12 +64,7 @@ class BaseRepository(ABC, Generic[T]):
         updates["updated_at"] = datetime.utcnow()
 
         set_clause = ", ".join(f"{k} = ${i + 2}" for i, k in enumerate(updates.keys()))
-        query = f"""
-            UPDATE {self.table_name}
-            SET {set_clause}
-            WHERE id = $1
-            RETURNING *
-        """
+        query = f"UPDATE {self.table_name} SET {set_clause} WHERE id = $1 RETURNING *"
 
         record = await self.pool.fetchrow(query, id, *updates.values())
         return self._to_model(dict(record)) if record else None
@@ -92,9 +79,8 @@ class BaseRepository(ABC, Generic[T]):
             conditions = " AND ".join(f"{k} = ${i + 1}" for i, k in enumerate(where.keys()))
             query = f"SELECT COUNT(*) FROM {self.table_name} WHERE {conditions}"
             return await self.pool.fetchval(query, *where.values())
-        else:
-            query = f"SELECT COUNT(*) FROM {self.table_name}"
-            return await self.pool.fetchval(query)
+        query = f"SELECT COUNT(*) FROM {self.table_name}"
+        return await self.pool.fetchval(query)
 
     async def exists(self, where: dict[str, Any]) -> bool:
         conditions = " AND ".join(f"{k} = ${i + 1}" for i, k in enumerate(where.keys()))

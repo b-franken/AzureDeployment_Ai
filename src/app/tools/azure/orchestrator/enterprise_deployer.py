@@ -6,8 +6,15 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
 
-from ..clients import Clients, get_clients
+from azure.mgmt.apimanagement import ApiManagementClient
+from azure.mgmt.apimanagement.models import (
+    ApiManagementServiceResource,
+    ApiManagementServiceSkuProperties,
+)
+
 from app.ai.nlu.intent_classifier import DeploymentIntent, EnterpriseNLPParser
+
+from ..clients import Clients, get_clients
 
 
 @dataclass
@@ -89,8 +96,7 @@ class EnterpriseAzureDeployer:
             "plan": self._serialize_plan(plan),
             "result": result,
             "monitoring_dashboard": (
-                self._generate_monitoring_url(
-                    result) if result["success"] else None
+                self._generate_monitoring_url(result) if result["success"] else None
             ),
         }
 
@@ -141,11 +147,9 @@ class EnterpriseAzureDeployer:
         if parsed.attributes.get("disaster_recovery"):
             resources.extend(self._add_dr_resources(base_config, context))
         if context.enable_monitoring:
-            resources.extend(
-                self._add_monitoring_resources(base_config, context))
+            resources.extend(self._add_monitoring_resources(base_config, context))
         if context.enable_private_endpoints:
-            resources.extend(
-                self._add_private_endpoint_resources(base_config, context))
+            resources.extend(self._add_private_endpoint_resources(base_config, context))
         if context.enable_backup:
             resources.extend(self._add_backup_resources(base_config, context))
         return resources
@@ -278,8 +282,7 @@ class EnterpriseAzureDeployer:
         location_match = re.search(pattern, request.lower())
         if location_match:
             context.location = location_match.group(1).replace(" ", "")
-        rg_match = re.search(
-            r"resource group\s+([a-z0-9][\w-]{0,89})", request.lower())
+        rg_match = re.search(r"resource group\s+([a-z0-9][\w-]{0,89})", request.lower())
         if rg_match:
             context.resource_group = rg_match.group(1)
         if parsed.attributes.get("private_endpoints"):
@@ -342,8 +345,7 @@ class EnterpriseAzureDeployer:
         return f"https://approval.local/requests/{plan.request_id}"
 
     def _generate_monitoring_url(self, result: dict[str, Any]) -> str:
-        tracking_id = str(result.get("tracking_id")
-                          or self._generate_request_id())
+        tracking_id = str(result.get("tracking_id") or self._generate_request_id())
         return f"https://monitoring.local/deployments/{tracking_id}"
 
     async def _validate_deployment(
@@ -353,15 +355,12 @@ class EnterpriseAzureDeployer:
         if context.subscription_id:
             validations.append({"check": "subscription_id", "status": "ok"})
         else:
-            validations.append({"check": "subscription_id",
-                               "status": "fail", "message": "missing"})
+            validations.append({"check": "subscription_id", "status": "fail", "message": "missing"})
         if context.resource_group:
             validations.append({"check": "resource_group", "status": "ok"})
         else:
-            validations.append(
-                {"check": "resource_group", "status": "fail", "message": "missing"})
-        validations.append(
-            {"check": "resource_count", "status": "ok", "details": len(resources)})
+            validations.append({"check": "resource_group", "status": "fail", "message": "missing"})
+        validations.append({"check": "resource_count", "status": "ok", "details": len(resources)})
         return validations
 
     def _create_rollback_plan(self, resources: list[dict[str, Any]]) -> dict[str, Any]:
@@ -562,8 +561,7 @@ class AKSDeployer:
             name=resource.get("name", "aks-cluster"),
             dns_prefix=resource.get("dns_prefix", resource.get("name", "aks")),
             node_count=config.get("node_pools", [{}])[0].get("count", 2),
-            network_plugin=config.get("network_profile", {}).get(
-                "network_plugin", "azure"),
+            network_plugin=config.get("network_profile", {}).get("network_plugin", "azure"),
             tags=context.tags,
             dry_run=context.dry_run,
             force=context.force,
@@ -607,20 +605,21 @@ class APIMDeployer:
     async def deploy(
         self, resource: dict[str, Any], clients: Clients, context: DeploymentContext
     ) -> dict[str, Any]:
-        from azure.mgmt.apimanagement import ApiManagementClient
-        from azure.mgmt.apimanagement.models import ApiManagementServiceResource
+        apim_client = ApiManagementClient(clients.cred, context.subscription_id)
 
-        apim_client = ApiManagementClient(
-            clients.cred, context.subscription_id)
+        sku = ApiManagementServiceSkuProperties(
+            name=resource.get("sku", {}).get("name", "Developer"),
+            capacity=resource.get("sku", {}).get("capacity", 1),
+        )
+
         service_params = ApiManagementServiceResource(
             location=context.location,
-            sku_name=resource.get("sku", {}).get("name", "Developer"),
-            sku_capacity=resource.get("sku", {}).get("capacity", 1),
-            publisher_email=resource.get(
-                "publisher_email", "admin@contoso.com"),
+            sku=sku,
+            publisher_email=resource.get("publisher_email", "admin@contoso.com"),
             publisher_name=resource.get("publisher_name", "Contoso"),
             tags=context.tags,
         )
+
         if not context.dry_run:
             poller = await clients.run(
                 apim_client.api_management_service.begin_create_or_update,
@@ -645,8 +644,7 @@ class DataFactoryDeployer:
         from azure.mgmt.datafactory import DataFactoryManagementClient
         from azure.mgmt.datafactory.models import Factory
 
-        adf_client = DataFactoryManagementClient(
-            clients.cred, context.subscription_id)
+        adf_client = DataFactoryManagementClient(clients.cred, context.subscription_id)
         factory = Factory(location=context.location, tags=context.tags)
         if not context.dry_run:
             result = await clients.run(
@@ -671,8 +669,7 @@ class SynapseDeployer:
         from azure.mgmt.synapse import SynapseManagementClient
         from azure.mgmt.synapse.models import DataLakeStorageAccountDetails, Workspace
 
-        synapse_client = SynapseManagementClient(
-            clients.cred, context.subscription_id)
+        synapse_client = SynapseManagementClient(clients.cred, context.subscription_id)
         workspace_params = Workspace(
             location=context.location,
             default_data_lake_storage=DataLakeStorageAccountDetails(
@@ -683,8 +680,7 @@ class SynapseDeployer:
                 filesystem=resource.get("filesystem", "synapse"),
             ),
             sql_administrator_login=resource.get("sql_admin", "sqladmin"),
-            sql_administrator_login_password=resource.get(
-                "sql_password", "P@ssw0rd123!"),
+            sql_administrator_login_password=resource.get("sql_password", "P@ssw0rd123!"),
             tags=context.tags,
         )
         if not context.dry_run:
@@ -709,15 +705,14 @@ class CognitiveServicesDeployer:
         self, resource: dict[str, Any], clients: Clients, context: DeploymentContext
     ) -> dict[str, Any]:
         from azure.mgmt.cognitiveservices import CognitiveServicesManagementClient
-        from azure.mgmt.cognitiveservices.models import Account, Sku
+        from azure.mgmt.cognitiveservices.models import Account, AccountProperties, Sku
 
-        cognitive_client = CognitiveServicesManagementClient(
-            clients.cred, context.subscription_id)
+        cognitive_client = CognitiveServicesManagementClient(clients.cred, context.subscription_id)
         account_params = Account(
             location=context.location,
             sku=Sku(name=resource.get("sku", "S0")),
             kind=resource.get("kind", "CognitiveServices"),
-            properties={},
+            properties=AccountProperties(),
             tags=context.tags,
         )
         if not context.dry_run:
@@ -745,8 +740,7 @@ class EventHubDeployer:
         from azure.mgmt.eventhub.models import EHNamespace
         from azure.mgmt.eventhub.models import Sku as EventHubSku
 
-        eventhub_client = EventHubManagementClient(
-            clients.cred, context.subscription_id)
+        eventhub_client = EventHubManagementClient(clients.cred, context.subscription_id)
         namespace_params = EHNamespace(
             location=context.location,
             sku=EventHubSku(
@@ -782,8 +776,7 @@ class ServiceBusDeployer:
         from azure.mgmt.servicebus import ServiceBusManagementClient
         from azure.mgmt.servicebus.models import SBNamespace, SBSku
 
-        servicebus_client = ServiceBusManagementClient(
-            clients.cred, context.subscription_id)
+        servicebus_client = ServiceBusManagementClient(clients.cred, context.subscription_id)
         namespace_params = SBNamespace(
             location=context.location,
             sku=SBSku(
@@ -816,8 +809,7 @@ class LogicAppsDeployer:
         from azure.mgmt.logic import LogicManagementClient
         from azure.mgmt.logic.models import Workflow
 
-        logic_client = LogicManagementClient(
-            clients.cred, context.subscription_id)
+        logic_client = LogicManagementClient(clients.cred, context.subscription_id)
         workflow_params = Workflow(
             location=context.location,
             definition=resource.get(
@@ -856,13 +848,14 @@ class FrontDoorDeployer:
         from azure.mgmt.frontdoor.models import (
             Backend,
             BackendPool,
+            ForwardingConfiguration,
             FrontDoor,
             FrontendEndpoint,
             RoutingRule,
+            SubResource,
         )
 
-        frontdoor_client = FrontDoorManagementClient(
-            clients.cred, context.subscription_id)
+        frontdoor_client = FrontDoorManagementClient(clients.cred, context.subscription_id)
         frontdoor_name = resource.get("name", "frontdoor")
         frontdoor_id_base = (
             f"/subscriptions/{context.subscription_id}/resourceGroups/"
@@ -885,8 +878,7 @@ class FrontDoorDeployer:
                     name="backendPool1",
                     backends=[
                         Backend(
-                            address=resource.get(
-                                "backend_address", "example.com"),
+                            address=resource.get("backend_address", "example.com"),
                             http_port=80,
                             https_port=443,
                             priority=1,
@@ -898,13 +890,13 @@ class FrontDoorDeployer:
             routing_rules=[
                 RoutingRule(
                     name="routingRule1",
-                    frontend_endpoints=[{"id": frontend_endpoint_id}],
+                    frontend_endpoints=[SubResource(id=frontend_endpoint_id)],
                     accepted_protocols=["Http", "Https"],
                     patterns_to_match=["/*"],
-                    route_configuration={
-                        "@odata.type": forwarding_odata_type,
-                        "backend_pool": {"id": backend_pool_id},
-                    },
+                    route_configuration=ForwardingConfiguration(
+                        odata_type=forwarding_odata_type,
+                        backend_pool=SubResource(id=backend_pool_id),
+                    ),
                 )
             ],
             tags=context.tags,

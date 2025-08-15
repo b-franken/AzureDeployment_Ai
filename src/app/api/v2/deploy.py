@@ -43,9 +43,7 @@ async def deploy(
         environment=(
             "prod"
             if req.environment == "production"
-            else "dev"
-            if req.environment == "development"
-            else "acc"
+            else "dev" if req.environment == "development" else "acc"
         ),
         correlation_id=req.correlation_id,
         cost_limit=int(req.cost_limit) if req.cost_limit is not None else None,

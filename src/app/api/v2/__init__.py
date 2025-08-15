@@ -9,6 +9,7 @@ from app.api.v2.cost import router as cost_router
 from app.api.v2.deploy import router as deploy_router
 from app.api.v2.health import router as health_router
 from app.api.v2.metrics import router as metrics_router
+from app.api.v2.status import router as status_router
 
 router = APIRouter()
 router.include_router(auth_router, prefix="/auth", tags=["v2/auth"])
@@ -18,3 +19,4 @@ router.include_router(cost_router, prefix="/cost", tags=["v2/cost"])
 router.include_router(audit_router, prefix="/audit", tags=["v2/audit"])
 router.include_router(metrics_router, prefix="/metrics", tags=["v2/metrics"])
 router.include_router(health_router, tags=["v2/health"])
+router.include_router(status_router, tags=["v2/status"])

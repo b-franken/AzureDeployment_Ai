@@ -65,6 +65,10 @@ class ToolsClient {
 
     async runTool(toolName: string, input: any): Promise<any> {
         if (!this.config.baseUrl) {
+            const isDev = process.env.NODE_ENV !== 'production'
+            if (!isDev) {
+                throw new Error('ToolsClient baseUrl is not configured')
+            }
             logger.info('Running tool in mock mode', { toolName, input })
             return this.getMockResponse(toolName, input)
         }

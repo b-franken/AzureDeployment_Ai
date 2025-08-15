@@ -45,6 +45,7 @@ async def create_keyvault(
         sku=KvSku(name="standard", family="A"),
         access_policies=[],
         enable_rbac_authorization=bool(enable_rbac),
+        enable_purge_protection=True,
     )
     params = VaultCreateOrUpdateParameters(location=location, properties=props, tags=tags or {})
     poller = await clients.run(

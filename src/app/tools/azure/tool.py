@@ -39,7 +39,6 @@ class EnhancedNaturalLanguageParser:
         (r"\buk\s*south\b", "uksouth"),
         (r"\beast\s*us\b", "eastus"),
         (r"\beurope\b", "westeurope"),
-        (r"\bus\b", "eastus"),
     ]
 
     RESOURCE_PATTERNS = {
@@ -379,16 +378,6 @@ def _apply_intelligent_defaults(action: str, params: dict[str, Any]) -> None:
             params["server_name"] = params["name"]
         if "sql_admin_user" not in params:
             params["sql_admin_user"] = "sqladmin"
-        if "sql_admin_password" not in params:
-            params["sql_admin_password"] = "P@ssw0rd123!"
-
-    elif action == "create_vnet":
-        if "resource_group" not in params and base_name:
-            params["resource_group"] = f"{base_name}-{env}-rg"
-        if "location" not in params:
-            params["location"] = "westeurope"
-        if "address_prefix" not in params:
-            params["address_prefix"] = "10.0.0.0/16"
 
 
 def _validate_and_suggest(action: str, params: dict[str, Any]) -> tuple[bool, str]:

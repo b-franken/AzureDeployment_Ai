@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from collections.abc import Awaitable, Callable
@@ -22,6 +23,7 @@ from app.platform.audit.logger import (
 router = APIRouter()
 security = HTTPBearer(auto_error=False)
 alog = AuditLogger()
+ph = PasswordHasher()
 
 try:
     JWT_SECRET: str = os.environ["API_JWT_SECRET"]
@@ -38,15 +40,59 @@ def _issue_token(payload: dict[str, Any]) -> str:
     return jwt.encode(data, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
-async def _validate_credentials(email: str, password: str) -> bool:
-    if password == "demo_password":
-        return True
-    ph = PasswordHasher()
-    dummy_hash = ph.hash("demo_password")
+def _load_users_from_env() -> dict[str, dict[str, Any]]:
+    users: dict[str, dict[str, Any]] = {}
+    raw = os.getenv("API_USERS_JSON")
+    if raw:
+        try:
+            arr = json.loads(raw)
+            for item in arr:
+                email = str(item.get("email", "")).lower()
+                if not email:
+                    continue
+                users[email] = {
+                    "password_hash": str(item.get("password_hash", "")),
+                    "roles": list(item.get("roles", [])) or ["user"],
+                    "subscription_id": str(item.get("subscription_id", "")),
+                }
+        except Exception:
+            users = {}
+    if not users:
+        email = os.getenv("API_USER_EMAIL", "").lower()
+        pwd_hash = os.getenv("API_PASSWORD_HASH", "")
+        if email and pwd_hash:
+            roles_env = os.getenv("API_USER_ROLES", "user")
+            roles = [r.strip() for r in roles_env.split(",") if r.strip()]
+            users[email] = {
+                "password_hash": pwd_hash,
+                "roles": roles or ["user"],
+                "subscription_id": os.getenv("API_USER_SUBSCRIPTION_ID", ""),
+            }
+    return users
+
+
+USERS = _load_users_from_env()
+
+
+async def _get_user(email: str) -> dict[str, Any] | None:
+    return USERS.get(email.lower())
+
+
+async def _validate_credentials(email: str, password: str) -> dict[str, Any] | None:
+    user = await _get_user(email)
+    if not user:
+        return None
     try:
-        return ph.verify(dummy_hash, password)
+        if ph.verify(user["password_hash"], password):
+            return {
+                "user_id": str(uuid.uuid5(uuid.NAMESPACE_DNS, email)),
+                "email": email,
+                "subscription_id": user.get("subscription_id") or "",
+                "roles": list(user.get("roles", [])) or ["user"],
+            }
     except Exception:
-        return False
+        return None
+    return None
 
 
 async def auth_required(request: Request) -> token_data:
@@ -83,8 +129,8 @@ def require_role(role: str) -> Callable[[Request], Awaitable[token_data]]:
 
 @router.post("/login")
 async def login(req: Request, body: auth_request) -> dict[str, Any]:
-    ok = await _validate_credentials(body.email, body.password)
-    if not ok:
+    user = await _validate_credentials(body.email, body.password)
+    if not user:
         await alog.log_event(
             AuditEvent(
                 event_type=AuditEventType.ACCESS_DENIED,
@@ -96,12 +142,6 @@ async def login(req: Request, body: auth_request) -> dict[str, Any]:
             )
         )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials")
-    user: dict[str, Any] = {
-        "user_id": str(uuid.uuid4()),
-        "email": body.email,
-        "subscription_id": "00000000-0000-0000-0000-000000000000",
-        "roles": ["user", "deploy", "cost_viewer"],
-    }
     token = _issue_token(user)
     await alog.log_event(
         AuditEvent(
@@ -117,7 +157,7 @@ async def login(req: Request, body: auth_request) -> dict[str, Any]:
     return {
         "access_token": token,
         "token_type": "bearer",
-        "expires_in": 3600 * 24,
+        "expires_in": 3600 * jwt_hours,
         "user": {"id": user["user_id"], "email": user["email"], "roles": user["roles"]},
     }
 

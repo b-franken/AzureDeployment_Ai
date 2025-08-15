@@ -46,14 +46,6 @@ def ensure_tools_loaded() -> None:
     registry: list[tuple[str, str]] = [
         ("app.tools.azure.tool", "AzureProvision"),
         ("app.tools.provision.orchestrator", "ProvisionOrchestrator"),
-        ("app.tools.hadolint", "Hadolint"),
-        ("app.tools.kubeconform", "KubeConform"),
-        ("app.tools.helm_lint", "HelmLint"),
-        ("app.tools.gh_pr", "GhPr"),
-        ("app.tools.tf_validate", "TfValidate"),
-        ("app.tools.kubectl_ro", "KubectlReadOnly"),
-        ("app.tools.docker_hardening", "DockerHardening"),
-        ("app.tools.k8s_rollout_audit", "K8sRolloutAudit"),
     ]
     for module_path, class_name in registry:
         tool = _import_tool(module_path, class_name)

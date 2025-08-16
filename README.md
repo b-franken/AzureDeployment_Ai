@@ -97,7 +97,6 @@ Set `LLM_PROVIDER` to select a provider, then configure the matching variables. 
 * `LLM_PROVIDER=openai`
 * `OPENAI_KEY`
 * `OPENAI_MODEL` — for example, `gpt-4o`, `gpt-4.1`, or another available model
-* `OPENAI_ORG_ID` (optional)
 * `OPENAI_API_BASE` (optional, for gateways)
 
 
@@ -222,7 +221,7 @@ pytest -q
 
 ```toml
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 warn_unused_ignores = true
 warn_return_any = true
 disallow_untyped_defs = true
@@ -251,7 +250,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
       - name: install
         run: |
           python -m pip install -U pip

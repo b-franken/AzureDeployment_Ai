@@ -1,38 +1,39 @@
-# Azure AI: Azure Copilot
+# Azure Copilot (DevOps AI)
 
-Natural‑language provisioning and policy management for Azure. Describe the desired state (for example, "create a web app in westeurope") and the tool produces a safe plan with sensible defaults. Apply when ready.
+![Python](https://img.shields.io/badge/Python-3.12%2B-blue)
+![Framework](https://img.shields.io/badge/FastAPI-API-green)
+![Frontend](https://img.shields.io/badge/Next.js-Web%20UI-black)
+![License](https://img.shields.io/badge/License-MIT-yellow)
 
----
-
-## Contents
-
-* [Features](#features)
-* [Quickstart](#quickstart)
-* [Configuration](#configuration)
-
-  * [Core](#core)
-  * [Azure authentication](#azure-authentication)
-  * [LLM providers](#llm-providers)
-
-* [Examples](#examples)
-* [Safety](#safety)
-* [Development](#development)
-* [Architecture](#architecture)
-* [Roadmap](#roadmap)
-* [License](#license)
-* [Disclaimer](#disclaimer)
+Natural language provisioning and policy management for Azure.  
+Describe the desired state (for example: "create an AKS cluster in westeurope") and the tool produces a safe plan with sensible defaults. Apply when ready.
 
 ---
 
 ## Features
 
-* Natural language to action with extracted parameters and typed results
-* Plan and dry‑run by default with clear, structured outputs
-* Idempotent ensure flows with safe lookup helpers
-* Azure actions via SDK: App Service Plan, Web App, Storage Account, SQL Server and DB, Redis, VNet and Private DNS, Private Endpoint and Private Link
-* Consistent typing, redaction of secrets in errors, and standard tags (owner, env)
+- NL to Action: parse user intent, extract parameters, and return typed results
+- Safe by default: plan or dry-run support with clear, structured output
+- Idempotent ensure flows: avoids recreating existing resources
+- Azure actions via SDK: initial set includes AKS and Traffic Manager profiles
+- Strong typing and ergonomics: consistent tags (owner, env) and secret redaction on errors
 
-> Goal: a professional MVP that internal teams can use with safe defaults and clear plans.
+Goal: a professional MVP internal teams can use with safe defaults and clear plans.
+
+---
+
+## Table of contents
+
+- [Quickstart](#quickstart)
+- [Configuration](#configuration)
+- [API server](#api-server-fastapi)
+- [Web UI](#web-ui-nextjs)
+- [Available Azure actions](#available-azure-actions-initial-set)
+- [Architecture](#architecture)
+- [Quality and CI](#quality--ci)
+- [Safety](#safety)
+- [License](#license)
+- [Disclaimer](#disclaimer)
 
 ---
 
@@ -40,130 +41,17 @@ Natural‑language provisioning and policy management for Azure. Describe the de
 
 ### Requirements
 
-* Python 3.11+
-* Azure access using Azure CLI (`az login`) or a Service Principal
-
+- Python 3.12 or newer
+- Azure access via Azure CLI (az login) or Service Principal
 
 ### Install
 
 ```bash
 python -m pip install -U pip
 pip install -e .
-# optional for typing
-pip install -U types-PyYAML
 ```
 
-### Minimal run
-
-Configure credentials in your environment, then run one of the examples below. Always start with `dry_run=true`.
-
----
-
-## Configuration
-
-The application is configured through environment variables. You can place these in a local `.env` file or export them into your shell. An example file is provided below.
-
-### Core
-
-* `USE_API` — set to `1` to route requests through an external API instead of calling cloud SDKs directly. Default is unset.
-* `API_BASE_URL` — base URL for the external API when `USE_API=1`.
-* `LOG_LEVEL` — `DEBUG`, `INFO`, `WARNING`, `ERROR`. Default is `INFO`.
-
-### Azure authentication
-
-Use one of:
-
-**1) Azure CLI**
-
-* Run `az login` and select a subscription with `az account set --subscription <id>`.
-
-**2) Service Principal**
-
-* `AZURE_TENANT_ID`
-* `AZURE_CLIENT_ID`
-* `AZURE_CLIENT_SECRET`
-* `AZURE_SUBSCRIPTION_ID`
-
-> Production tip: prefer Managed Identity and Key Vault for secret storage where possible.
-
-
-
-### LLM providers
-
-Set `LLM_PROVIDER` to select a provider, then configure the matching variables. If multiple are set, the app will use `LLM_PROVIDER` when present.
-
-#### OpenAI
-
-* `LLM_PROVIDER=openai`
-* `OPENAI_KEY`
-* `OPENAI_MODEL` — for example, `gpt-4o`, `gpt-4.1`, or another available model
-* `OPENAI_API_BASE` (optional, for gateways)
-
-
-#### Google Gemini
-
-* `LLM_PROVIDER=gemini`
-* `GOOGLE_API_KEY` (or `GEMINI_API_KEY` depending on your SDK)
-* `GEMINI_MODEL` — for example, `gemini-1.5-pro`
-
-
-*`LLM_PROVIDER=ollama`
-*`OLLAMA_HOST=http://localhost:11434`
-*`OLLAMA_MODEL=llama3.2`
-
-### Discord bot integration (optional)
-
-If you wire this tool into a Discord bot, set the following:
-
-* `DISCORD_TOKEN`
-* `DISCORD_CLIENT_ID`
-* `DISCORD_CLIENT_SECRET`
-
-> Scope the bot token to the minimal permissions your bot needs.
-
-### `.env` example
-
-```dotenv
-# Core
-USE_API=1
-API_BASE_URL=https://api.example.com
-LOG_LEVEL=INFO
-
-# Azure authentication (Service Principal)
-AZURE_TENANT_ID=
-AZURE_CLIENT_ID=
-AZURE_CLIENT_SECRET=
-AZURE_SUBSCRIPTION_ID=
-
-# LLM selection
-LLM_PROVIDER=openai
-
-# OpenAI
-OPENAI_KEY=
-OPENAI_MODEL=gpt-4o
-
-
-
-# Google Gemini
-GOOGLE_API_KEY=
-GEMINI_MODEL=gemini-1.5-pro
-
-```
-
----
-### Sample prompts:
-
-```create storage account mydata123 in westeurope resource group myapp-dev-rg
-create web app mywebapp in westeurope resource group myapp-dev-rg
-create sql server mysqlsrv with admin sqladmin
-link private dns zone privatelink.blob.core.windows.net to vnet rg/vnet-name
-create private endpoint pe1 in rg myapp-dev-rg vnet myapp-dev-vnet subnet default target <resource_id>
-```
----
-
-## Examples
-
-### Dry‑run provisioning
+### Minimal usage (dry-run first)
 
 ```python
 import asyncio
@@ -172,7 +60,7 @@ from app.tools.azure.tool import AzureProvision
 async def main():
     tool = AzureProvision()
     res = await tool.run(
-        action="create a web app myweb in westeurope using a basic plan",
+        action="create an aks cluster aks-dev in westeurope dns prefix aksdev",
         dry_run=True,
         env="dev",
         owner="team-devops",
@@ -183,66 +71,166 @@ async def main():
 asyncio.run(main())
 ```
 
-### Execute changes
+Switch to apply:
 
 ```python
 res = await tool.run(
-    action="create storage account mydata123 in westeurope resource group myapp-dev-rg",
+    action="create traffic manager profile tm-prod with performance routing",
     dry_run=False,
-    env="dev",
-    owner="team-devops",
+    env="prod",
+    owner="platform",
 )
 ```
 
 ---
 
-## Safety
+## Configuration
 
-* Dry‑run first, and keep dry‑run in CI
-* Secrets and tokens are redacted in errors where possible
-* Use least privilege; prefer Managed Identity and Key Vault over plain environment variables
-* Add guardrails such as region and SKU allowlists and an approve‑before‑apply workflow
+Configure via environment variables. A local .env file works well in development.
 
-> This tool makes changes in cloud environments. Validate policies, costs, and compliance before applying.
+### Azure authentication
+
+Use one of the following:
+
+**1) Azure CLI**
+
+```bash
+az login
+az account set --subscription <SUBSCRIPTION_ID>
+```
+
+**2) Service Principal**
+
+```dotenv
+AZURE_TENANT_ID=
+AZURE_CLIENT_ID=
+AZURE_CLIENT_SECRET=
+AZURE_SUBSCRIPTION_ID=
+```
+
+### LLM provider selection
+
+Set LLM_PROVIDER to choose a backend: openai (default), gemini, or ollama.
+
+**OpenAI**
+
+```dotenv
+LLM_PROVIDER=openai
+OPENAI_API_KEY=...
+# Optional when using gateways
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_MODEL=gpt-4o
+```
+
+**Google Gemini**
+
+```dotenv
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=...
+GEMINI_MODEL=gemini-1.5-pro
+```
+
+**Ollama**
+
+```dotenv
+LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=llama3.1
+```
 
 ---
 
-## Development
+## API server (FastAPI)
 
-### Quality gates
+Run the API locally:
 
 ```bash
-mypy src
+uvicorn app.api.main:app --reload --port 8000
+# Health check:  GET http://localhost:8000/healthz
+# Chat endpoint: POST http://localhost:8000/api/chat
+```
+
+### Docker for API
+
+```bash
+# from repo root
+docker build -t azure-copilot-api -f src/app/api/Dockerfile .
+docker run --rm -p 8000:8000 --env-file .env azure-copilot-api
+```
+
+---
+
+## Web UI (Next.js)
+
+The web UI lives in apps/web. Point it at your API base URL.
+
+```bash
+# Development
+cd apps/web
+npm install
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000 npm run dev
+```
+
+### Docker for Web
+
+```bash
+# from apps/web
+docker build -t azure-copilot-web --build-arg NEXT_PUBLIC_API_BASE_URL=http://localhost:8000 .
+docker run --rm -p 3000:3000 azure-copilot-web
+```
+
+---
+
+## Available Azure actions (initial set)
+
+- AKS: create or ensure clusters (node count, networking profile, workload identity, ACR pull role)
+- Traffic Manager: create or ensure profiles (routing method, TTL, monitor, endpoints)
+
+More actions will be added iteratively. Always start with dry_run=True in new environments.
+
+---
+
+## Architecture
+
+```
+src/
+└─ app/
+   ├─ api/                # FastAPI app (routes v1 and v2, CORS, health)
+   ├─ ai/                 # NLU mapping (intent to provisioning spec)
+   └─ tools/
+      ├─ azure/           # Azure clients, validators, and actions
+      │  └─ actions/      # aks.py, traffic_manager.py, ...
+      ├─ provision/       # Orchestrator and backends (SDK, Bicep plan)
+      └─ registry.py      # Tool registration and loader
+apps/
+└─ web/                   # Next.js UI (standalone build)
+```
+
+High-level flow:
+
+```
+User text -> NLU mapping -> Provision spec -> Orchestrator
+                 |                 |
+                 +---- Preview plan (dry-run) ----> Apply (SDK)
+```
+
+---
+
+## Quality & CI
+
+Local quality gates:
+
+```bash
 ruff check .
+mypy src
 pytest -q
 ```
 
-**Suggested pyproject.toml**
-
-```toml
-[tool.mypy]
-python_version = "3.12"
-warn_unused_ignores = true
-warn_return_any = true
-disallow_untyped_defs = true
-no_implicit_optional = true
-strict_optional = true
-
-[tool.ruff]
-line-length = 100
-target-version = "py311"
-select = ["E","F","I","UP","B","C4","PIE","PT","RUF"]
-ignore = ["E501"]
-```
-
-**Minimal GitHub Actions workflow**
+Suggested GitHub Actions (Python 3.12):
 
 ```yaml
 name: ci
-on:
-  push:
-  pull_request:
-
+on: [push, pull_request]
 jobs:
   qa:
     runs-on: ubuntu-latest
@@ -251,43 +239,31 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: install
-        run: |
+      - run: |
           python -m pip install -U pip
           pip install -e .
-          pip install -U types-PyYAML pytest ruff mypy
-      - name: ruff
-        run: ruff check .
-      - name: mypy
-        run: mypy src
-      - name: tests
-        run: pytest -q
+          pip install -U ruff mypy pytest
+      - run: ruff check .
+      - run: mypy src
+      - run: pytest -q
 ```
 
 ---
 
-## Architecture
+## Safety
 
-* `app/tools/azure/*` — Azure clients, validators, and actions
-* `app/tools/azure/tool.py` — natural‑language parser and action orchestration
-* `app/tools/provision/*` — provisioning orchestrator and backends (SDK, Terraform, Bicep)
-* `app/ai/*` — NLU intent parsing and tool registration
+- Prefer dry-run first and keep dry-run checks in CI for new actions
+- Use least privilege and prefer Managed Identity or Key Vault for secrets
+- Add guardrails such as region or SKU allowlists and require approval before apply in production
 
 ---
 
-## Roadmap
+## License
 
-* Retries with jitter and consistent error envelopes
-* Stronger idempotency with human‑readable diffs
-* Observability: structured logs, tracing, audit events
-* CLI with plan and apply and example playbooks
-* More actions such as Key Vault access policies, AKS node pools, app settings and secrets
-* Integration tests with mocked SDKs
-* Guardrails for destructive actions
-
+MIT (see LICENSE).
 
 ---
 
 ## Disclaimer
 
-Use at your own risk. Validate policies, costs, and compliance requirements in your own environment before applying changes.
+This tool can change cloud infrastructure. Validate costs, policies, and compliance for your environment before applying changes.

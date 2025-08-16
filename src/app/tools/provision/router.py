@@ -1,19 +1,42 @@
 from __future__ import annotations
 
+from typing import Literal, cast
 
-def pick_backend(product: str, env: str, requested: str) -> str:
-    if requested and requested != "auto":
-        if requested in ["sdk", "terraform", "bicep"]:
-            return requested
+backendname = Literal["sdk", "terraform", "bicep"]
+
+
+def _normalize_backend(value: str | None) -> backendname | None:
+    if value is None:
+        return None
+    v = value.strip().lower()
+    if v in ("sdk", "terraform", "bicep"):
+        return cast(backendname, v)
+    return None
+
+
+def pick_backend(env: str, requested: str | None, plan_only: bool) -> backendname:
+    e = (env or "").strip().lower()
+    r = _normalize_backend(requested)
+
+    if r == "sdk":
         return "sdk"
 
-    if env == "prod":
+    if r == "bicep":
+        if plan_only:
+            return "bicep"
+        return "sdk"
+
+    if r == "terraform":
+        if plan_only:
+            return "terraform"
+        return "sdk"
+
+    if e == "prod":
+        if plan_only:
+            return "terraform"
+        return "sdk"
+
+    if plan_only:
         return "terraform"
-
-    if product == "web_app":
-        return "sdk"
-
-    if product == "storage_account":
-        return "sdk"
 
     return "sdk"

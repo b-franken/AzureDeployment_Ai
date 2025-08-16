@@ -1,18 +1,18 @@
-# src/app/tools/provision/orchestrator.py
 from __future__ import annotations
 
 import json
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 from app.common.envs import ALLOWED_ENVS, Env
 from app.tools.base import Tool, ToolResult
 
 from .backends import BicepBackend, SdkBackend, TerraformBackend
+from .models import Backend as BackendLiteral
 from .models import ProvisionSpec
 from .router import pick_backend
 
 Product = Literal["web_app", "storage_account"]
-Backend = Literal["auto", "terraform", "bicep", "sdk"]
+BackendName = Literal["sdk", "terraform", "bicep"]
 
 
 def _to_str(obj: Any) -> str:
@@ -55,7 +55,7 @@ class ProvisionOrchestrator(Tool):
         self,
         product: Product,
         parameters: dict[str, Any],
-        backend: Backend = "auto",
+        backend: BackendLiteral = "auto",
         env: Env = "dev",
         plan_only: bool = True,
     ) -> ToolResult:
@@ -70,7 +70,11 @@ class ProvisionOrchestrator(Tool):
         except Exception as e:
             return _err("Invalid specification", str(e))
 
-        chosen = cast(Backend, pick_backend(spec["product"], spec["env"], spec["backend"]))
+        chosen: BackendName = pick_backend(
+            env=spec["env"],
+            requested=spec["backend"],
+            plan_only=spec["plan_only"],
+        )
 
         if chosen == "sdk":
             be: SdkBackend | TerraformBackend | BicepBackend = SdkBackend()

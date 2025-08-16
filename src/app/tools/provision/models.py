@@ -25,6 +25,7 @@ class StorageParameters(BaseModel):
     resource_group: str
     location: str
     name: str
+    sku: str | None = None
     access_tier: str = "Hot"
     tags: dict[str, str] = Field(default_factory=dict)
 

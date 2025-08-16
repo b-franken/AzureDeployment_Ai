@@ -1,12 +1,33 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, TypedDict, cast
+
+from .base import ApplyResult, Backend, PlanResult
 
 logger = logging.getLogger(__name__)
 
 
-class SdkBackend:
+class ActionArgs(TypedDict, total=False):
+    resource_group: str
+    location: str
+    tags: dict[str, str]
+    name: str
+    sku: str
+    linux: bool
+    runtime: str | None
+    plan: str
+    access_tier: str
+    dry_run: bool
+    force: bool
+
+
+class Action(TypedDict):
+    action: str
+    args: ActionArgs
+
+
+class SdkBackend(Backend):
     def __init__(self) -> None:
         self.azure = None
         self._ensure_azure_tool()
@@ -17,24 +38,29 @@ class SdkBackend:
                 from app.tools.azure.tool import AzureProvision
 
                 self.azure = AzureProvision()
-            except ImportError as e:
+            except Exception as e:
                 logger.warning(
                     "Failed to import AzureProvision; proceeding without Azure SDK. %s",
                     e,
                 )
                 self.azure = None
 
-    def _build_actions(self, spec: dict[str, Any]) -> list[dict[str, Any]]:
-        p = spec["parameters"]
-        product = spec["product"]
+    def _tags(self, spec: dict[str, Any]) -> dict[str, str]:
+        p = spec.get("parameters", {})
         env = spec.get("env", "dev")
         tags = dict(p.get("tags") or {})
         tags.setdefault("env", env)
+        return tags
 
-        actions = []
+    def _build_actions(self, spec: dict[str, Any]) -> list[Action]:
+        p = spec["parameters"]
+        product = spec["product"]
+        tags = self._tags(spec)
 
         if product == "web_app":
-            actions = [
+            plan_cfg = p["plan"]
+            runtime = p.get("runtime")
+            return [
                 {
                     "action": "create_rg",
                     "args": {
@@ -49,10 +75,10 @@ class SdkBackend:
                     "action": "create_plan",
                     "args": {
                         "resource_group": p["resource_group"],
-                        "name": p["plan"]["name"],
+                        "name": plan_cfg["name"],
                         "location": p["location"],
-                        "sku": p["plan"]["sku"],
-                        "linux": bool(p["plan"]["linux"]),
+                        "sku": plan_cfg["sku"],
+                        "linux": bool(plan_cfg.get("linux", True)),
                         "tags": tags,
                         "dry_run": False,
                         "force": False,
@@ -63,20 +89,20 @@ class SdkBackend:
                     "args": {
                         "resource_group": p["resource_group"],
                         "name": p["name"],
-                        "plan": p["plan"]["name"],
-                        "runtime": p.get("runtime"),
+                        "plan": plan_cfg["name"],
+                        "runtime": runtime,
                         "tags": tags,
                         "dry_run": False,
                         "force": False,
                     },
                 },
             ]
-        elif product == "storage_account":
-            sku = p.get("sku", "Standard_LRS")
-            if sku in ["Basic", "Standard", "Premium"]:
-                sku = "Standard_LRS"
 
-            actions = [
+        if product == "storage_account":
+            sku = p.get("sku", "Standard_LRS")
+            if sku in {"Basic", "Standard", "Premium"}:
+                sku = "Standard_LRS"
+            return [
                 {
                     "action": "create_rg",
                     "args": {
@@ -102,9 +128,9 @@ class SdkBackend:
                 },
             ]
 
-        return actions
+        return []
 
-    async def plan(self, spec: dict[str, Any]) -> tuple[bool, str]:
+    async def plan(self, spec: dict[str, Any]) -> PlanResult:
         try:
             actions = self._build_actions(spec)
             if not actions:
@@ -113,7 +139,7 @@ class SdkBackend:
         except Exception as e:
             return False, str(e)
 
-    async def apply(self, spec: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
+    async def apply(self, spec: dict[str, Any]) -> ApplyResult:
         if self.azure is None:
             return False, {"message": "Azure SDK not initialized"}
 
@@ -147,7 +173,7 @@ class SdkBackend:
 
         return True, results
 
-    def _summarize_plan(self, title: str, items: list[dict[str, Any]]) -> str:
+    def _summarize_plan(self, title: str, items: list[Action]) -> str:
         lines = [title, ""]
         for i, it in enumerate(items, 1):
             action = it.get("action", "unknown")
@@ -156,7 +182,7 @@ class SdkBackend:
             if "resource_group" in args:
                 key_params.append(f"rg={args['resource_group']}")
             if "name" in args:
-                key_params.append(f"name={args['name']}")
+                key_params.append(f"name={cast(dict[str, Any], args)['name']}")
             if "location" in args:
                 key_params.append(f"location={args['location']}")
             lines.append(f"{i}. {action} ({', '.join(key_params)})")

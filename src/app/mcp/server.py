@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from collections.abc import AsyncIterator
 from datetime import datetime, timedelta
 from typing import Any, Literal, Protocol, cast
 
-from azure.identity import AzureCliCredential, ChainedTokenCredential, ManagedIdentityCredential
+from azure.identity import (
+    AzureCliCredential,
+    ChainedTokenCredential,
+    ManagedIdentityCredential,
+)
 from azure.mgmt.resourcegraph import ResourceGraphClient
 from azure.mgmt.resourcegraph.models import QueryRequest, QueryRequestOptions
 from mcp.server.fastmcp import Context, FastMCP
@@ -190,7 +195,8 @@ class MCPServer:
             return result
 
         @self.mcp.tool(
-            name="stream_logs", description="Stream deployment or execution logs in real-time"
+            name="stream_logs",
+            description="Stream deployment or execution logs in real-time",
         )
         async def stream_logs(
             deployment_id: str,
@@ -400,22 +406,172 @@ Optimization strategies:
         raw = os.getenv("AZURE_SUBSCRIPTIONS", "")
         return [s.strip() for s in raw.split(",") if s.strip()]
 
-    async def _check_naming_conventions(self, request: DeploymentRequest) -> dict[str, Any]:
-        return {"passed": True, "details": "Naming conventions validated"}
+    async def _check_naming_conventions(
+        self,
+        request: DeploymentRequest,
+    ) -> dict[str, Any]:
+        pattern = re.compile(r"^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])?$")
+        invalid: list[dict[str, str]] = []
+        seen: set[str] = set()
 
-    async def _check_security_policies(self, request: DeploymentRequest) -> dict[str, Any]:
-        return {"passed": True, "details": "Security policies validated"}
+        rg = getattr(request, "resource_group", "") or ""
+        if not rg or len(rg) > 90:
+            invalid.append({"scope": "resource_group", "name": rg or ""})
 
-    async def _check_network_connectivity(self, request: DeploymentRequest) -> dict[str, Any]:
-        return {"passed": True, "details": "Network connectivity verified"}
+        for r in request.resources:
+            name = str(r.get("name", "")).strip()
+            rtype = str(r.get("type", "")).strip()
+            if not name or not rtype:
+                invalid.append({"scope": "resource", "name": name or "", "type": rtype or ""})
+                continue
+            if name in seen:
+                invalid.append({"scope": "duplicate", "name": name, "type": rtype})
+            seen.add(name)
+            if not pattern.match(name):
+                invalid.append({"scope": "format", "name": name, "type": rtype})
 
-    async def _check_resource_quotas(self, request: DeploymentRequest) -> dict[str, Any]:
-        return {"passed": True, "details": "Resource quotas available"}
+        passed = len(invalid) == 0
+        return {
+            "passed": passed,
+            "details": {"invalid": invalid, "checked": len(request.resources)},
+        }
 
-    async def _estimate_deployment_cost(self, request: DeploymentRequest) -> dict[str, Any]:
-        return {"monthly_cost": 150.0, "currency": "USD"}
+    async def _check_security_policies(
+        self,
+        request: DeploymentRequest,
+    ) -> dict[str, Any]:
+        required_tags = {"owner", "environment"}
+        missing_tags: list[str] = []
+        enforced: list[dict[str, Any]] = []
+        tags = getattr(request, "tags", {}) or {}
+        for t in required_tags:
+            if t not in tags:
+                missing_tags.append(t)
 
-    async def _get_deployment_recommendations(self, request: DeploymentRequest) -> list[str]:
+        for r in request.resources:
+            rtype = str(r.get("type", "")).lower()
+            props = dict(r.get("properties", {}))
+            name = str(r.get("name", ""))
+
+            if rtype == "web_app":
+                https_only = bool(props.get("https_only", True))
+                tls = str(props.get("minimum_tls_version", "1.2"))
+                if not https_only:
+                    enforced.append({"name": name, "policy": "https_only", "value": True})
+                if tls not in {"1.2", "1.3"}:
+                    enforced.append(
+                        {
+                            "name": name,
+                            "policy": "minimum_tls_version",
+                            "value": "1.2",
+                        }
+                    )
+
+            if rtype == "storage_account":
+                allow_public = bool(props.get("allow_blob_public_access", False))
+                if allow_public:
+                    enforced.append(
+                        {
+                            "name": name,
+                            "policy": "allow_blob_public_access",
+                            "value": False,
+                        }
+                    )
+
+        passed = not missing_tags and not enforced
+        return {
+            "passed": passed,
+            "details": {"missing_tags": missing_tags, "enforced": enforced},
+        }
+
+    async def _check_network_connectivity(
+        self,
+        request: DeploymentRequest,
+    ) -> dict[str, Any]:
+        issues: list[dict[str, str]] = []
+
+        for r in request.resources:
+            name = str(r.get("name", ""))
+            props = dict(r.get("properties", {}))
+            subnet = str(props.get("subnet_id", "")).strip()
+            vnet = str(props.get("vnet_id", "")).strip()
+
+            if subnet:
+                if "/subnets/" not in subnet:
+                    issues.append({"name": name, "issue": "invalid_subnet_ref"})
+                if not subnet.startswith("/subscriptions/"):
+                    issues.append({"name": name, "issue": "subnet_not_fully_qualified"})
+            if vnet:
+                if "/virtualNetworks/" not in vnet:
+                    issues.append({"name": name, "issue": "invalid_vnet_ref"})
+                if not vnet.startswith("/subscriptions/"):
+                    issues.append({"name": name, "issue": "vnet_not_fully_qualified"})
+
+        return {"passed": len(issues) == 0, "details": {"issues": issues}}
+
+    async def _check_resource_quotas(
+        self,
+        request: DeploymentRequest,
+    ) -> dict[str, Any]:
+        env = str(getattr(request, "environment", "dev")).lower()
+        limits: dict[str, dict[str, int]] = {
+            "dev": {"storage_account": 10, "web_app": 10, "app_service_plan": 10},
+            "test": {"storage_account": 20, "web_app": 20, "app_service_plan": 20},
+            "staging": {
+                "storage_account": 30,
+                "web_app": 30,
+                "app_service_plan": 30,
+            },
+            "prod": {"storage_account": 100, "web_app": 60, "app_service_plan": 60},
+        }
+        limit = limits.get(env, limits["dev"])
+        counts: dict[str, int] = {}
+        for r in request.resources:
+            rtype = str(r.get("type", "")).lower()
+            counts[rtype] = counts.get(rtype, 0) + 1
+
+        over: list[dict[str, Any]] = []
+        for rtype, cnt in counts.items():
+            if rtype in limit and cnt > limit[rtype]:
+                over.append({"type": rtype, "count": cnt, "limit": limit[rtype]})
+
+        return {"passed": len(over) == 0, "details": {"usage": counts, "exceeded": over}}
+
+    async def _estimate_deployment_cost(
+        self,
+        request: DeploymentRequest,
+    ) -> dict[str, Any]:
+        prices: dict[str, Any] = {
+            "app_service_plan": {"B1": 13.0, "P1V3": 147.0},
+            "storage_account": {"standard_lrs": 5.0, "standard_grs": 10.0},
+            "web_app": {"default": 0.0},
+        }
+        total = 0.0
+        breakdown: list[dict[str, Any]] = []
+        for r in request.resources:
+            rtype = str(r.get("type", "")).lower()
+            name = str(r.get("name", ""))
+
+            if rtype == "app_service_plan":
+                sku = str(r.get("sku", "B1")).upper()
+                cost = float(prices["app_service_plan"].get(sku, 13.0))
+            elif rtype == "storage_account":
+                sku = str(r.get("sku", "Standard_LRS")).lower()
+                cost = float(prices["storage_account"].get(sku, 5.0))
+            elif rtype == "web_app":
+                cost = float(prices["web_app"]["default"])
+            else:
+                cost = 0.0
+
+            total += cost
+            breakdown.append({"name": name, "type": rtype, "monthly_cost": cost})
+
+        return {"monthly_cost": total, "currency": "USD", "items": breakdown}
+
+    async def _get_deployment_recommendations(
+        self,
+        request: DeploymentRequest,
+    ) -> list[str]:
         return [
             "Enable auto-scaling for production workloads",
             "Configure backup retention policy",
@@ -427,26 +583,108 @@ Optimization strategies:
 
         return str(uuid.uuid4())
 
-    async def _init_deployment(self, request: DeploymentRequest) -> dict[str, Any]:
-        return {"initialized": True}
+    async def _init_deployment(
+        self,
+        request: DeploymentRequest,
+    ) -> dict[str, Any]:
+        required = ["subscription_id", "resource_group", "location", "resources"]
+        for key in required:
+            if not getattr(request, key, None):
+                raise ValueError(f"missing_required_field:{key}")
 
-    async def _create_resources(self, request: DeploymentRequest) -> dict[str, Any]:
-        return {"resources_created": len(request.resources)}
+        names: set[str] = set()
+        for r in request.resources:
+            name = str(r.get("name", "")).strip()
+            rtype = str(r.get("type", "")).strip()
+            if not name or not rtype:
+                raise ValueError("invalid_resource_definition")
+            if name in names:
+                raise ValueError(f"duplicate_resource_name:{name}")
+            names.add(name)
 
-    async def _configure_network(self, request: DeploymentRequest) -> dict[str, Any]:
-        return {"network_configured": True}
+        return {"initialized": True, "resource_count": len(request.resources)}
 
-    async def _apply_security(self, request: DeploymentRequest) -> dict[str, Any]:
-        return {"security_applied": True}
+    async def _create_resources(
+        self,
+        request: DeploymentRequest,
+    ) -> dict[str, Any]:
+        plan: list[dict[str, Any]] = []
+        for r in request.resources:
+            item: dict[str, Any] = {
+                "action": "create",
+                "type": str(r.get("type", "")).lower(),
+                "name": str(r.get("name", "")),
+                "location": str(getattr(request, "location", "westeurope")),
+                "depends_on": list(r.get("depends_on", [])),
+            }
+            plan.append(item)
+        if not plan:
+            raise ValueError("empty_plan")
+        return {"resources_planned": len(plan), "plan": plan}
 
-    async def _enable_monitoring(self, request: DeploymentRequest) -> dict[str, Any]:
-        return {"monitoring_enabled": True}
+    async def _configure_network(
+        self,
+        request: DeploymentRequest,
+    ) -> dict[str, Any]:
+        configured = 0
+        checks: list[dict[str, str]] = []
+        for r in request.resources:
+            props = dict(r.get("properties", {}))
+            subnet = str(props.get("subnet_id", "")).strip()
+            if subnet:
+                if "/subnets/" in subnet and subnet.startswith("/subscriptions/"):
+                    configured += 1
+                else:
+                    checks.append({"name": str(r.get("name", "")), "issue": "invalid_subnet"})
+        return {"network_configured": configured, "issues": checks}
 
-    async def _run_tests(self, request: DeploymentRequest) -> dict[str, Any]:
-        return {"tests_passed": True}
+    async def _apply_security(
+        self,
+        request: DeploymentRequest,
+    ) -> dict[str, Any]:
+        applied: list[dict[str, Any]] = []
+        for r in request.resources:
+            rtype = str(r.get("type", "")).lower()
+            name = str(r.get("name", ""))
+            if rtype == "web_app":
+                applied.append({"name": name, "setting": "https_only", "value": True})
+                applied.append({"name": name, "setting": "minimum_tls_version", "value": "1.2"})
+            if rtype == "storage_account":
+                applied.append(
+                    {
+                        "name": name,
+                        "setting": "allow_blob_public_access",
+                        "value": False,
+                    }
+                )
+        return {"security_applied": True, "changes": applied}
 
-    async def _finalize_deployment(self, request: DeploymentRequest) -> dict[str, Any]:
-        return {"finalized": True}
+    async def _enable_monitoring(
+        self,
+        request: DeploymentRequest,
+    ) -> dict[str, Any]:
+        env = str(getattr(request, "environment", "dev")).lower()
+        enable_backup = env == "prod"
+        return {"monitoring_enabled": True, "backup_enabled": enable_backup}
+
+    async def _run_tests(
+        self,
+        request: DeploymentRequest,
+    ) -> dict[str, Any]:
+        failures: list[str] = []
+        for r in request.resources:
+            if not r.get("name"):
+                failures.append("missing_name")
+            if not r.get("type"):
+                failures.append("missing_type")
+        return {"tests_passed": len(failures) == 0, "failures": failures}
+
+    async def _finalize_deployment(
+        self,
+        request: DeploymentRequest,
+    ) -> dict[str, Any]:
+        ts = datetime.utcnow().isoformat()
+        return {"finalized": True, "timestamp": ts}
 
     async def _generate_deployment_summary(
         self,

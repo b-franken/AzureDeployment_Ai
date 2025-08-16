@@ -24,7 +24,7 @@ class AzureCosts(Tool):
             "resource": {"type": "object"},
             "level": {
                 "type": "string",
-                "enum": ["aggressive", "balanced, conservative"],
+                "enum": ["aggressive", "balanced", "conservative"],
             },
             "format": {"type": "string", "enum": ["json", "csv"]},
         },

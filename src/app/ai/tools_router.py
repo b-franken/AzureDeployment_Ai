@@ -4,7 +4,6 @@ import json
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Literal
 
 from app.ai.generator import generate_response
 from app.ai.llm.factory import get_provider_and_model
@@ -12,6 +11,7 @@ from app.ai.llm.openai_provider import OpenAIProvider
 from app.ai.nlu import maybe_map_provision
 from app.ai.nlu.embeddings_classifier import EmbeddingsClassifierService
 from app.ai.tools_definitions import build_openai_tools
+from app.common.envs import Env
 from app.platform.audit.logger import (
     AuditEvent,
     AuditEventType,
@@ -36,7 +36,7 @@ class ToolExecutionContext:
     user_id: str
     subscription_id: str | None = None
     resource_group: str | None = None
-    environment: Literal["dev", "tst", "acc", "prod"] = "dev"
+    environment: Env = "dev"
     correlation_id: str | None = None
     audit_enabled: bool = True
     cost_limit: int | None = None

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import inspect
 import json
 import re
 from typing import Any
 
+from app.common.envs import ALLOWED_ENVS, normalize_env
 from app.tools.base import Tool, ToolResult
 
 from .actions.registry import action_names_with_aliases, resolve_action
@@ -535,7 +535,7 @@ class AzureProvision(Tool):
             "sql_admin_user": {"type": "string"},
             "sql_admin_password": {"type": "string"},
             "force": {"type": "boolean", "default": False},
-            "env": {"type": "string", "enum": ["dev", "test", "staging", "prod"]},
+            "env": {"type": "string", "enum": list(ALLOWED_ENVS)},
             "owner": {"type": "string"},
         },
         "required": ["action"],
@@ -545,9 +545,15 @@ class AzureProvision(Tool):
     async def run(self, action: str, **kwargs: Any) -> ToolResult:
         try:
             params = dict(kwargs)
+            env_in = str(params.get("env") or params.get("environment") or "dev")
+            try:
+                canon_env = normalize_env(env_in)
+            except Exception:
+                canon_env = "dev"
+            params["env"] = canon_env
+            params["environment"] = canon_env
 
             canonical_action = _resolve_action_intelligently(action, params)
-
             if not canonical_action:
                 available = list(action_names_with_aliases())[:10]
                 suggestions = _provide_helpful_suggestions(action)
@@ -583,15 +589,9 @@ class AzureProvision(Tool):
 
             _, action_func = resolve_action(canonical_action)
             if not action_func:
-                return _err(
-                    "Action not implemented",
-                    f"Action {canonical_action} is not available",
-                )
+                return _err("Action not implemented", f"Action {canonical_action} is not available")
 
-            sig = inspect.signature(action_func)
-            allowed = {k: v for k, v in params.items() if k in sig.parameters}
-
-            status, payload = await action_func(clients=clients, tags=tags, **allowed)
+            status, payload = await action_func(clients=clients, tags=tags, **params)
 
             if status == "plan":
                 return _dry(f"{canonical_action} plan", payload)

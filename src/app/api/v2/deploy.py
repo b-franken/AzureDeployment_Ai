@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from app.ai.tools_router import ToolExecutionContext, maybe_call_tool
 from app.api.v2.auth import require_role, token_data
+from app.common.envs import normalize_env
 
 router = APIRouter()
 deploy_role_dependency = require_role("deploy")
@@ -36,15 +37,12 @@ async def deploy(
             detail="admin required for production",
         )
     start = time.time()
+    canon_env = normalize_env(req.environment)
     ctx = ToolExecutionContext(
         user_id=td.user_id,
         subscription_id=req.subscription_id,
         resource_group=req.resource_group,
-        environment=(
-            "prod"
-            if req.environment == "production"
-            else "dev" if req.environment == "development" else "acc"
-        ),
+        environment=canon_env,
         correlation_id=req.correlation_id,
         cost_limit=int(req.cost_limit) if req.cost_limit is not None else None,
         dry_run=req.dry_run,
@@ -53,7 +51,7 @@ async def deploy(
         user_input=req.request,
         memory=[
             {"role": "system", "content": f"subscription:{req.subscription_id}"},
-            {"role": "system", "content": f"environment:{req.environment}"},
+            {"role": "system", "content": f"environment:{canon_env}"},
             {"role": "system", "content": f"dry_run:{req.dry_run}"},
         ],
         provider="openai",
@@ -67,7 +65,7 @@ async def deploy(
     took = time.time() - start
     return {
         "status": "accepted",
-        "environment": req.environment,
+        "environment": canon_env,
         "dry_run": req.dry_run,
         "details": {
             "request": req.request,

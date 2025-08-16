@@ -1,8 +1,10 @@
+# src/app/tools/provision/orchestrator.py
 from __future__ import annotations
 
 import json
 from typing import Any, Literal, cast
 
+from app.common.envs import ALLOWED_ENVS, Env
 from app.tools.base import Tool, ToolResult
 
 from .backends import BicepBackend, SdkBackend, TerraformBackend
@@ -11,7 +13,6 @@ from .router import pick_backend
 
 Product = Literal["web_app", "storage_account"]
 Backend = Literal["auto", "terraform", "bicep", "sdk"]
-Env = Literal["dev", "tst", "acc", "prod"]
 
 
 def _to_str(obj: Any) -> str:
@@ -40,7 +41,7 @@ class ProvisionOrchestrator(Tool):
             },
             "env": {
                 "type": "string",
-                "enum": ["dev", "tst", "acc", "prod"],
+                "enum": list(ALLOWED_ENVS),
                 "default": "dev",
             },
             "plan_only": {"type": "boolean", "default": True},

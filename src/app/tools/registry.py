@@ -46,6 +46,7 @@ def ensure_tools_loaded() -> None:
     registry: list[tuple[str, str]] = [
         ("app.tools.azure.tool", "AzureProvision"),
         ("app.tools.provision.orchestrator", "ProvisionOrchestrator"),
+        ("app.tools.finops.cost_tool", "AzureCosts"),
     ]
     for module_path, class_name in registry:
         tool = _import_tool(module_path, class_name)

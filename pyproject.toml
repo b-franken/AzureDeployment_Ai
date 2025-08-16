@@ -60,7 +60,8 @@ dependencies = [
   "azure-mgmt-frontdoor",
   "azure-mgmt-trafficmanager",
   "azure-mgmt-recoveryservicesbackup",
-  "azure-mgmt-recoveryservices"
+  "azure-mgmt-recoveryservices",
+  "mcp.server"
 ]
 
 [project.urls]

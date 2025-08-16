@@ -62,7 +62,8 @@ dependencies = [
   "azure-mgmt-recoveryservicesbackup",
   "azure-mgmt-recoveryservices",
   "mcp.server",
-  "azure-mgmt-resourcegraph"
+  "azure-mgmt-resourcegraph",
+  "azure-mgmt-subscription",
 ]
 
 [project.urls]

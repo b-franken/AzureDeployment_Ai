@@ -36,6 +36,7 @@ azure.mgmt.trafficmanager
 azure.mgmt.recoveryservicesbackup
 azure.mgmt.recoveryservices
 azure.mgmt.resourcegraph
+azure.mgmt.subscription
 httpx
 discord.py
 streamlit

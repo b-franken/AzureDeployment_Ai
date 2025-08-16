@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 import re
 from typing import Any
@@ -587,7 +588,10 @@ class AzureProvision(Tool):
                     f"Action {canonical_action} is not available",
                 )
 
-            status, payload = await action_func(clients=clients, tags=tags, **params)
+            sig = inspect.signature(action_func)
+            allowed = {k: v for k, v in params.items() if k in sig.parameters}
+
+            status, payload = await action_func(clients=clients, tags=tags, **allowed)
 
             if status == "plan":
                 return _dry(f"{canonical_action} plan", payload)

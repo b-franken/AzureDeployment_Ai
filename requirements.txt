@@ -35,6 +35,7 @@ azure-mgmt-frontdoor
 azure.mgmt.trafficmanager
 azure.mgmt.recoveryservicesbackup
 azure.mgmt.recoveryservices
+azure.mgmt.resourcegraph
 httpx
 discord.py
 streamlit

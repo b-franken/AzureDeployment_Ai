@@ -61,11 +61,12 @@ dependencies = [
   "azure-mgmt-trafficmanager",
   "azure-mgmt-recoveryservicesbackup",
   "azure-mgmt-recoveryservices",
-  "mcp.server"
+  "mcp.server",
+  "azure-mgmt-resourcegraph"
 ]
 
 [project.urls]
-Repository = "https://github.com/b-franken/DevOps_AI"
+Repository = "https://github.com/b-franken/AzureDeployment_Ai"
 
 [project.optional-dependencies]
 dev = [

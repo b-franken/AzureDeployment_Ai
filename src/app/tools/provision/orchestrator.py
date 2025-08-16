@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import importlib
 import json
 from typing import Any, Literal
 
 from app.common.envs import ALLOWED_ENVS, Env
 from app.tools.base import Tool, ToolResult
 
-from .backends import BicepBackend, SdkBackend, TerraformBackend
+from .backends import BicepBackend as LegacyBicepBackend
+from .backends import SdkBackend, TerraformBackend
 from .models import Backend as BackendLiteral
 from .models import ProvisionSpec
 from .router import pick_backend
@@ -16,6 +18,11 @@ BackendName = Literal["sdk", "terraform", "bicep"]
 
 
 def _to_str(obj: Any) -> str:
+    if isinstance(obj, bytes):
+        try:
+            return obj.decode("utf-8", errors="replace")
+        except Exception:
+            return str(obj)
     return obj if isinstance(obj, str) else json.dumps(obj, default=str, ensure_ascii=False)
 
 
@@ -25,6 +32,21 @@ def _ok(summary: str, obj: Any) -> ToolResult:
 
 def _err(summary: str, obj: Any) -> ToolResult:
     return {"ok": False, "summary": summary, "output": _to_str(obj)}
+
+
+def _load_avm_backend_cls() -> Any | None:
+    try:
+        mod = importlib.import_module(".backends.avm_bicep", package=__package__)
+        return mod.BicepAvmBackend
+    except Exception:
+        return None
+
+
+def _choose_bicep_backend() -> tuple[Literal["avm", "legacy"], Any]:
+    avm_cls = _load_avm_backend_cls()
+    if avm_cls is not None:
+        return "avm", avm_cls()
+    return "legacy", LegacyBicepBackend()
 
 
 class ProvisionOrchestrator(Tool):
@@ -76,30 +98,56 @@ class ProvisionOrchestrator(Tool):
             plan_only=spec["plan_only"],
         )
 
+        be: Any
         if chosen == "sdk":
-            be: SdkBackend | TerraformBackend | BicepBackend = SdkBackend()
+            be = SdkBackend()
+            chosen_label = "sdk"
         elif chosen == "terraform":
             be = TerraformBackend()
+            chosen_label = "terraform"
         elif chosen == "bicep":
-            be = BicepBackend()
+            bicep_mode, be = _choose_bicep_backend()
+            chosen_label = "bicep-avm" if bicep_mode == "avm" else "bicep-legacy"
+            if not plan_only and bicep_mode == "legacy":
+                return _err(
+                    "bicep apply is not supported with the legacy backend",
+                    "AVM-based Bicep backend is not available. Enable plan_only or choose sdk.",
+                )
         else:
             return _err("Unknown backend", chosen)
 
         ok, plan_text = await be.plan(spec)
         if not ok:
-            return _err(f"{chosen} plan failed", plan_text)
+            return _err(f"{chosen_label} plan failed", plan_text)
 
         if plan_only:
-            return _ok(f"{chosen} plan", plan_text)
+            return _ok(
+                f"{chosen_label} plan",
+                {
+                    "product": spec["product"],
+                    "env": spec["env"],
+                    "backend": chosen_label,
+                    "plan": plan_text,
+                },
+            )
 
         if isinstance(be, TerraformBackend):
             return _err(
                 "terraform apply is not supported",
-                "enable plan_only or choose sdk or bicep",
+                "Enable plan_only or choose sdk or bicep.",
             )
 
         ok, outputs = await be.apply(spec)
         if not ok:
-            return _err(f"{chosen} apply failed", outputs)
+            return _err(f"{chosen_label} apply failed", outputs)
 
-        return _ok(f"{chosen} applied", outputs)
+        return _ok(
+            f"{chosen_label} applied",
+            {
+                "product": spec["product"],
+                "env": spec["env"],
+                "backend": chosen_label,
+                "plan": plan_text,
+                "apply": outputs,
+            },
+        )

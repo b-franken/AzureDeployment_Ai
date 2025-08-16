@@ -57,7 +57,10 @@ dependencies = [
   "azure-mgmt-datafactory",
   "azure-mgmt-synapse",
   "azure-mgmt-cognitiveservices",
-  "azure-mgmt-frontdoor"
+  "azure-mgmt-frontdoor",
+  "azure-mgmt-trafficmanager",
+  "azure-mgmt-recoveryservicesbackup",
+  "azure-mgmt-recoveryservices"
 ]
 
 [project.urls]

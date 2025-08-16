@@ -4,10 +4,10 @@ import json
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import NotRequired, Protocol, TypedDict, runtime_checkable
 
 from app.ai.generator import generate_response
 from app.ai.llm.factory import get_provider_and_model
-from app.ai.llm.openai_provider import OpenAIProvider
 from app.ai.nlu import maybe_map_provision
 from app.ai.nlu.embeddings_classifier import EmbeddingsClassifierService
 from app.ai.tools_definitions import build_openai_tools
@@ -29,6 +29,30 @@ _CODEFENCE_JSON_RE = re.compile(r"(?:```(?:json)?\s*)?(\{.*?\})(?:\s*```)?\s*", 
 DIRECT_TOOL_RE = re.compile(
     r"^\s*tool\s*:\s*([a-z0-9-]+)\s*(\{.*\})\s*$", re.IGNORECASE | re.DOTALL
 )
+
+
+class ToolFunction(TypedDict, total=False):
+    name: str
+    arguments: object
+
+
+class ToolCall(TypedDict, total=False):
+    id: NotRequired[str]
+    type: NotRequired[str]
+    function: ToolFunction
+
+
+class Message(TypedDict, total=False):
+    content: str
+    tool_calls: list[ToolCall]
+
+
+class Choice(TypedDict):
+    message: Message
+
+
+class ChatResponse(TypedDict, total=False):
+    choices: list[Choice]
 
 
 @dataclass
@@ -213,6 +237,19 @@ async def _run_tool(
     return result
 
 
+@runtime_checkable
+class SupportsChatRaw(Protocol):
+    async def chat_raw(
+        self,
+        model: str,
+        messages: list[dict[str, object]],
+        tools: list[dict[str, object]] | None = None,
+        tool_choice: str | None = "auto",
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ) -> ChatResponse: ...
+
+
 async def _openai_tools_orchestrator(
     user_input: str,
     memory: Sequence[Mapping[str, str]] | None,
@@ -227,26 +264,30 @@ async def _openai_tools_orchestrator(
     tools = build_openai_tools()
     if not tools:
         return None
-    _, selected_model = get_provider_and_model("openai", model)
+    llm, selected_model = get_provider_and_model(provider, model)
+    if not isinstance(llm, SupportsChatRaw):
+        return None
     messages: list[dict[str, object]] = [
         {
             "role": "system",
             "content": (
-                "You are a DevOps assistant. an expert in infrastructure,"
-                " CI/CD, Kubernetes, Terraform, cloud platforms, monitoring, and automation."
-                " Provide accurate, concise, production-ready guidance."
+                "You are a DevOps assistant. an expert in infrastructure, "
+                "CI/CD, Kubernetes, Terraform, cloud platforms, monitoring, and automation. "
+                "Provide accurate, concise, production-ready guidance."
             ),
         }
     ]
     if memory:
         messages.extend([{"role": m["role"], "content": m["content"]} for m in memory])
     messages.append({"role": "user", "content": user_input})
-    openai = OpenAIProvider()
     if not allow_chaining:
-        first = await openai.chat_raw(
+        first = await llm.chat_raw(
             model=selected_model, messages=messages, tools=tools, tool_choice="auto"
         )
-        msg = (first.get("choices") or [{}])[0].get("message") or {}
+        choices = first.get("choices", [])
+        if not choices:
+            return None
+        msg = choices[0]["message"]
         tool_calls = msg.get("tool_calls") or []
         if not tool_calls:
             content = (msg.get("content") or "").strip()
@@ -264,10 +305,13 @@ async def _openai_tools_orchestrator(
         return f"{tname} • {result.get('summary', '')}\n\njson\n{body}\n"
     steps = 0
     while steps < max_chain_steps and _within_budget(messages, token_budget):
-        resp = await openai.chat_raw(
+        resp = await llm.chat_raw(
             model=selected_model, messages=messages, tools=tools, tool_choice="auto"
         )
-        msg = (resp.get("choices") or [{}])[0].get("message") or {}
+        choices2 = resp.get("choices", [])
+        if not choices2:
+            return None
+        msg = choices2[0]["message"]
         tool_calls = msg.get("tool_calls") or []
         if not tool_calls:
             content = (msg.get("content") or "").strip()
@@ -297,11 +341,15 @@ async def _openai_tools_orchestrator(
                 }
             )
             steps += 1
-    final = await openai.chat_raw(
+    final = await llm.chat_raw(
         model=selected_model, messages=messages, tools=tools, tool_choice="none"
     )
-    content = (final.get("choices") or [{}])[0].get("message", {}).get("content") or ""
-    return content.strip() or None
+    choicesf = final.get("choices", [])
+    if not choicesf:
+        return None
+    msgf = choicesf[0]["message"]
+    content = (msgf.get("content") or "").strip()
+    return content or None
 
 
 async def _run_tool_and_explain(

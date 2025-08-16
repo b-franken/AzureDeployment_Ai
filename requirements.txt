@@ -58,3 +58,5 @@ PyJWT
 asyncpg
 redis
 mcp.server  
+structlog
+prometheus_client

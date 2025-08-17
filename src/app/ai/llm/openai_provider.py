@@ -1,70 +1,74 @@
 from __future__ import annotations
 
+from typing import Any, cast
+
 import httpx
+from openai import AsyncOpenAI
+from openai.types.chat import ChatCompletionMessageParam
 
 from app.ai.llm.base import LLMProvider
-from app.ai.llm.utils import retry_async
 from app.ai.types import Message
-from app.config import (
-    OPENAI_API_KEY,
-    OPENAI_BASE_URL,
-    REQUEST_TIMEOUT_SECONDS,
-    RETRY_BACKOFF_SECONDS,
-    RETRY_MAX_ATTEMPTS,
-)
+from app.core.config import get_settings
+from app.core.exceptions import ExternalServiceException, retry_on_error
 
 
 class OpenAIProvider(LLMProvider):
     def __init__(self) -> None:
-        if not OPENAI_API_KEY:
-            raise RuntimeError("OPENAI not configured")
-        self._headers = {
-            "Authorization": f"Bearer {OPENAI_API_KEY}",
-            "Content-Type": "application/json",
-        }
-        self._base = OPENAI_BASE_URL.rstrip("/")
+        settings = get_settings()
+        api_key = (
+            settings.llm.openai_api_key.get_secret_value() if settings.llm.openai_api_key else None
+        )
+        if not api_key:
+            raise RuntimeError("OPENAI_API_KEY not configured")
+        self._client = AsyncOpenAI(
+            api_key=api_key,
+            base_url=settings.llm.openai_api_base,
+            max_retries=3,
+            timeout=httpx.Timeout(60.0, connect=5.0),
+        )
+        self._default_model = settings.llm.openai_model
 
+    @retry_on_error(max_retries=3, delay=1.0)
     async def chat(self, model: str, messages: list[Message]) -> str:
-        async def _call() -> str:
-            async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
-                r = await client.post(
-                    f"{self._base}/chat/completions",
-                    headers=self._headers,
-                    json={"model": model, "messages": messages},
-                )
-                r.raise_for_status()
-                data = r.json()
-                return data["choices"][0]["message"]["content"].strip()
+        try:
+            formatted = cast(
+                list[ChatCompletionMessageParam],
+                [{"role": str(m["role"]), "content": str(m["content"])} for m in messages],
+            )
+            resp = await self._client.chat.completions.create(
+                model=model or self._default_model,
+                messages=formatted,
+            )
+            content = resp.choices[0].message.content or ""
+            return content.strip()
+        except Exception as err:
+            raise ExternalServiceException(f"OpenAI API error: {err}", retryable=True) from err
 
-        return await retry_async(_call, RETRY_MAX_ATTEMPTS, RETRY_BACKOFF_SECONDS)
-
+    @retry_on_error(max_retries=3, delay=1.0)
     async def chat_raw(
         self,
         model: str,
-        messages: list[dict[str, object]],
-        tools: list[dict[str, object]] | None = None,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
         tool_choice: str | None = "auto",
         temperature: float | None = None,
         max_tokens: int | None = None,
-    ) -> dict[str, object]:
-        payload: dict[str, object] = {"model": model, "messages": messages}
-        if tools:
-            payload["tools"] = tools
-            if tool_choice is not None:
-                payload["tool_choice"] = tool_choice
-        if temperature is not None:
-            payload["temperature"] = temperature
-        if max_tokens is not None:
-            payload["max_tokens"] = max_tokens
-
-        async def _call() -> dict[str, object]:
-            async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
-                r = await client.post(
-                    f"{self._base}/chat/completions",
-                    headers=self._headers,
-                    json=payload,
-                )
-                r.raise_for_status()
-                return r.json()
-
-        return await retry_async(_call, RETRY_MAX_ATTEMPTS, RETRY_BACKOFF_SECONDS)
+    ) -> dict[str, Any]:
+        try:
+            msg_params = cast(list[ChatCompletionMessageParam], messages)
+            kwargs: dict[str, Any] = {
+                "model": model or self._default_model,
+                "messages": msg_params,
+            }
+            if tools:
+                kwargs["tools"] = tools
+                if tool_choice is not None:
+                    kwargs["tool_choice"] = tool_choice
+            if temperature is not None:
+                kwargs["temperature"] = float(temperature)
+            if max_tokens is not None:
+                kwargs["max_tokens"] = int(max_tokens)
+            resp = await self._client.chat.completions.create(**kwargs)
+            return resp.model_dump()
+        except Exception as err:
+            raise ExternalServiceException(f"OpenAI API error: {err}", retryable=True) from err

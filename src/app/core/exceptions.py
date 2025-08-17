@@ -1,7 +1,3 @@
-"""
-Advanced error handling with structured logging, error recovery, and detailed tracking.
-"""
-
 from __future__ import annotations
 
 import asyncio

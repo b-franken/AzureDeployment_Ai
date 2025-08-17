@@ -1,5 +1,3 @@
-"""Enhanced Dependency Injection Container"""
-
 from __future__ import annotations
 
 import asyncio

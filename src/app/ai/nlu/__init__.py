@@ -9,6 +9,9 @@ from .unified_parser import (
     unified_parse_result,
 )
 
+NLPParser = unified_nlu_parser
+
+
 __all__ = [
     "unified_nlu_parser",
     "unified_parse_result",

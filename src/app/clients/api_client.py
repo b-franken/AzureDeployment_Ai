@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import os
 from collections.abc import Sequence
 
 import httpx
 
-API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
+from app.core.config import get_env_var
+
+API_BASE_URL = get_env_var("API_BASE_URL", "http://localhost:8000")
 
 
 async def chat(

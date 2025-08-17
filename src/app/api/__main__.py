@@ -1,18 +1,16 @@
 from __future__ import annotations
 
-import os
-
 import uvicorn
+
+from app.core.config import API_HOST, API_PORT, settings
 
 
 def main() -> None:
-    host = os.getenv("API_HOST", "0.0.0.0")
-    port = int(os.getenv("API_PORT", "8000"))
     uvicorn.run(
         "app.api.main:app",
-        host=host,
-        port=port,
-        reload=os.getenv("API_RELOAD", "0") == "1",
+        host=API_HOST,
+        port=API_PORT,
+        reload=bool(settings.debug),
     )
 
 

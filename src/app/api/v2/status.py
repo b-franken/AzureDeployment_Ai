@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import os
-
 from fastapi import APIRouter
+
+from app.core.config import settings
 
 router = APIRouter()
 
@@ -10,18 +10,18 @@ router = APIRouter()
 @router.get("/status")
 async def status() -> dict:
     return {
-        "version": os.getenv("APP_VERSION", "2.0.0"),
-        "environment": "production",
+        "version": settings.app_version,
+        "environment": settings.environment,
         "features": {
             "ai_chat": True,
             "azure_provisioning": True,
             "cost_management": True,
-            "audit_logging": True,
+            "audit_logging": settings.security.enable_audit_logging,
             "multi_cloud": False,
         },
         "limits": {
-            "chat_requests_per_minute": 30,
-            "deployment_requests_per_minute": 10,
+            "chat_requests_per_minute": settings.security.api_rate_limit_per_minute,
+            "deployment_requests_per_minute": settings.security.api_rate_limit_per_hour // 100,
             "max_request_size_mb": 10,
         },
     }

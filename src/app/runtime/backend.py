@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import os
 from collections.abc import Sequence
 
 from app.clients.api_client import chat as api_chat
 from app.clients.api_client import review as api_review
+from app.core.config import get_env_var
 
-USE_API = os.getenv("USE_API", "").lower() in {"1", "true", "yes"} or bool(
-    os.getenv("API_BASE_URL")
+USE_API = get_env_var("USE_API", "").lower() in {"1", "true", "yes"} or bool(
+    get_env_var("API_BASE_URL")
 )
 
 

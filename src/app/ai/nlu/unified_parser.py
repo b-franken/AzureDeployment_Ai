@@ -45,6 +45,58 @@ class unified_parse_result:
         d["action"] = self.action
         return d
 
+    def to_orchestrator_args(self) -> dict[str, Any] | None:
+        try:
+            from app.common.envs import normalize_env
+        except Exception:
+
+            def normalize_env(v: str) -> str:
+                return "dev"
+
+        rtype = self.resource_type
+        params = dict(self.parameters)
+        name = params.get("name")
+        rg = params.get("resource_group")
+        loc = params.get("location", "westeurope")
+        env_in = params.get("environment", "dev")
+        env = normalize_env(str(env_in))
+        product = None
+        spec_params: dict[str, Any] = {}
+        if rtype == "webapp" and name and rg:
+            plan_name = params.get("plan") or f"{name}-{env}-plan"
+            runtime = params.get("runtime")
+            sku = params.get("sku", "P1v3")
+            spec_params = {
+                "resource_group": rg,
+                "location": loc,
+                "name": name,
+                "runtime": runtime,
+                "plan": {"name": plan_name, "sku": sku, "linux": True},
+                "tags": self.context.get("tags", {}),
+            }
+            product = "web_app"
+        elif rtype == "storage" and name and rg:
+            sku = params.get("sku", "Standard_LRS")
+            access_tier = params.get("access_tier", "Hot")
+            spec_params = {
+                "resource_group": rg,
+                "location": loc,
+                "name": name,
+                "sku": sku,
+                "access_tier": access_tier,
+                "tags": self.context.get("tags", {}),
+            }
+            product = "storage_account"
+        else:
+            return None
+        return {
+            "product": product,
+            "backend": "auto",
+            "env": env,
+            "plan_only": True,
+            "parameters": spec_params,
+        }
+
 
 class unified_nlu_parser:
     location_patterns = [
@@ -160,27 +212,20 @@ class unified_nlu_parser:
 
     def parse(self, text: str) -> unified_parse_result:
         t = text.lower().strip()
-
         intent = self._detect_intent(t)
         rtype = self._detect_resource_type(t)
         rname = self._extract_resource_name(t, rtype)
-
         params = self._extract_parameters(t, rtype)
         if rname and "name" not in params:
             params["name"] = rname
-
         ctx = self._build_context(t, params)
         adv = self._build_advanced_context(t, intent, rtype)
-
         conf = self._confidence(t, intent, rtype, bool(rname))
-
         emb_scores = None
         if self._emb:
             probs = self._emb.predict_proba([text])
             emb_scores = probs.detach().cpu().tolist()[0]
-
         action = self._action(intent, rtype)
-
         return unified_parse_result(
             text=text,
             intent=intent,
@@ -257,12 +302,10 @@ class unified_nlu_parser:
 
     def _extract_parameters(self, text: str, rtype: str) -> dict[str, Any]:
         params: dict[str, Any] = {}
-
         for p, loc in self.location_patterns:
             if re.search(p, text, re.IGNORECASE):
                 params["location"] = loc
                 break
-
         for p in [
             r"resource\s+group\s+([a-z0-9][\w-]{0,89})",
             r"rg\s+([a-z0-9][\w-]{0,89})",
@@ -272,7 +315,6 @@ class unified_nlu_parser:
             if m:
                 params["resource_group"] = m.group(1)
                 break
-
         m = re.search(
             r"\b(dev|development|test|testing|staging|stage|prod|production|uat)\b",
             text,
@@ -280,17 +322,14 @@ class unified_nlu_parser:
         )
         if m:
             params["environment"] = m.group(1).lower()
-
         m = re.search(r"(?:sku|tier|size)\s+([a-z0-9_]+)", text, re.IGNORECASE)
         if m:
             params["sku"] = m.group(1).upper()
-
         if rtype == "storage":
             if "cool" in text:
                 params["access_tier"] = "Cool"
             elif "hot" in text:
                 params["access_tier"] = "Hot"
-
         return params
 
     def _build_context(self, text: str, params: dict[str, Any]) -> dict[str, Any]:
@@ -315,7 +354,6 @@ class unified_nlu_parser:
         self, text: str, intent: deployment_intent, rtype: str
     ) -> dict[str, Any]:
         adv: dict[str, Any] = {}
-
         comp = []
         for name, pat in {
             "gdpr": r"\b(gdpr|general\s+data\s+protection)\b",
@@ -326,10 +364,8 @@ class unified_nlu_parser:
                 comp.append(name)
         if comp:
             adv["compliance_requirements"] = comp
-
         if any(s in text for s in ["encrypt", "secure", "private", "isolated"]):
             adv["security_enhanced"] = True
-
         if intent in {deployment_intent.update, deployment_intent.migrate}:
             if "blue green" in text or "blue-green" in text:
                 adv["deployment_strategy"] = "blue_green"
@@ -337,7 +373,6 @@ class unified_nlu_parser:
                 adv["deployment_strategy"] = "canary"
             elif "rolling" in text:
                 adv["deployment_strategy"] = "rolling"
-
         return adv
 
     def _confidence(
@@ -386,4 +421,7 @@ def maybe_map_provision(text: str) -> dict[str, object] | None:
     r = parse_provision_request(text)
     if r.confidence < 0.3:
         return None
-    return {"tool": "azure_provision", "args": r.to_provision_args()}
+    args = r.to_orchestrator_args()
+    if not isinstance(args, dict):
+        return None
+    return {"tool": "provision_orchestrator", "args": args}

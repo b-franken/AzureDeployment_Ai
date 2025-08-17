@@ -1,0 +1,117 @@
+{
+    "uid": "devops-ai-api",
+    "title": "DevOps AI - API",
+    "schemaVersion": 39,
+    "version": 1,
+    "timezone": "browser",
+    "editable": true,
+    "panels": [
+        {
+            "type": "timeseries",
+            "title": "HTTP p95 latency by route",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 0
+            },
+            "targets": [
+                {
+                    "expr": "histogram_quantile(0.95, sum by (le, path) (rate(http_request_duration_seconds_bucket[5m])))",
+                    "legendFormat": "{{path}}"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "Request rate by route",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 0
+            },
+            "targets": [
+                {
+                    "expr": "sum by (path) (rate(http_requests_total[5m]))",
+                    "legendFormat": "{{path}}"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "Errors by type - rate",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 8
+            },
+            "targets": [
+                {
+                    "expr": "sum by (error_type) (rate(app_errors_total[5m]))",
+                    "legendFormat": "{{error_type}}"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "Error recovery p95",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 8
+            },
+            "targets": [
+                {
+                    "expr": "histogram_quantile(0.95, sum by (le) (rate(app_error_recovery_duration_seconds_bucket[5m])))",
+                    "legendFormat": "p95"
+                }
+            ]
+        },
+        {
+            "type": "stat",
+            "title": "Active errors now",
+            "gridPos": {
+                "h": 6,
+                "w": 6,
+                "x": 0,
+                "y": 16
+            },
+            "targets": [
+                {
+                    "expr": "sum(app_active_errors)"
+                }
+            ]
+        },
+        {
+            "type": "stat",
+            "title": "Errors today",
+            "gridPos": {
+                "h": 6,
+                "w": 6,
+                "x": 6,
+                "y": 16
+            },
+            "targets": [
+                {
+                    "expr": "sum(increase(app_errors_total[1d]))"
+                }
+            ]
+        }
+    ],
+    "templating": {
+        "list": [
+            {
+                "type": "datasource",
+                "name": "DS_PROMETHEUS",
+                "query": "prometheus",
+                "current": {
+                    "text": "Prometheus",
+                    "value": "Prometheus"
+                }
+            }
+        ]
+    }
+}

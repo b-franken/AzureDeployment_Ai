@@ -36,10 +36,8 @@ def instrument_app(app: FastAPI) -> None:
             elapsed = time.perf_counter() - start
             route = request.scope.get("route")
             path = getattr(route, "path", request.url.path)
-            HTTP_REQUESTS.labels(method=method, path=path,
-                                 status_code=status_code).inc()
-            HTTP_LATENCY.labels(method=method, path=path,
-                                status_code=status_code).observe(elapsed)
+            HTTP_REQUESTS.labels(method=method, path=path, status_code=status_code).inc()
+            HTTP_LATENCY.labels(method=method, path=path, status_code=status_code).observe(elapsed)
 
     @app.get("/metrics")
     def _metrics() -> Response:

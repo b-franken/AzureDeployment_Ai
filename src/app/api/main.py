@@ -5,6 +5,7 @@ from collections.abc import Awaitable, Callable
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app.api.middleware.rate_limiter import RateLimitConfig, RateLimiter
 from app.api.routes.chat import router as chat_router
@@ -12,9 +13,23 @@ from app.api.routes.review import router as review_router
 from app.api.v2 import router as v2_router
 from app.observability.prometheus import instrument_app
 
+import inspect
+print("MAIN FILE:", __file__)
+
 APP_VERSION = os.getenv("APP_VERSION", "2.0.0")
 app = FastAPI(title="DevOps AI API", version=APP_VERSION)
 instrument_app(app)
+
+
+@app.get("/_routes")
+def _routes():
+    return [r.path for r in app.routes]
+
+
+@app.get("/metrics")
+def metrics() -> Response:
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
 
 origins_raw = os.getenv("CORS_ORIGINS", "*").strip()
 if origins_raw in {"", "*"}:
@@ -32,7 +47,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-limiter = RateLimiter(RateLimitConfig(requests_per_minute=30, requests_per_hour=1000))
+limiter = RateLimiter(RateLimitConfig(
+    requests_per_minute=30, requests_per_hour=1000))
 
 
 @app.middleware("http")

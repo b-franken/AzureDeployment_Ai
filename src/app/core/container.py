@@ -12,8 +12,8 @@ from functools import wraps
 from typing import Any, Generic, TypeVar, Union, cast, get_args, get_origin
 from weakref import WeakKeyDictionary, WeakValueDictionary
 
-from app.common.errors import ConfigurationError
-from app.common.logging_config import get_logger
+from app.core.exceptions import ConfigurationError
+from app.core.logging import get_logger
 
 T = TypeVar("T")
 logger = get_logger(__name__)

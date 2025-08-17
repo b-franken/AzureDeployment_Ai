@@ -275,18 +275,15 @@ class ConfigManager:
 
 @lru_cache
 def get_config() -> ConfigManager:
-    """Get the configuration manager instance."""
     return ConfigManager()
 
 
 @lru_cache
 def get_settings() -> Settings:
-    """Get application settings."""
     return get_config().settings
 
 
 def get_env_var(key: str, default: str = "") -> str:
-    """Get environment variable with fallback."""
     return os.getenv(key, default)
 
 

@@ -42,6 +42,10 @@ class SecurityConfig(BaseModel):
     min_password_length: int = Field(default=12, ge=8)
     password_history_count: int = Field(default=5, ge=0)
 
+    @property
+    def jwt_secret(self) -> SecretStr:
+        return self.jwt_secret_key
+
     @field_validator("encryption_key", mode="before")
     @classmethod
     def validate_encryption_key(cls, v: Any) -> str:
@@ -79,23 +83,43 @@ class AzureConfig(BaseModel):
     subscription_id: str | None = Field(
         default=None,
         pattern="^[a-f0-9-]{36}$",
-        validation_alias=AliasChoices("AZURE_SUBSCRIPTION_ID", "AZURE__SUBSCRIPTION_ID"),
+        validation_alias=AliasChoices(
+            "AZURE_SUBSCRIPTION_ID",
+            "AZURE__SUBSCRIPTION_ID",
+        ),
     )
     tenant_id: str | None = Field(
         default=None,
         pattern="^[a-f0-9-]{36}$",
-        validation_alias=AliasChoices("AZURE_TENANT_ID", "AZURE__TENANT_ID"),
+        validation_alias=AliasChoices(
+            "AZURE_TENANT_ID",
+            "AZURE__TENANT_ID",
+        ),
     )
     client_id: str | None = Field(
-        default=None, validation_alias=AliasChoices("AZURE_CLIENT_ID", "AZURE__CLIENT_ID")
+        default=None,
+        validation_alias=AliasChoices(
+            "AZURE_CLIENT_ID",
+            "AZURE__CLIENT_ID",
+        ),
     )
     client_secret: SecretStr | None = Field(
-        default=None, validation_alias=AliasChoices("AZURE_CLIENT_SECRET", "AZURE__CLIENT_SECRET")
+        default=None,
+        validation_alias=AliasChoices(
+            "AZURE_CLIENT_SECRET",
+            "AZURE__CLIENT_SECRET",
+        ),
     )
 
     default_location: str = Field(default="westeurope")
     allowed_locations: list[str] = Field(
-        default_factory=lambda: ["westeurope", "northeurope", "eastus", "westus"]
+        default_factory=lambda: [
+            "westeurope",
+            "northeurope",
+            "eastus",
+            "westus",
+            "uksouth",
+        ]
     )
 
     resource_naming_prefix: str = Field(
@@ -111,13 +135,19 @@ class AzureConfig(BaseModel):
         default=3,
         ge=1,
         le=10,
-        validation_alias=AliasChoices("RETRY_MAX_ATTEMPTS", "AZURE__MAX_RETRY_ATTEMPTS"),
+        validation_alias=AliasChoices(
+            "RETRY_MAX_ATTEMPTS",
+            "AZURE__MAX_RETRY_ATTEMPTS",
+        ),
     )
     retry_backoff_seconds: float = Field(
         default=1.0,
         ge=0.1,
         le=60,
-        validation_alias=AliasChoices("RETRY_BACKOFF_SECONDS", "AZURE__RETRY_BACKOFF_SECONDS"),
+        validation_alias=AliasChoices(
+            "RETRY_BACKOFF_SECONDS",
+            "AZURE__RETRY_BACKOFF_SECONDS",
+        ),
     )
 
 
@@ -126,37 +156,66 @@ class LLMConfig(BaseModel):
 
     default_provider: Literal["openai", "gemini", "ollama", "azure"] = Field(
         default="openai",
-        validation_alias=AliasChoices("LLM_PROVIDER", "LLM__DEFAULT_PROVIDER"),
+        validation_alias=AliasChoices(
+            "LLM_PROVIDER",
+            "LLM__DEFAULT_PROVIDER",
+        ),
     )
 
     openai_api_key: SecretStr | None = Field(
         default=None,
-        validation_alias=AliasChoices("OPENAI_API_KEY", "OPENAI_KEY", "LLM__OPENAI_API_KEY"),
+        validation_alias=AliasChoices(
+            "OPENAI_API_KEY",
+            "OPENAI_KEY",
+            "LLM__OPENAI_API_KEY",
+        ),
     )
     openai_api_base: str = Field(
         default="https://api.openai.com/v1",
-        validation_alias=AliasChoices("OPENAI_BASE_URL", "LLM__OPENAI_API_BASE"),
+        validation_alias=AliasChoices(
+            "OPENAI_BASE_URL",
+            "LLM__OPENAI_API_BASE",
+        ),
     )
 
     openai_model: str = Field(
-        default="gpt-5", validation_alias=AliasChoices("OPENAI_MODEL", "LLM__OPENAI_MODEL")
+        default="gpt-5",
+        validation_alias=AliasChoices(
+            "OPENAI_MODEL",
+            "LLM__OPENAI_MODEL",
+        ),
     )
     openai_max_tokens: int = Field(default=4096, ge=1, le=128000)
     openai_temperature: float = Field(default=0.7, ge=0, le=2)
 
     gemini_api_key: SecretStr | None = Field(
-        default=None, validation_alias=AliasChoices("GEMINI_API_KEY", "LLM__GEMINI_API_KEY")
+        default=None,
+        validation_alias=AliasChoices(
+            "GEMINI_API_KEY",
+            "LLM__GEMINI_API_KEY",
+        ),
     )
     gemini_model: str = Field(
-        default="gemini-1.5-pro", validation_alias=AliasChoices("GEMINI_MODEL", "LLM__GEMINI_MODEL")
+        default="gemini-1.5-pro",
+        validation_alias=AliasChoices(
+            "GEMINI_MODEL",
+            "LLM__GEMINI_MODEL",
+        ),
     )
 
     ollama_base_url: str = Field(
         default="http://localhost:11434",
-        validation_alias=AliasChoices("OLLAMA_BASE_URL", "LLM__OLLAMA_BASE_URL"),
+        validation_alias=AliasChoices(
+            "OLLAMA_BASE_URL",
+            "LLM__OLLAMA_BASE_URL",
+        ),
     )
     ollama_model: str = Field(
-        default="llama3.1", validation_alias=AliasChoices("OLLAMA_MODEL", "LLM__OLLAMA_MODEL")
+        default="llama3.1",
+        validation_alias=AliasChoices(
+            "OLLAMA_MODEL",
+            "LLM__OLLAMA_MODEL",
+        ),
     )
 
     requests_per_minute: int = Field(default=60, ge=1)
@@ -206,12 +265,20 @@ class MemoryConfig(BaseModel):
     """In-app memory caps. Legacy envs supported."""
 
     max_memory: int = Field(
-        default=25, ge=1, validation_alias=AliasChoices("MAX_MEMORY", "MEMORY__MAX_MEMORY")
+        default=25,
+        ge=1,
+        validation_alias=AliasChoices(
+            "MAX_MEMORY",
+            "MEMORY__MAX_MEMORY",
+        ),
     )
     max_total_memory: int = Field(
         default=100,
         ge=1,
-        validation_alias=AliasChoices("MAX_TOTAL_MEMORY", "MEMORY__MAX_TOTAL_MEMORY"),
+        validation_alias=AliasChoices(
+            "MAX_TOTAL_MEMORY",
+            "MEMORY__MAX_TOTAL_MEMORY",
+        ),
     )
 
 
@@ -221,17 +288,26 @@ class RetryConfig(BaseModel):
     request_timeout_seconds: float = Field(
         default=60.0,
         ge=1,
-        validation_alias=AliasChoices("REQUEST_TIMEOUT_SECONDS", "HTTP__REQUEST_TIMEOUT_SECONDS"),
+        validation_alias=AliasChoices(
+            "REQUEST_TIMEOUT_SECONDS",
+            "HTTP__REQUEST_TIMEOUT_SECONDS",
+        ),
     )
     retry_max_attempts: int = Field(
         default=3,
         ge=0,
-        validation_alias=AliasChoices("RETRY_MAX_ATTEMPTS", "HTTP__RETRY_MAX_ATTEMPTS"),
+        validation_alias=AliasChoices(
+            "RETRY_MAX_ATTEMPTS",
+            "HTTP__RETRY_MAX_ATTEMPTS",
+        ),
     )
     retry_backoff_seconds: float = Field(
         default=0.8,
         ge=0,
-        validation_alias=AliasChoices("RETRY_BACKOFF_SECONDS", "HTTP__RETRY_BACKOFF_SECONDS"),
+        validation_alias=AliasChoices(
+            "RETRY_BACKOFF_SECONDS",
+            "HTTP__RETRY_BACKOFF_SECONDS",
+        ),
     )
 
 
@@ -265,12 +341,11 @@ class Settings(BaseSettings):
     retry: RetryConfig = Field(default_factory=lambda: RetryConfig())
 
     def validate_environment_settings(self) -> None:
-        """Validate settings based on environment."""
         if self.environment == "production":
-            assert self.security.jwt_secret_key, "JWT secret required in production"
-            assert not self.debug, "Debug must be disabled in production"
-            assert self.security.enable_audit_logging, "Audit logging required in production"
-            assert not self.api_docs_enabled, "API docs should be disabled in production"
+            assert self.security.jwt_secret_key
+            assert not self.debug
+            assert self.security.enable_audit_logging
+            assert not self.api_docs_enabled
 
 
 class ConfigManager:
@@ -290,43 +365,34 @@ class ConfigManager:
             self._load_settings()
 
     def _load_settings(self) -> None:
-        """Load and validate settings."""
         self._settings = Settings()
-
         key = self._settings.security.encryption_key.get_secret_value()
         self._cipher = Fernet(key.encode() if isinstance(key, str) else key)
-
         self._settings.validate_environment_settings()
 
     @property
     def settings(self) -> Settings:
-        """Get current settings."""
         if self._settings is None:
             self._load_settings()
         return self._settings  # type: ignore
 
     def encrypt_value(self, value: str) -> str:
-        """Encrypt a string value."""
         if not self._cipher:
             raise RuntimeError("Encryption not configured")
         return self._cipher.encrypt(value.encode()).decode()
 
     def decrypt_value(self, encrypted: str) -> str:
-        """Decrypt an encrypted string."""
         if not self._cipher:
             raise RuntimeError("Encryption not configured")
         return self._cipher.decrypt(encrypted.encode()).decode()
 
     def reload(self) -> None:
-        """Reload configuration from environment."""
         self._settings = None
         self._cipher = None
         self._load_settings()
 
     def export_safe_config(self) -> dict[str, Any]:
-        """Export configuration with sensitive values redacted."""
         config_dict = self.settings.model_dump()
-
         sensitive_paths = [
             ["security", "jwt_secret_key"],
             ["security", "encryption_key"],
@@ -334,7 +400,6 @@ class ConfigManager:
             ["llm", "openai_api_key"],
             ["llm", "gemini_api_key"],
         ]
-
         for path in sensitive_paths:
             current = config_dict
             for key in path[:-1]:
@@ -342,7 +407,6 @@ class ConfigManager:
                     current = current[key]
             if path[-1] in current:
                 current[path[-1]] = "***REDACTED***"
-
         return config_dict
 
 
@@ -389,11 +453,9 @@ GEMINI_API_KEY = (
 )
 OLLAMA_BASE_URL = settings.llm.ollama_base_url
 
-
 OPENAI_MODEL = settings.llm.openai_model
 GEMINI_MODEL = settings.llm.gemini_model
 OLLAMA_MODEL = settings.llm.ollama_model
-
 
 MAX_MEMORY = settings.memory.max_memory
 MAX_TOTAL_MEMORY = settings.memory.max_total_memory

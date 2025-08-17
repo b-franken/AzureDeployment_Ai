@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import re
 
-ALLOWED_LOCATIONS = ["westeurope", "northeurope", "uksouth", "eastus"]
+from app.core.config import settings
+
+ALLOWED_LOCATIONS = tuple(settings.azure.allowed_locations)
 
 LOCATION_ALIASES = {
     "west europe": "westeurope",
     "north europe": "northeurope",
     "uk south": "uksouth",
     "east us": "eastus",
+    "west us": "westus",
 }
 
 _NAME_PATTERNS: dict[str, re.Pattern[str]] = {
@@ -31,15 +34,12 @@ def validate_name(kind: str, value: str | None) -> bool:
 def validate_location(loc: str | None) -> bool:
     if not loc:
         return False
-
     loc_lower = loc.lower().strip()
-
     if loc_lower in ALLOWED_LOCATIONS:
         return True
-
     if loc_lower in LOCATION_ALIASES:
-        return True
-
+        aliased = LOCATION_ALIASES[loc_lower]
+        return aliased in ALLOWED_LOCATIONS
     return False
 
 

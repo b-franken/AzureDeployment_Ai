@@ -6,7 +6,6 @@ from collections.abc import Awaitable, Callable
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
-from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from starlette.routing import Mount, Route, WebSocketRoute
 
 from app.api.middleware.rate_limiter import RateLimitConfig, RateLimiter
@@ -25,11 +24,6 @@ instrument_app(app)
 @app.get("/_routes")
 def _routes() -> list[str]:
     return [r.path for r in app.routes if isinstance(r, APIRoute | Route | Mount | WebSocketRoute)]
-
-
-@app.get("/metrics")
-def metrics() -> Response:
-    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 origins_raw = os.getenv("CORS_ORIGINS", "*").strip()

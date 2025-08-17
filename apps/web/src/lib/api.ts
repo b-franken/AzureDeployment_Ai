@@ -1,6 +1,10 @@
-const base = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000"
+const base =
+    process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000"
 
-export type ChatMsg = { role: "user" | "assistant" | "system"; content: string }
+export type ChatMsg = {
+    role: "user" | "assistant" | "system"
+    content: string
+}
 
 type HeadersDict = { [k: string]: string }
 
@@ -8,7 +12,9 @@ function withAuth(token?: string): HeadersDict {
     return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
-export function splitModel(id: string): { provider: string | null; model: string | null } {
+export function splitModel(
+    id: string
+): { provider: string | null; model: string | null } {
     if (!id) return { provider: null, model: null }
     const i = id.indexOf(":")
     if (i === -1) return { provider: null, model: id }
@@ -22,7 +28,10 @@ export type AuthResult = {
     user: { id: string; email: string; roles: string[] }
 }
 
-export async function login(email: string, password: string): Promise<AuthResult> {
+export async function login(
+    email: string,
+    password: string
+): Promise<AuthResult> {
     const res = await fetch(`${base}/api/v2/auth/login`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -131,7 +140,10 @@ export type DeployRequest = {
     tags?: Record<string, string>
 }
 
-export async function deploy(token: string, body: DeployRequest) {
+export async function deploy(
+    token: string,
+    body: DeployRequest
+) {
     const res = await fetch(`${base}/api/v2/deploy/deploy`, {
         method: "POST",
         headers: { "content-type": "application/json", ...withAuth(token) },
@@ -158,7 +170,10 @@ export type CostAnalysisArgs = {
     include_recommendations?: boolean
 }
 
-export async function analyzeCosts(token: string, args: CostAnalysisArgs) {
+export async function analyzeCosts(
+    token: string,
+    args: CostAnalysisArgs
+) {
     const res = await fetch(`${base}/api/v2/cost/cost/analysis`, {
         method: "POST",
         headers: { "content-type": "application/json", ...withAuth(token) },
@@ -177,7 +192,13 @@ export async function analyzeCosts(token: string, args: CostAnalysisArgs) {
 
 export async function auditLogs(
     token: string,
-    params?: { start_date?: string; end_date?: string; user_id?: string; page?: number; page_size?: number }
+    params?: {
+        start_date?: string
+        end_date?: string
+        user_id?: string
+        page?: number
+        page_size?: number
+    }
 ) {
     const q = new URLSearchParams()
     if (params?.start_date) q.set("start_date", params.start_date)
@@ -185,15 +206,16 @@ export async function auditLogs(
     if (params?.user_id) q.set("user_id", params.user_id)
     if (params?.page) q.set("page", String(params.page))
     if (params?.page_size) q.set("page_size", String(params.page_size))
-    const res = await fetch(`${base}/api/v2/audit/audit/logs?${q.toString()}`, {
-        headers: { ...withAuth(token) },
-    })
+    const res = await fetch(
+        `${base}/api/v2/audit/audit/logs?${q.toString()}`,
+        { headers: { ...withAuth(token) } }
+    )
     if (!res.ok) throw new Error(`audit logs failed ${res.status}`)
     return res.json()
 }
 
 export async function metrics(token: string) {
-    const res = await fetch(`${base}/api/v2/metrics/metrics`, {
+    const res = await fetch(`${base}/api/v2/metrics`, {
         headers: { ...withAuth(token) },
     })
     if (!res.ok) throw new Error(`metrics failed ${res.status}`)

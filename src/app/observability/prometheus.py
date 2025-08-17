@@ -4,7 +4,12 @@ import time
 from collections.abc import Awaitable, Callable
 
 from fastapi import FastAPI, Request, Response
-from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
+from prometheus_client import (
+    CONTENT_TYPE_LATEST,
+    Counter,
+    Histogram,
+    generate_latest,
+)
 
 HTTP_REQUESTS = Counter(
     "http_requests_total",
@@ -36,8 +41,16 @@ def instrument_app(app: FastAPI) -> None:
             elapsed = time.perf_counter() - start
             route = request.scope.get("route")
             path = getattr(route, "path", request.url.path)
-            HTTP_REQUESTS.labels(method=method, path=path, status_code=status_code).inc()
-            HTTP_LATENCY.labels(method=method, path=path, status_code=status_code).observe(elapsed)
+            HTTP_REQUESTS.labels(
+                method=method,
+                path=path,
+                status_code=status_code,
+            ).inc()
+            HTTP_LATENCY.labels(
+                method=method,
+                path=path,
+                status_code=status_code,
+            ).observe(elapsed)
 
     @app.get("/metrics")
     def _metrics() -> Response:

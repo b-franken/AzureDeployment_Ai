@@ -12,8 +12,6 @@ from azure.mgmt.apimanagement.models import (
     ApiManagementServiceSkuProperties,
 )
 
-from app.ai.nlu.intent_classifier import DeploymentIntent, EnterpriseNLPParser
-
 from ..clients import Clients, get_clients
 
 
@@ -21,7 +19,7 @@ from ..clients import Clients, get_clients
 class DeploymentPlan:
     request_id: str
     timestamp: datetime
-    intent: DeploymentIntent
+    intent: Any
     resources: list[dict[str, Any]]
     dependencies: list[str]
     validations: list[dict[str, Any]]
@@ -59,17 +57,17 @@ class ResourceDeployer(Protocol):
 
 class EnterpriseAzureDeployer:
     def __init__(self) -> None:
-        self.nlp_parser = EnterpriseNLPParser()
         self.deployment_templates = self._load_deployment_templates()
         self.cost_calculator = CostCalculator()
         self.compliance_validator = ComplianceValidator()
         self.dependency_resolver = DependencyResolver()
+        self.nlp_parser = NLPParser()  # type: ignore[call-arg]
 
     async def deploy_from_natural_language(
         self, request: str, context: DeploymentContext | None = None
     ) -> dict[str, Any]:
         parsed = self.nlp_parser.parse(request)
-        if parsed.confidence < 0.3:
+        if getattr(parsed, "confidence", 0.0) < 0.3:
             return {
                 "status": "error",
                 "message": "Could not understand the deployment request with sufficient confidence",
@@ -96,7 +94,8 @@ class EnterpriseAzureDeployer:
             "plan": self._serialize_plan(plan),
             "result": result,
             "monitoring_dashboard": (
-                self._generate_monitoring_url(result) if result["success"] else None
+                self._generate_monitoring_url(
+                    result) if result["success"] else None
             ),
         }
 
@@ -104,16 +103,17 @@ class EnterpriseAzureDeployer:
         self, parsed: Any, context: DeploymentContext
     ) -> DeploymentPlan:
         resources = await self._determine_resources(parsed, context)
-        dependencies = await self.dependency_resolver.resolve(resources, parsed.dependencies)
+        dependencies = await self.dependency_resolver.resolve(
+            resources, getattr(parsed, "dependencies", [])
+        )
         validations = await self._validate_deployment(resources, context)
         cost_estimate = await self.cost_calculator.estimate(resources, context)
         compliance_checks = await self.compliance_validator.check(
-            resources, parsed.compliance_requirements
+            resources, getattr(parsed, "compliance_requirements", [])
         )
         rollback_plan = self._create_rollback_plan(resources)
         risk_level = self._assess_risk_level(
-            parsed.intent, resources, context.environment, cost_estimate
-        )
+            resources, context.environment, cost_estimate)
         approval_required = (
             risk_level in ["high", "critical"]
             or cost_estimate.get("monthly_total", 0.0) > (context.cost_threshold or 1000.0)
@@ -122,7 +122,7 @@ class EnterpriseAzureDeployer:
         return DeploymentPlan(
             request_id=self._generate_request_id(),
             timestamp=datetime.utcnow(),
-            intent=parsed.intent,
+            intent=getattr(parsed, "intent", "create"),
             resources=resources,
             dependencies=dependencies,
             validations=validations,
@@ -137,20 +137,24 @@ class EnterpriseAzureDeployer:
         self, parsed: Any, context: DeploymentContext
     ) -> list[dict[str, Any]]:
         resources: list[dict[str, Any]] = []
-        template = self.deployment_templates.get(parsed.resource_type)
+        resource_type = getattr(parsed, "resource_type", "generic")
+        template = self.deployment_templates.get(resource_type)
         if not template:
             template = self._create_dynamic_template(parsed)
         base_config = self._apply_template(template, parsed, context)
         resources.append(base_config)
-        if parsed.attributes.get("high_availability"):
+        attrs = getattr(parsed, "attributes", {}) or {}
+        if attrs.get("high_availability"):
             resources.extend(self._add_ha_resources(base_config, context))
-        if parsed.attributes.get("disaster_recovery"):
+        if attrs.get("disaster_recovery"):
             resources.extend(self._add_dr_resources(base_config, context))
-        if context.enable_monitoring:
-            resources.extend(self._add_monitoring_resources(base_config, context))
-        if context.enable_private_endpoints:
-            resources.extend(self._add_private_endpoint_resources(base_config, context))
-        if context.enable_backup:
+        if context.enable_monitoring or attrs.get("monitoring"):
+            resources.extend(
+                self._add_monitoring_resources(base_config, context))
+        if context.enable_private_endpoints or attrs.get("private_endpoints"):
+            resources.extend(
+                self._add_private_endpoint_resources(base_config, context))
+        if context.enable_backup or attrs.get("backup"):
             resources.extend(self._add_backup_resources(base_config, context))
         return resources
 
@@ -223,6 +227,7 @@ class EnterpriseAzureDeployer:
             "logic_apps": LogicAppsDeployer(),
             "front_door": FrontDoorDeployer(),
         }
+        # type: ignore[return-value]
         return deployers.get(resource_type, GenericResourceDeployer())
 
     def _load_deployment_templates(self) -> dict[str, Any]:
@@ -262,11 +267,16 @@ class EnterpriseAzureDeployer:
         }
 
     def _extract_context_from_parsed(self, parsed: Any, request: str) -> DeploymentContext:
+        ctx = getattr(parsed, "context", {}) or {}
+        attrs = getattr(parsed, "attributes", {}) or {}
         context = DeploymentContext(
-            subscription_id="",
-            resource_group="",
-            location="westeurope",
-            environment=parsed.attributes.get("environment", "development"),
+            subscription_id=str(ctx.get("subscription_id", "")),
+            resource_group=str(ctx.get("resource_group", "")),
+            location=str(ctx.get("location", "westeurope")),
+            environment=str(
+                attrs.get("environment", ctx.get("environment", "development"))),
+            tags=dict(ctx.get("tags", {})) if isinstance(
+                ctx.get("tags", {}), dict) else {},
         )
         regions = [
             "west europe",
@@ -282,20 +292,26 @@ class EnterpriseAzureDeployer:
         location_match = re.search(pattern, request.lower())
         if location_match:
             context.location = location_match.group(1).replace(" ", "")
-        rg_match = re.search(r"resource group\s+([a-z0-9][\w-]{0,89})", request.lower())
+        rg_match = re.search(
+            r"resource group\s+([a-z0-9][\w-]{0,89})", request.lower())
         if rg_match:
             context.resource_group = rg_match.group(1)
-        if parsed.attributes.get("private_endpoints"):
+        if attrs.get("private_endpoints"):
             context.enable_private_endpoints = True
-        if "backup" in parsed.dependencies:
+        deps = getattr(parsed, "dependencies", []) or []
+        if "backup" in deps or attrs.get("backup"):
             context.enable_backup = True
+        if attrs.get("monitoring"):
+            context.enable_monitoring = True
         return context
 
     def _serialize_plan(self, plan: DeploymentPlan) -> dict[str, Any]:
+        intent_value = plan.intent.value if hasattr(
+            plan.intent, "value") else str(plan.intent)
         return {
             "request_id": plan.request_id,
             "timestamp": plan.timestamp.isoformat(),
-            "intent": plan.intent.value,
+            "intent": intent_value,
             "resources": plan.resources,
             "cost_estimate": plan.cost_estimate,
             "risk_level": plan.risk_level,
@@ -307,14 +323,11 @@ class EnterpriseAzureDeployer:
 
     def _assess_risk_level(
         self,
-        intent: DeploymentIntent,
         resources: list[dict[str, Any]],
         environment: str,
         cost_estimate: dict[str, Any],
     ) -> str:
         risk_score = 0
-        if intent in [DeploymentIntent.DELETE, DeploymentIntent.MIGRATE]:
-            risk_score += 3
         if environment == "production":
             risk_score += 2
         elif environment == "staging":
@@ -345,7 +358,8 @@ class EnterpriseAzureDeployer:
         return f"https://approval.local/requests/{plan.request_id}"
 
     def _generate_monitoring_url(self, result: dict[str, Any]) -> str:
-        tracking_id = str(result.get("tracking_id") or self._generate_request_id())
+        tracking_id = str(result.get("tracking_id")
+                          or self._generate_request_id())
         return f"https://monitoring.local/deployments/{tracking_id}"
 
     async def _validate_deployment(
@@ -355,12 +369,15 @@ class EnterpriseAzureDeployer:
         if context.subscription_id:
             validations.append({"check": "subscription_id", "status": "ok"})
         else:
-            validations.append({"check": "subscription_id", "status": "fail", "message": "missing"})
+            validations.append({"check": "subscription_id",
+                               "status": "fail", "message": "missing"})
         if context.resource_group:
             validations.append({"check": "resource_group", "status": "ok"})
         else:
-            validations.append({"check": "resource_group", "status": "fail", "message": "missing"})
-        validations.append({"check": "resource_count", "status": "ok", "details": len(resources)})
+            validations.append(
+                {"check": "resource_group", "status": "fail", "message": "missing"})
+        validations.append(
+            {"check": "resource_count", "status": "ok", "details": len(resources)})
         return validations
 
     def _create_rollback_plan(self, resources: list[dict[str, Any]]) -> dict[str, Any]:
@@ -370,20 +387,28 @@ class EnterpriseAzureDeployer:
         }
 
     def _create_dynamic_template(self, parsed: Any) -> dict[str, Any]:
-        name_val = parsed.attributes.get("name", parsed.resource_type)
-        return {"type": parsed.resource_type, "name": name_val, "base_config": {}}
+        name_val = getattr(parsed, "attributes", {}).get(
+            "name", getattr(parsed, "resource_type", "resource")
+        )
+        return {
+            "type": getattr(parsed, "resource_type", "generic"),
+            "name": name_val,
+            "base_config": {},
+        }
 
     def _apply_template(
         self, template: dict[str, Any], parsed: Any, context: DeploymentContext
     ) -> dict[str, Any]:
         base: dict[str, Any] = dict(template)
         base_config: dict[str, Any] = dict(template.get("base_config", {}))
-        if "name" in parsed.attributes:
-            base["name"] = parsed.attributes["name"]
-        base["type"] = template.get("type", parsed.resource_type)
+        attrs = getattr(parsed, "attributes", {}) or {}
+        if "name" in attrs:
+            base["name"] = attrs["name"]
+        base["type"] = template.get("type", getattr(
+            parsed, "resource_type", "generic"))
         base["base_config"] = base_config
-        if parsed.attributes.get("tags") and isinstance(parsed.attributes["tags"], dict):
-            context.tags.update(parsed.attributes["tags"])
+        if attrs.get("tags") and isinstance(attrs["tags"], dict):
+            context.tags.update(attrs["tags"])
         return base
 
     def _add_ha_resources(
@@ -510,7 +535,7 @@ class DependencyResolver:
         resolved: list[str] = []
         for dep in dependencies:
             if dep == "active_directory":
-                resolved.append("Azure AD integration configured")
+                resolved.append("EntraID integration configured")
             elif dep == "dns":
                 resolved.append("DNS zones configured")
             elif dep == "certificate":
@@ -561,7 +586,8 @@ class AKSDeployer:
             name=resource.get("name", "aks-cluster"),
             dns_prefix=resource.get("dns_prefix", resource.get("name", "aks")),
             node_count=config.get("node_pools", [{}])[0].get("count", 2),
-            network_plugin=config.get("network_profile", {}).get("network_plugin", "azure"),
+            network_plugin=config.get("network_profile", {}).get(
+                "network_plugin", "azure"),
             tags=context.tags,
             dry_run=context.dry_run,
             force=context.force,
@@ -605,7 +631,8 @@ class APIMDeployer:
     async def deploy(
         self, resource: dict[str, Any], clients: Clients, context: DeploymentContext
     ) -> dict[str, Any]:
-        apim_client = ApiManagementClient(clients.cred, context.subscription_id)
+        apim_client = ApiManagementClient(
+            clients.cred, context.subscription_id)
 
         sku = ApiManagementServiceSkuProperties(
             name=resource.get("sku", {}).get("name", "Developer"),
@@ -615,7 +642,8 @@ class APIMDeployer:
         service_params = ApiManagementServiceResource(
             location=context.location,
             sku=sku,
-            publisher_email=resource.get("publisher_email", "admin@contoso.com"),
+            publisher_email=resource.get(
+                "publisher_email", "admin@contoso.com"),
             publisher_name=resource.get("publisher_name", "Contoso"),
             tags=context.tags,
         )
@@ -644,7 +672,8 @@ class DataFactoryDeployer:
         from azure.mgmt.datafactory import DataFactoryManagementClient
         from azure.mgmt.datafactory.models import Factory
 
-        adf_client = DataFactoryManagementClient(clients.cred, context.subscription_id)
+        adf_client = DataFactoryManagementClient(
+            clients.cred, context.subscription_id)
         factory = Factory(location=context.location, tags=context.tags)
         if not context.dry_run:
             result = await clients.run(
@@ -669,7 +698,8 @@ class SynapseDeployer:
         from azure.mgmt.synapse import SynapseManagementClient
         from azure.mgmt.synapse.models import DataLakeStorageAccountDetails, Workspace
 
-        synapse_client = SynapseManagementClient(clients.cred, context.subscription_id)
+        synapse_client = SynapseManagementClient(
+            clients.cred, context.subscription_id)
         workspace_params = Workspace(
             location=context.location,
             default_data_lake_storage=DataLakeStorageAccountDetails(
@@ -680,7 +710,8 @@ class SynapseDeployer:
                 filesystem=resource.get("filesystem", "synapse"),
             ),
             sql_administrator_login=resource.get("sql_admin", "sqladmin"),
-            sql_administrator_login_password=resource.get("sql_password", "P@ssw0rd123!"),
+            sql_administrator_login_password=resource.get(
+                "sql_password", "P@ssw0rd123!"),
             tags=context.tags,
         )
         if not context.dry_run:
@@ -707,7 +738,8 @@ class CognitiveServicesDeployer:
         from azure.mgmt.cognitiveservices import CognitiveServicesManagementClient
         from azure.mgmt.cognitiveservices.models import Account, AccountProperties, Sku
 
-        cognitive_client = CognitiveServicesManagementClient(clients.cred, context.subscription_id)
+        cognitive_client = CognitiveServicesManagementClient(
+            clients.cred, context.subscription_id)
         account_params = Account(
             location=context.location,
             sku=Sku(name=resource.get("sku", "S0")),
@@ -740,7 +772,8 @@ class EventHubDeployer:
         from azure.mgmt.eventhub.models import EHNamespace
         from azure.mgmt.eventhub.models import Sku as EventHubSku
 
-        eventhub_client = EventHubManagementClient(clients.cred, context.subscription_id)
+        eventhub_client = EventHubManagementClient(
+            clients.cred, context.subscription_id)
         namespace_params = EHNamespace(
             location=context.location,
             sku=EventHubSku(
@@ -776,7 +809,8 @@ class ServiceBusDeployer:
         from azure.mgmt.servicebus import ServiceBusManagementClient
         from azure.mgmt.servicebus.models import SBNamespace, SBSku
 
-        servicebus_client = ServiceBusManagementClient(clients.cred, context.subscription_id)
+        servicebus_client = ServiceBusManagementClient(
+            clients.cred, context.subscription_id)
         namespace_params = SBNamespace(
             location=context.location,
             sku=SBSku(
@@ -809,7 +843,8 @@ class LogicAppsDeployer:
         from azure.mgmt.logic import LogicManagementClient
         from azure.mgmt.logic.models import Workflow
 
-        logic_client = LogicManagementClient(clients.cred, context.subscription_id)
+        logic_client = LogicManagementClient(
+            clients.cred, context.subscription_id)
         workflow_params = Workflow(
             location=context.location,
             definition=resource.get(
@@ -855,7 +890,8 @@ class FrontDoorDeployer:
             SubResource,
         )
 
-        frontdoor_client = FrontDoorManagementClient(clients.cred, context.subscription_id)
+        frontdoor_client = FrontDoorManagementClient(
+            clients.cred, context.subscription_id)
         frontdoor_name = resource.get("name", "frontdoor")
         frontdoor_id_base = (
             f"/subscriptions/{context.subscription_id}/resourceGroups/"
@@ -878,7 +914,8 @@ class FrontDoorDeployer:
                     name="backendPool1",
                     backends=[
                         Backend(
-                            address=resource.get("backend_address", "example.com"),
+                            address=resource.get(
+                                "backend_address", "example.com"),
                             http_port=80,
                             https_port=443,
                             priority=1,

@@ -5,7 +5,9 @@ from collections.abc import Awaitable, Callable
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.routing import APIRoute
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from starlette.routing import Mount, Route, WebSocketRoute
 
 from app.api.middleware.rate_limiter import RateLimitConfig, RateLimiter
 from app.api.routes.chat import router as chat_router
@@ -13,7 +15,6 @@ from app.api.routes.review import router as review_router
 from app.api.v2 import router as v2_router
 from app.observability.prometheus import instrument_app
 
-import inspect
 print("MAIN FILE:", __file__)
 
 APP_VERSION = os.getenv("APP_VERSION", "2.0.0")
@@ -22,8 +23,8 @@ instrument_app(app)
 
 
 @app.get("/_routes")
-def _routes():
-    return [r.path for r in app.routes]
+def _routes() -> list[str]:
+    return [r.path for r in app.routes if isinstance(r, APIRoute | Route | Mount | WebSocketRoute)]
 
 
 @app.get("/metrics")
@@ -47,8 +48,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-limiter = RateLimiter(RateLimitConfig(
-    requests_per_minute=30, requests_per_hour=1000))
+limiter = RateLimiter(RateLimitConfig(requests_per_minute=30, requests_per_hour=1000))
 
 
 @app.middleware("http")

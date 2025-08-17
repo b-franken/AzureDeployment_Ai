@@ -6,7 +6,7 @@ from app.ai.llm.base import LLMProvider
 from app.ai.llm.gemini_provider import GeminiProvider
 from app.ai.llm.ollama_provider import OllamaProvider
 from app.ai.llm.openai_provider import OpenAIProvider
-from app.config import (
+from app.core.config import (
     GEMINI_MODEL,
     LLM_PROVIDER,
     OLLAMA_BASE_URL,

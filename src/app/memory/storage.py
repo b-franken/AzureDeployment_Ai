@@ -14,7 +14,7 @@ from typing import Any, Literal
 
 import aiosqlite
 
-from app.config import MAX_MEMORY, MAX_TOTAL_MEMORY
+from app.core.config import MAX_MEMORY, MAX_TOTAL_MEMORY
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)

@@ -5,7 +5,7 @@ import httpx
 from app.ai.llm.base import LLMProvider
 from app.ai.llm.utils import retry_async
 from app.ai.types import Message
-from app.config import (
+from app.core.config import (
     OLLAMA_BASE_URL,
     REQUEST_TIMEOUT_SECONDS,
     RETRY_BACKOFF_SECONDS,

@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 from cryptography.fernet import Fernet
 from pydantic import (
+    AliasChoices,
     AnyHttpUrl,
     BaseModel,
     Field,
@@ -78,13 +79,19 @@ class AzureConfig(BaseModel):
     subscription_id: str | None = Field(
         default=None,
         pattern="^[a-f0-9-]{36}$",
+        validation_alias=AliasChoices("AZURE_SUBSCRIPTION_ID", "AZURE__SUBSCRIPTION_ID"),
     )
     tenant_id: str | None = Field(
         default=None,
         pattern="^[a-f0-9-]{36}$",
+        validation_alias=AliasChoices("AZURE_TENANT_ID", "AZURE__TENANT_ID"),
     )
-    client_id: str | None = None
-    client_secret: SecretStr | None = None
+    client_id: str | None = Field(
+        default=None, validation_alias=AliasChoices("AZURE_CLIENT_ID", "AZURE__CLIENT_ID")
+    )
+    client_secret: SecretStr | None = Field(
+        default=None, validation_alias=AliasChoices("AZURE_CLIENT_SECRET", "AZURE__CLIENT_SECRET")
+    )
 
     default_location: str = Field(default="westeurope")
     allowed_locations: list[str] = Field(
@@ -100,26 +107,57 @@ class AzureConfig(BaseModel):
     max_cost_per_month: float = Field(default=10000.0, ge=0)
 
     deployment_timeout_seconds: int = Field(default=3600, ge=60)
-    max_retry_attempts: int = Field(default=3, ge=1, le=10)
-    retry_backoff_seconds: float = Field(default=1.0, ge=0.1, le=60)
+    max_retry_attempts: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        validation_alias=AliasChoices("RETRY_MAX_ATTEMPTS", "AZURE__MAX_RETRY_ATTEMPTS"),
+    )
+    retry_backoff_seconds: float = Field(
+        default=1.0,
+        ge=0.1,
+        le=60,
+        validation_alias=AliasChoices("RETRY_BACKOFF_SECONDS", "AZURE__RETRY_BACKOFF_SECONDS"),
+    )
 
 
 class LLMConfig(BaseModel):
     """LLM provider configuration."""
 
-    default_provider: Literal["openai", "gemini", "ollama", "azure"] = "openai"
+    default_provider: Literal["openai", "gemini", "ollama", "azure"] = Field(
+        default="openai",
+        validation_alias=AliasChoices("LLM_PROVIDER", "LLM__DEFAULT_PROVIDER"),
+    )
 
-    openai_api_key: SecretStr | None = None
-    openai_api_base: str = "https://api.openai.com/v1"
-    openai_model: str = Field(default="gpt-4o-mini")
+    openai_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("OPENAI_API_KEY", "OPENAI_KEY", "LLM__OPENAI_API_KEY"),
+    )
+    openai_api_base: str = Field(
+        default="https://api.openai.com/v1",
+        validation_alias=AliasChoices("OPENAI_BASE_URL", "LLM__OPENAI_API_BASE"),
+    )
+
+    openai_model: str = Field(
+        default="gpt-5", validation_alias=AliasChoices("OPENAI_MODEL", "LLM__OPENAI_MODEL")
+    )
     openai_max_tokens: int = Field(default=4096, ge=1, le=128000)
     openai_temperature: float = Field(default=0.7, ge=0, le=2)
 
-    gemini_api_key: SecretStr | None = None
-    gemini_model: str = Field(default="gemini-1.5-pro")
+    gemini_api_key: SecretStr | None = Field(
+        default=None, validation_alias=AliasChoices("GEMINI_API_KEY", "LLM__GEMINI_API_KEY")
+    )
+    gemini_model: str = Field(
+        default="gemini-1.5-pro", validation_alias=AliasChoices("GEMINI_MODEL", "LLM__GEMINI_MODEL")
+    )
 
-    ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = Field(default="llama3.1")
+    ollama_base_url: str = Field(
+        default="http://localhost:11434",
+        validation_alias=AliasChoices("OLLAMA_BASE_URL", "LLM__OLLAMA_BASE_URL"),
+    )
+    ollama_model: str = Field(
+        default="llama3.1", validation_alias=AliasChoices("OLLAMA_MODEL", "LLM__OLLAMA_MODEL")
+    )
 
     requests_per_minute: int = Field(default=60, ge=1)
     tokens_per_minute: int = Field(default=90000, ge=1)
@@ -164,6 +202,39 @@ class CacheConfig(BaseModel):
     auto_invalidate_on_update: bool = Field(default=True)
 
 
+class MemoryConfig(BaseModel):
+    """In-app memory caps. Legacy envs supported."""
+
+    max_memory: int = Field(
+        default=25, ge=1, validation_alias=AliasChoices("MAX_MEMORY", "MEMORY__MAX_MEMORY")
+    )
+    max_total_memory: int = Field(
+        default=100,
+        ge=1,
+        validation_alias=AliasChoices("MAX_TOTAL_MEMORY", "MEMORY__MAX_TOTAL_MEMORY"),
+    )
+
+
+class RetryConfig(BaseModel):
+    """HTTP timeouts and retry strategy. Legacy envs supported."""
+
+    request_timeout_seconds: float = Field(
+        default=60.0,
+        ge=1,
+        validation_alias=AliasChoices("REQUEST_TIMEOUT_SECONDS", "HTTP__REQUEST_TIMEOUT_SECONDS"),
+    )
+    retry_max_attempts: int = Field(
+        default=3,
+        ge=0,
+        validation_alias=AliasChoices("RETRY_MAX_ATTEMPTS", "HTTP__RETRY_MAX_ATTEMPTS"),
+    )
+    retry_backoff_seconds: float = Field(
+        default=0.8,
+        ge=0,
+        validation_alias=AliasChoices("RETRY_BACKOFF_SECONDS", "HTTP__RETRY_BACKOFF_SECONDS"),
+    )
+
+
 class Settings(BaseSettings):
     """Main application settings."""
 
@@ -190,6 +261,8 @@ class Settings(BaseSettings):
     llm: LLMConfig = Field(default_factory=lambda: LLMConfig())
     observability: ObservabilityConfig = Field(default_factory=lambda: ObservabilityConfig())
     cache: CacheConfig = Field(default_factory=lambda: CacheConfig())
+    memory: MemoryConfig = Field(default_factory=lambda: MemoryConfig())
+    retry: RetryConfig = Field(default_factory=lambda: RetryConfig())
 
     def validate_environment_settings(self) -> None:
         """Validate settings based on environment."""
@@ -316,8 +389,14 @@ GEMINI_API_KEY = (
 )
 OLLAMA_BASE_URL = settings.llm.ollama_base_url
 
-MAX_MEMORY = 100
-MAX_TOTAL_MEMORY = 1000
-REQUEST_TIMEOUT_SECONDS = 60.0
-RETRY_MAX_ATTEMPTS = settings.azure.max_retry_attempts
-RETRY_BACKOFF_SECONDS = settings.azure.retry_backoff_seconds
+
+OPENAI_MODEL = settings.llm.openai_model
+GEMINI_MODEL = settings.llm.gemini_model
+OLLAMA_MODEL = settings.llm.ollama_model
+
+
+MAX_MEMORY = settings.memory.max_memory
+MAX_TOTAL_MEMORY = settings.memory.max_total_memory
+REQUEST_TIMEOUT_SECONDS = settings.retry.request_timeout_seconds
+RETRY_MAX_ATTEMPTS = settings.retry.retry_max_attempts
+RETRY_BACKOFF_SECONDS = settings.retry.retry_backoff_seconds

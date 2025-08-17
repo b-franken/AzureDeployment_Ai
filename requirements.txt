@@ -53,10 +53,10 @@ uvicorn[standard]>=0.30
 httpx>=0.27
 torch
 transformers
-argon2-cffi>=23.1.0
 PyJWT
 asyncpg
 redis
 mcp.server  
 structlog
 prometheus_client
+pymongo

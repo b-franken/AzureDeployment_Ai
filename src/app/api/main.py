@@ -6,12 +6,14 @@ from collections.abc import Awaitable, Callable
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from starlette.routing import Mount, Route, WebSocketRoute
 
 from app.api.middleware.rate_limiter import RateLimitConfig, RateLimiter
 from app.api.routes.chat import router as chat_router
 from app.api.routes.review import router as review_router
 from app.api.v2 import router as v2_router
+from app.core.config import settings
 from app.observability.prometheus import instrument_app
 
 print("MAIN FILE:", __file__)
@@ -24,6 +26,11 @@ instrument_app(app)
 @app.get("/_routes")
 def _routes() -> list[str]:
     return [r.path for r in app.routes if isinstance(r, APIRoute | Route | Mount | WebSocketRoute)]
+
+
+@app.get("/metrics")
+def metrics() -> Response:
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 origins_raw = os.getenv("CORS_ORIGINS", "*").strip()
@@ -42,7 +49,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-limiter = RateLimiter(RateLimitConfig(requests_per_minute=30, requests_per_hour=1000))
+limiter = RateLimiter(
+    RateLimitConfig(
+        requests_per_minute=settings.security.api_rate_limit_per_minute,
+        requests_per_hour=settings.security.api_rate_limit_per_hour,
+        burst_size=10,
+        enable_ip_tracking=True,
+        enable_user_tracking=True,
+        redis_url=str(settings.database.redis_dsn) if settings.database.redis_dsn else None,
+    )
+)
 
 
 @app.middleware("http")

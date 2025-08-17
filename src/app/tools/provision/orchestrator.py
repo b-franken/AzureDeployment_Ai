@@ -2,18 +2,26 @@ from __future__ import annotations
 
 import importlib
 import json
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from app.common.envs import ALLOWED_ENVS, Env
 from app.tools.base import Tool, ToolResult
 
 from .backends import BicepBackend as LegacyBicepBackend
 from .backends import SdkBackend, TerraformBackend
+from .backends.base import Backend
 from .models import Backend as BackendLiteral
 from .models import ProvisionSpec
 from .router import pick_backend
 
-Product = Literal["web_app", "storage_account"]
+Product = Literal[
+    "web_app",
+    "storage_account",
+    "aks_cluster",
+    "container_registry",
+    "api_management",
+    "event_hub",
+]
 BackendName = Literal["sdk", "terraform", "bicep"]
 
 
@@ -42,10 +50,10 @@ def _load_avm_backend_cls() -> Any | None:
         return None
 
 
-def _choose_bicep_backend() -> tuple[Literal["avm", "legacy"], Any]:
+def _choose_bicep_backend() -> tuple[Literal["avm", "legacy"], Backend]:
     avm_cls = _load_avm_backend_cls()
     if avm_cls is not None:
-        return "avm", avm_cls()
+        return "avm", cast(Backend, avm_cls())
     return "legacy", LegacyBicepBackend()
 
 
@@ -55,17 +63,23 @@ class ProvisionOrchestrator(Tool):
     schema: dict[str, object] = {
         "type": "object",
         "properties": {
-            "product": {"type": "string", "enum": ["web_app", "storage_account"]},
+            "product": {
+                "type": "string",
+                "enum": [
+                    "web_app",
+                    "storage_account",
+                    "aks_cluster",
+                    "container_registry",
+                    "api_management",
+                    "event_hub",
+                ],
+            },
             "backend": {
                 "type": "string",
                 "enum": ["auto", "terraform", "bicep", "sdk"],
                 "default": "auto",
             },
-            "env": {
-                "type": "string",
-                "enum": list(ALLOWED_ENVS),
-                "default": "dev",
-            },
+            "env": {"type": "string", "enum": list(ALLOWED_ENVS), "default": "dev"},
             "plan_only": {"type": "boolean", "default": True},
             "parameters": {"type": "object", "additionalProperties": True},
         },
@@ -82,72 +96,49 @@ class ProvisionOrchestrator(Tool):
         plan_only: bool = True,
     ) -> ToolResult:
         try:
-            spec = ProvisionSpec(
-                product=product,
-                env=env,
-                backend=backend,
-                plan_only=plan_only,
-                parameters=parameters,
-            ).dict()
-        except Exception as e:
-            return _err("Invalid specification", str(e))
+            try:
+                spec = ProvisionSpec(
+                    product=product,
+                    env=env,
+                    backend=backend,
+                    plan_only=plan_only,
+                    parameters=parameters,
+                ).dict()
+            except Exception as e:
+                return _err("Invalid specification", str(e))
 
-        chosen: BackendName = pick_backend(
-            env=spec["env"],
-            requested=spec["backend"],
-            plan_only=spec["plan_only"],
-        )
+            chosen: BackendName = pick_backend(
+                env=spec["env"], requested=spec["backend"], plan_only=spec["plan_only"]
+            )
 
-        be: Any
-        if chosen == "sdk":
-            be = SdkBackend()
-            chosen_label = "sdk"
-        elif chosen == "terraform":
-            be = TerraformBackend()
-            chosen_label = "terraform"
-        elif chosen == "bicep":
-            bicep_mode, be = _choose_bicep_backend()
-            chosen_label = "bicep-avm" if bicep_mode == "avm" else "bicep-legacy"
-            if not plan_only and bicep_mode == "legacy":
-                return _err(
-                    "bicep apply is not supported with the legacy backend",
-                    "AVM-based Bicep backend is not available. Enable plan_only or choose sdk.",
+            be: Backend
+            chosen_label: str
+            if chosen == "sdk":
+                be = SdkBackend()
+                chosen_label = "sdk"
+            elif chosen == "terraform":
+                be = TerraformBackend()
+                chosen_label = "terraform"
+            elif chosen == "bicep":
+                mode, be = _choose_bicep_backend()
+                chosen_label = "bicep-avm" if mode == "avm" else "bicep"
+            else:
+                be = SdkBackend()
+                chosen_label = "sdk"
+
+            if spec["plan_only"]:
+                ok_plan, plan_out = await be.plan(spec)
+                return (
+                    _ok(f"{chosen_label} plan", plan_out)
+                    if ok_plan
+                    else _err(f"{chosen_label} plan failed", plan_out)
                 )
-        else:
-            return _err("Unknown backend", chosen)
 
-        ok, plan_text = await be.plan(spec)
-        if not ok:
-            return _err(f"{chosen_label} plan failed", plan_text)
-
-        if plan_only:
-            return _ok(
-                f"{chosen_label} plan",
-                {
-                    "product": spec["product"],
-                    "env": spec["env"],
-                    "backend": chosen_label,
-                    "plan": plan_text,
-                },
+            ok_apply, apply_out = await be.apply(spec)
+            return (
+                _ok(f"{chosen_label} apply", apply_out)
+                if ok_apply
+                else _err(f"{chosen_label} apply failed", apply_out)
             )
-
-        if isinstance(be, TerraformBackend):
-            return _err(
-                "terraform apply is not supported",
-                "Enable plan_only or choose sdk or bicep.",
-            )
-
-        ok, outputs = await be.apply(spec)
-        if not ok:
-            return _err(f"{chosen_label} apply failed", outputs)
-
-        return _ok(
-            f"{chosen_label} applied",
-            {
-                "product": spec["product"],
-                "env": spec["env"],
-                "backend": chosen_label,
-                "plan": plan_text,
-                "apply": outputs,
-            },
-        )
+        except Exception as e:
+            return _err("orchestrator error", str(e))

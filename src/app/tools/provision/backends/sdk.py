@@ -20,6 +20,15 @@ class ActionArgs(TypedDict, total=False):
     access_tier: str
     dry_run: bool
     force: bool
+    dns_prefix: str
+    node_count: int
+    admin_user_enabled: bool
+    capacity: int
+    publisher_email: str
+    publisher_name: str
+    tier: str
+    auto_inflate: bool
+    max_throughput: int
 
 
 class Action(TypedDict):
@@ -40,8 +49,7 @@ class SdkBackend(Backend):
                 self.azure = AzureProvision()
             except Exception as e:
                 logger.warning(
-                    "Failed to import AzureProvision; proceeding without Azure SDK. %s",
-                    e,
+                    "Failed to import AzureProvision; proceeding without Azure SDK. %s", e
                 )
                 self.azure = None
 
@@ -128,6 +136,118 @@ class SdkBackend(Backend):
                 },
             ]
 
+        if product == "aks_cluster":
+            return [
+                {
+                    "action": "create_rg",
+                    "args": {
+                        "resource_group": p["resource_group"],
+                        "location": p["location"],
+                        "tags": tags,
+                        "dry_run": False,
+                        "force": False,
+                    },
+                },
+                {
+                    "action": "create_aks",
+                    "args": {
+                        "resource_group": p["resource_group"],
+                        "location": p["location"],
+                        "name": p["name"],
+                        "dns_prefix": p["dns_prefix"],
+                        "node_count": int(p.get("node_count", 2)),
+                        "tags": tags,
+                        "dry_run": False,
+                        "force": False,
+                    },
+                },
+            ]
+
+        if product == "container_registry":
+            return [
+                {
+                    "action": "create_rg",
+                    "args": {
+                        "resource_group": p["resource_group"],
+                        "location": p["location"],
+                        "tags": tags,
+                        "dry_run": False,
+                        "force": False,
+                    },
+                },
+                {
+                    "action": "create_acr",
+                    "args": {
+                        "resource_group": p["resource_group"],
+                        "location": p["location"],
+                        "name": p["name"],
+                        "sku": p.get("sku", "Basic"),
+                        "admin_user_enabled": bool(p.get("admin_user_enabled", True)),
+                        "tags": tags,
+                        "dry_run": False,
+                        "force": False,
+                    },
+                },
+            ]
+
+        if product == "api_management":
+            return [
+                {
+                    "action": "create_rg",
+                    "args": {
+                        "resource_group": p["resource_group"],
+                        "location": p["location"],
+                        "tags": tags,
+                        "dry_run": False,
+                        "force": False,
+                    },
+                },
+                {
+                    "action": "create_apim",
+                    "args": {
+                        "resource_group": p["resource_group"],
+                        "location": p["location"],
+                        "name": p["name"],
+                        "sku": p.get("sku_name", "Developer"),
+                        "capacity": int(p.get("capacity", 1)),
+                        "publisher_email": p.get("publisher_email", "admin@contoso.com"),
+                        "publisher_name": p.get("publisher_name", "Contoso"),
+                        "tags": tags,
+                        "dry_run": False,
+                        "force": False,
+                    },
+                },
+            ]
+
+        if product == "event_hub":
+            return [
+                {
+                    "action": "create_rg",
+                    "args": {
+                        "resource_group": p["resource_group"],
+                        "location": p["location"],
+                        "tags": tags,
+                        "dry_run": False,
+                        "force": False,
+                    },
+                },
+                {
+                    "action": "create_eventhub",
+                    "args": {
+                        "resource_group": p["resource_group"],
+                        "location": p["location"],
+                        "name": p["name"],
+                        "tier": p.get("tier", "Standard"),
+                        "capacity": int(p.get("capacity", 1)),
+                        "auto_inflate": bool(p.get("auto_inflate", True)),
+                        "max_throughput": int(p.get("max_throughput", 10)),
+                        "tags": tags,
+                        "dry_run": False,
+                        "force": False,
+                    },
+                },
+            ]
+
         return []
 
     async def plan(self, spec: dict[str, Any]) -> PlanResult:
@@ -142,10 +262,8 @@ class SdkBackend(Backend):
     async def apply(self, spec: dict[str, Any]) -> ApplyResult:
         if self.azure is None:
             return False, {"message": "Azure SDK not initialized"}
-
         actions = self._build_actions(spec)
         results: dict[str, Any] = {"steps": []}
-
         for a in actions:
             try:
                 res = await self.azure.run(action=a["action"], **a["args"])
@@ -170,7 +288,6 @@ class SdkBackend(Backend):
                     }
                 )
                 return False, results
-
         return True, results
 
     def _summarize_plan(self, title: str, items: list[Action]) -> str:

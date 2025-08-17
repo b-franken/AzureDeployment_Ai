@@ -17,118 +17,36 @@ def _bind(mod: str, attr: str) -> str:
 
 
 _LAZY_BINDINGS: dict[str, str] = {
-    "create_rg": _bind(
-        "resource_groups",
-        "create_resource_group",
-    ),
-    "create_storage": _bind(
-        "storage",
-        "create_storage_account",
-    ),
-    "create_blob_container": _bind(
-        "storage",
-        "create_blob_container",
-    ),
-    "create_file_share": _bind(
-        "storage",
-        "create_file_share",
-    ),
-    "create_vnet": _bind(
-        "network",
-        "create_vnet",
-    ),
-    "create_subnet": _bind(
-        "network",
-        "create_subnet",
-    ),
-    "create_public_ip": _bind(
-        "network",
-        "create_public_ip",
-    ),
-    "create_nsg": _bind(
-        "network",
-        "create_nsg",
-    ),
-    "create_lb": _bind(
-        "network",
-        "create_lb",
-    ),
-    "create_app_gateway": _bind(
-        "network",
-        "create_app_gateway",
-    ),
-    "create_plan": _bind(
-        "webapp",
-        "create_plan",
-    ),
-    "create_webapp": _bind(
-        "webapp",
-        "create_webapp",
-    ),
-    "create_acr": _bind(
-        "acr",
-        "create_registry",
-    ),
-    "create_aks": _bind(
-        "aks",
-        "create_aks",
-    ),
-    "create_vm": _bind(
-        "compute",
-        "create_vm",
-    ),
-    "create_sql": _bind(
-        "sql",
-        "create_sql",
-    ),
-    "create_keyvault": _bind(
-        "keyvault",
-        "create_keyvault",
-    ),
-    "set_keyvault_secret": _bind(
-        "keyvault",
-        "set_keyvault_secret",
-    ),
-    "create_cosmos": _bind(
-        "cosmos",
-        "create_cosmos_account",
-    ),
-    "create_sp": _bind(
-        "iam",
-        "create_service_principal",
-    ),
-    "assign_role": _bind(
-        "iam",
-        "assign_role",
-    ),
-    "create_log_analytics_workspace": _bind(
-        "monitor",
-        "create_log_analytics_workspace",
-    ),
-    "create_app_insights": _bind(
-        "monitor",
-        "create_app_insights",
-    ),
-    "create_user_assigned_identity": _bind(
-        "identity",
-        "create_user_assigned_identity",
-    ),
-    "create_redis": _bind(
-        "redis",
-        "create_redis",
-    ),
-    "create_private_dns_zone": _bind(
-        "private_dns",
-        "create_private_dns_zone",
-    ),
-    "link_private_dns_zone": _bind(
-        "private_dns",
-        "link_private_dns_zone",
-    ),
-    "create_private_endpoint": _bind(
-        "private_link",
-        "create_private_endpoint",
-    ),
+    "create_rg": _bind("resource_groups", "create_resource_group"),
+    "create_storage": _bind("storage", "create_storage_account"),
+    "create_blob_container": _bind("storage", "create_blob_container"),
+    "create_file_share": _bind("storage", "create_file_share"),
+    "create_vnet": _bind("network", "create_vnet"),
+    "create_subnet": _bind("network", "create_subnet"),
+    "create_public_ip": _bind("network", "create_public_ip"),
+    "create_nsg": _bind("network", "create_nsg"),
+    "create_lb": _bind("network", "create_lb"),
+    "create_app_gateway": _bind("network", "create_app_gateway"),
+    "create_plan": _bind("webapp", "create_plan"),
+    "create_webapp": _bind("webapp", "create_webapp"),
+    "create_acr": _bind("acr", "create_registry"),
+    "create_aks": _bind("aks", "create_aks"),
+    "create_vm": _bind("compute", "create_vm"),
+    "create_sql": _bind("sql", "create_sql"),
+    "create_keyvault": _bind("keyvault", "create_keyvault"),
+    "set_keyvault_secret": _bind("keyvault", "set_keyvault_secret"),
+    "create_cosmos": _bind("cosmos", "create_cosmos_account"),
+    "create_sp": _bind("iam", "create_service_principal"),
+    "assign_role": _bind("iam", "assign_role"),
+    "create_log_analytics_workspace": _bind("monitor", "create_log_analytics_workspace"),
+    "create_app_insights": _bind("monitor", "create_app_insights"),
+    "create_user_assigned_identity": _bind("identity", "create_user_assigned_identity"),
+    "create_redis": _bind("redis", "create_redis"),
+    "create_private_dns_zone": _bind("private_dns", "create_private_dns_zone"),
+    "link_private_dns_zone": _bind("private_dns", "link_private_dns_zone"),
+    "create_private_endpoint": _bind("private_link", "create_private_endpoint"),
+    "create_apim": _bind("apim", "create_apim"),
+    "create_eventhub": _bind("eventhub", "create_eventhub"),
 }
 
 _ALIASES_BASE: dict[str, str] = {
@@ -155,21 +73,15 @@ _ALIASES_BASE: dict[str, str] = {
     "create_private_dns": "create_private_dns_zone",
     "link_private_dns": "link_private_dns_zone",
     "create_pe": "create_private_endpoint",
+    "create_api_management": "create_apim",
+    "create_event_hub": "create_eventhub",
 }
 
 _ALIAS_LOOKUP: dict[str, str] = {}
 
 _NORMALIZE_RE = re.compile(r"[^a-z0-9_]+")
 
-_VERBS_CREATE: list[str] = [
-    "create",
-    "make",
-    "new",
-    "provision",
-    "ensure",
-    "setup",
-    "add",
-]
+_VERBS_CREATE: list[str] = ["create", "make", "new", "provision", "ensure", "setup", "add"]
 _VERBS_SET: list[str] = ["set", "create", "add", "put", "update"]
 _VERBS_ASSIGN: list[str] = ["assign", "grant", "add", "attach"]
 
@@ -183,12 +95,7 @@ _OBJ_SYNONYMS: dict[str, list[str]] = {
     "public_ip": ["public_ip", "public ip", "pip"],
     "nsg": ["network_security_group", "network security group", "nsg"],
     "lb": ["load_balancer", "load balancer", "lb"],
-    "app_gateway": [
-        "application_gateway",
-        "application gateway",
-        "app gateway",
-        "appgw",
-    ],
+    "app_gateway": ["application_gateway", "application gateway", "app gateway", "appgw"],
     "plan": ["app_service_plan", "app service plan", "plan"],
     "webapp": ["webapp", "web app", "app service", "website"],
     "acr": ["container_registry", "container registry", "acr"],

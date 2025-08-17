@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import wraps
-from typing import Any, Generic, TypeVar, Union, cast, get_args, get_origin
+from typing import Any, TypeVar, Union, cast, get_args, get_origin
 from weakref import WeakKeyDictionary, WeakValueDictionary
 
 from app.core.exceptions import ConfigurationError
@@ -25,7 +25,7 @@ class Scope(str, Enum):
     TRANSIENT = "transient"
 
 
-class InjectionToken(Generic[T]):
+class InjectionToken[T]:
     def __init__(self, name: str, type_hint: type[T] | None = None):
         self.name = name
         self.type_hint = type_hint

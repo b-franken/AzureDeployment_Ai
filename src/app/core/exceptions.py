@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import sys
 import traceback
 from collections import defaultdict
@@ -121,7 +122,7 @@ class BaseApplicationException(Exception):
         self.severity = severity or self.severity
         self.category = category or self.category
         self.retryable = retryable if retryable is not None else self.retryable
-        self.user_message = user_message or self.user_message
+        self.user_message = user_message or self.user_message or message
         self.details = details or {}
         self.cause = cause
         self.timestamp = datetime.utcnow()
@@ -165,7 +166,7 @@ class AuthenticationException(BaseApplicationException):
 class AuthorizationException(BaseApplicationException):
     severity = ErrorSeverity.WARNING
     category = ErrorCategory.AUTHORIZATION
-    user_message = "You don't have permission to perform this action"
+    user_message = "You do not have permission to perform this action"
 
 
 class ResourceNotFoundException(BaseApplicationException):
@@ -326,42 +327,65 @@ class ErrorHandler:
     ) -> None:
         self.recovery_strategies[category] = strategy
 
+    def get_circuit(self, key: str, **kwargs: Any) -> CircuitBreaker:
+        cb = self.circuit_breakers.get(key)
+        if cb is None:
+            cb = CircuitBreaker(**kwargs)
+            self.circuit_breakers[key] = cb
+        return cb
+
     async def handle_error(
         self,
         error: Exception,
         context: dict[str, Any] | None = None,
         recover: bool = True,
     ) -> Any | None:
-        if isinstance(error, BaseApplicationException):
-            error_context = error.get_context()
-        else:
-            error_context = self._create_error_context(error)
+        import time
 
-        if context:
-            error_context.request_data.update(context)
+        start = time.monotonic()
+        metrics_updated = False
+        error_type_for_metrics: str | None = None
 
-        self._log_error(error_context)
-        self._update_metrics(error_context)
-        self._store_error(error_context)
+        try:
+            if isinstance(error, BaseApplicationException):
+                error_context = error.get_context()
+            else:
+                error_context = self._create_error_context(error)
 
-        for handler in self.handlers.get(type(error), []):
-            try:
-                await handler(error)
-            except Exception as e:
-                self.logger.error("Error handler failed", error=str(e))
+            if context:
+                error_context.request_data.update(context)
 
-        if recover and isinstance(error, BaseApplicationException):
-            strategy = self.recovery_strategies.get(error.category)
-            if strategy and await strategy.can_recover(error):
+            self._log_error(error_context)
+            self._update_metrics(error_context)
+            metrics_updated = True
+            error_type_for_metrics = error_context.error_type
+            self._store_error(error_context)
+
+            for handler in self.handlers.get(type(error), []):
                 try:
-                    error_context.recovery_attempted = True
-                    result = await strategy.recover(error, error_context)
-                    error_context.recovery_successful = True
-                    return result
+                    res = handler(error)
+                    if inspect.isawaitable(res):
+                        await res
                 except Exception as e:
-                    self.logger.error("Recovery failed", error=str(e))
+                    self.logger.error("Error handler failed", error=str(e))
 
-        raise error
+            if recover and isinstance(error, BaseApplicationException):
+                strategy = self.recovery_strategies.get(error.category)
+                if strategy and await strategy.can_recover(error):
+                    try:
+                        error_context.recovery_attempted = True
+                        result = await strategy.recover(error, error_context)
+                        error_context.recovery_successful = True
+                        return result
+                    except Exception as e:
+                        self.logger.error("Recovery failed", error=str(e))
+
+            raise error
+        finally:
+            if metrics_updated and error_type_for_metrics:
+                duration = time.monotonic() - start
+                error_duration.labels(error_type=error_type_for_metrics).observe(duration)
+                active_errors.labels(error_type=error_type_for_metrics).dec()
 
     def _create_error_context(self, error: Exception) -> ErrorContext:
         import uuid
@@ -442,17 +466,43 @@ def handle_errors(
                     return await handler.handle_error(e, recover=recover)
                 except Exception:
                     if default_return is not None:
+                        logger = structlog.get_logger()
+                        if log_level == ErrorSeverity.DEBUG:
+                            logger.debug("Handled error with default return", error=str(e))
+                        elif log_level == ErrorSeverity.INFO:
+                            logger.info("Handled error with default return", error=str(e))
+                        elif log_level == ErrorSeverity.WARNING:
+                            logger.warning("Handled error with default return", error=str(e))
+                        elif log_level in (ErrorSeverity.CRITICAL, ErrorSeverity.FATAL):
+                            logger.critical("Handled error with default return", error=str(e))
+                        else:
+                            logger.error("Handled error with default return", error=str(e))
                         return default_return
                     raise
 
         @wraps(func)
         def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+            handler = ErrorHandler()
             try:
                 return func(*args, **kwargs)
-            except Exception:
-                if default_return is not None:
-                    return default_return
-                raise
+            except Exception as e:
+                try:
+                    return asyncio.run(handler.handle_error(e, recover=recover))
+                except Exception:
+                    if default_return is not None:
+                        logger = structlog.get_logger()
+                        if log_level == ErrorSeverity.DEBUG:
+                            logger.debug("Handled error with default return", error=str(e))
+                        elif log_level == ErrorSeverity.INFO:
+                            logger.info("Handled error with default return", error=str(e))
+                        elif log_level == ErrorSeverity.WARNING:
+                            logger.warning("Handled error with default return", error=str(e))
+                        elif log_level in (ErrorSeverity.CRITICAL, ErrorSeverity.FATAL):
+                            logger.critical("Handled error with default return", error=str(e))
+                        else:
+                            logger.error("Handled error with default return", error=str(e))
+                        return default_return
+                    raise
 
         return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
 
@@ -462,12 +512,12 @@ def handle_errors(
 def retry_on_error(
     max_retries: int = 3,
     delay: float = 1.0,
-    exceptions: tuple = (Exception,),
+    exceptions: tuple[type[BaseException], ...] = (Exception,),
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(func)
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
-            last_exception: Exception | None = None
+            last_exception: BaseException | None = None
             for attempt in range(max_retries):
                 try:
                     return await func(*args, **kwargs)
@@ -475,21 +525,25 @@ def retry_on_error(
                     last_exception = e
                     if attempt < max_retries - 1:
                         await asyncio.sleep(delay * (2**attempt))
-            raise last_exception  # type: ignore[misc]
+            if last_exception is not None:
+                raise last_exception
+            raise RuntimeError("retry_on_error reached an impossible state")
 
         @wraps(func)
         def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
-            last_exception: Exception | None = None
+            import time
+
+            last_exception: BaseException | None = None
             for attempt in range(max_retries):
                 try:
                     return func(*args, **kwargs)
                 except exceptions as e:
                     last_exception = e
                     if attempt < max_retries - 1:
-                        import time
-
                         time.sleep(delay * (2**attempt))
-            raise last_exception  # type: ignore[misc]
+            if last_exception is not None:
+                raise last_exception
+            raise RuntimeError("retry_on_error reached an impossible state")
 
         return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
 

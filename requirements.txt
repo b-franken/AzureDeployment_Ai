@@ -60,3 +60,9 @@ mcp.server
 structlog
 prometheus_client
 pymongo
+azure-monitor-opentelemetry
+opentelemetry-instrumentation-fastapi
+opentelemetry-instrumentation-asgi
+opentelemetry-instrumentation-httpx
+opentelemetry-instrumentation-asyncpg
+opentelemetry-instrumentation-pymongo

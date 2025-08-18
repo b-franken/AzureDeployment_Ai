@@ -7,8 +7,10 @@ from collections.abc import Awaitable, Callable
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from starlette.routing import Mount, Route, WebSocketRoute
 
+from app.api.middleware.correlation import install_correlation_middleware
 from app.api.middleware.rate_limiter import RateLimitConfig, RateLimiter
 from app.api.routes.audit import router as audit_router
 from app.api.routes.auth import router as auth_router
@@ -21,7 +23,7 @@ from app.api.routes.review import router as review_router
 from app.api.routes.status import router as status_router
 from app.core.config import settings
 from app.observability.prometheus import instrument_app
-from app.observability.tracing import init as init_tracing
+from app.observability.tracing import init_tracing
 
 logger = logging.getLogger(__name__)
 
@@ -31,15 +33,7 @@ APP_VERSION = os.getenv("APP_VERSION", "2.0.0")
 app = FastAPI(title="DevOps AI API", version=APP_VERSION)
 instrument_app(app)
 init_tracing("devops-ai-api")
-
-
-@app.get("/_routes")
-def _routes() -> list[str]:
-    return [
-        r.path for r in app.routes if isinstance(r, (APIRoute | Route | Mount | WebSocketRoute))
-    ]
-
-
+FastAPIInstrumentor.instrument_app(app)
 origins_raw = os.getenv("CORS_ORIGINS", "*").strip()
 if origins_raw in {"", "*"}:
     allow_origins = ["*"]
@@ -55,6 +49,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+install_correlation_middleware(app)
 
 limiter = RateLimiter(
     RateLimitConfig(
@@ -80,9 +76,16 @@ async def _rl_mw(
     await limiter.check_rate_limit(request)
     try:
         return await call_next(request)
-    except Exception as exc:  # pragma: no cover - defensive
+    except Exception as exc:
         logger.exception("Middleware error")
         raise HTTPException(status_code=500, detail="Internal Server Error") from exc
+
+
+@app.get("/_routes")
+def _routes() -> list[str]:
+    return [
+        r.path for r in app.routes if isinstance(r, (APIRoute | Route | Mount | WebSocketRoute))
+    ]
 
 
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])

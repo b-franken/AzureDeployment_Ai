@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from collections.abc import AsyncGenerator
-import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response

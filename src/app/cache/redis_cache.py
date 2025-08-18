@@ -1,13 +1,5 @@
 from __future__ import annotations
 
-"""Redis-based cache utilities.
-
-This module accepts JSON-compatible primitives (``str``, ``int``, ``float``,
-``bool``, ``None``), lists and dictionaries. Bytes-like objects are supported by
-base64 encoding their contents within a JSON object. This avoids the security
-risks associated with ``pickle`` while still allowing binary data to be cached.
-"""
-
 import base64
 import binascii
 import json
@@ -59,7 +51,7 @@ class CacheManager:
         if not deserialize:
             return value
 
-        if isinstance(value, (bytes, bytearray, memoryview)):
+        if isinstance(value, (bytes | bytearray | memoryview)):
             raw = bytes(value).decode()
         else:
             raw = str(value)
@@ -88,7 +80,7 @@ class CacheManager:
         ttl = ttl or self.default_ttl
 
         if serialize:
-            if isinstance(value, (bytes, bytearray, memoryview)):
+            if isinstance(value, (bytes | bytearray | memoryview)):
                 b64 = base64.b64encode(bytes(value)).decode()
                 value = json.dumps({"__type__": "bytes", "data": b64})
             else:

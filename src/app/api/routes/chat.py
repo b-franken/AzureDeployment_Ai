@@ -9,12 +9,43 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from app.ai.llm.factory import get_provider_and_model
 from app.api.routes.auth import auth_dependency
-from app.api.schemas import ChatRequest, ChatRequestV2, ChatResponse, TokenData
+from app.api.routes.schemas import ChatRequest, ChatRequestV2, ChatResponse, TokenData
 from app.api.services import run_chat
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+async def _stream_plain_chat(req: ChatRequest) -> AsyncGenerator[bytes, None]:
+    llm, model = await get_provider_and_model(req.provider, req.model)
+    if not hasattr(llm, "chat_stream"):
+        text = await run_chat(
+            req.input,
+            [m.model_dump() for m in req.memory or []],
+            req.provider,
+            req.model,
+            req.enable_tools,
+            req.preferred_tool,
+            req.allowlist,
+        )
+        chunk = 2048
+        for i in range(0, len(text), chunk):
+            yield f"data: {text[i : i + chunk]}\n\n".encode()
+            await asyncio.sleep(0)
+        yield b"data: [DONE]\n\n"
+        return
+
+    memory = [m.model_dump() for m in req.memory or []]
+    messages = [{"role": m["role"], "content": m["content"]} for m in memory]
+    messages.append({"role": "user", "content": req.input})
+    # type: ignore[attr-defined]
+    async for token in llm.chat_stream(model=model, messages=messages):
+        if token:
+            yield f"data: {token}\n\n".encode()
+            await asyncio.sleep(0)
+    yield b"data: [DONE]\n\n"
 
 
 @router.post("", response_model=ChatResponse)
@@ -25,6 +56,9 @@ async def chat(
     td: Annotated[TokenData, Depends(auth_dependency)] = None,
 ) -> Response:
     try:
+        if stream and not req.enable_tools:
+            return StreamingResponse(_stream_plain_chat(req), media_type="text/event-stream")
+
         text = await run_chat(
             req.input,
             [m.model_dump() for m in req.memory or []],

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from typing import Any, cast
 
 import httpx
@@ -32,12 +33,20 @@ class OpenAIProvider(LLMProvider):
         self._default_model = settings.llm.openai_model
         self._tracer = trace.get_tracer("llm.openai")
 
+    def list_models(self) -> list[str]:
+        try:
+            import asyncio
+
+            async def _do() -> list[str]:
+                resp = await self._client.models.list()
+                return [m.id for m in resp.data if getattr(m, "id", None)]
+
+            return asyncio.get_event_loop().run_until_complete(_do())
+        except Exception:
+            return ["gpt-4o-mini", "gpt-4o", "gpt-5"]
+
     @retry_on_error(max_retries=3, delay=1.0)
     async def chat(self, model: str, messages: list[Message]) -> str:
-        """
-        High level chat helper that returns only the assistant text.
-        Adds an OpenTelemetry span with useful LLM attributes and token usage.
-        """
         with self._tracer.start_as_current_span("openai.chat.completions") as span:
             span.set_attribute("llm.provider", "openai")
             span.set_attribute("llm.endpoint", "chat.completions")
@@ -51,7 +60,6 @@ class OpenAIProvider(LLMProvider):
                     model=model or self._default_model,
                     messages=formatted,
                 )
-
                 usage = getattr(resp, "usage", None)
                 if usage is not None:
                     span.set_attribute("llm.tokens.prompt", getattr(usage, "prompt_tokens", 0))
@@ -59,7 +67,6 @@ class OpenAIProvider(LLMProvider):
                         "llm.tokens.completion", getattr(usage, "completion_tokens", 0)
                     )
                     span.set_attribute("llm.tokens.total", getattr(usage, "total_tokens", 0))
-
                 content = resp.choices[0].message.content or ""
                 return content.strip()
             except Exception as err:
@@ -82,11 +89,9 @@ class OpenAIProvider(LLMProvider):
         tool_choice: str | None = "auto",
         temperature: float | None = None,
         max_tokens: int | None = None,
+        # JSON mode or JSON Schema
+        response_format: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """
-        Lower level chat helper that returns the full response model dump.
-        Also wrapped in an OpenTelemetry span and reports token usage.
-        """
         with self._tracer.start_as_current_span("openai.chat.completions.raw") as span:
             span.set_attribute("llm.provider", "openai")
             span.set_attribute("llm.endpoint", "chat.completions")
@@ -101,6 +106,8 @@ class OpenAIProvider(LLMProvider):
                     kwargs["tools"] = tools
                     if tool_choice is not None:
                         kwargs["tool_choice"] = tool_choice
+                if response_format:
+                    kwargs["response_format"] = response_format
                 if temperature is not None:
                     kwargs["temperature"] = float(temperature)
                 if max_tokens is not None:
@@ -127,3 +134,41 @@ class OpenAIProvider(LLMProvider):
                     " try a smaller prompt or wait a minute.",
                     retryable=True,
                 ) from err
+
+    @retry_on_error(max_retries=2, delay=0.5)
+    async def chat_stream(
+        self, model: str, messages: list[Message], temperature: float | None = None
+    ) -> AsyncGenerator[str, None]:
+        with self._tracer.start_as_current_span("openai.chat.completions.stream") as span:
+            span.set_attribute("llm.provider", "openai")
+            span.set_attribute("llm.endpoint", "chat.completions")
+            span.set_attribute("llm.model.requested", model or self._default_model)
+            try:
+                formatted = cast(
+                    list[ChatCompletionMessageParam],
+                    [{"role": str(m["role"]), "content": str(m["content"])} for m in messages],
+                )
+                kwargs: dict[str, Any] = {
+                    "model": model or self._default_model,
+                    "messages": formatted,
+                    "stream": True,
+                }
+                if temperature is not None:
+                    kwargs["temperature"] = float(temperature)
+                # type: ignore[arg-type]
+                stream = await self._client.chat.completions.create(**kwargs)
+                async for event in stream:
+                    try:
+                        ch = event.choices[0]
+                        piece = getattr(ch.delta, "content", None)
+                        if piece:
+                            yield str(piece)
+                    except Exception:
+                        continue
+                yield ""
+            except Exception as err:
+                current = trace.get_current_span()
+                if current:
+                    current.record_exception(err)
+                    current.set_status(Status(StatusCode.ERROR, str(err)))
+                raise

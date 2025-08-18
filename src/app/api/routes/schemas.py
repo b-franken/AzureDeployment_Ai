@@ -98,3 +98,19 @@ class CostAnalysisResponse(BaseModel):
     analysis: dict[str, Any]
     forecast: dict[str, Any] | None = None
     recommendations: list[dict[str, Any]] | None = None
+
+
+class StructuredChatRequest(BaseModel):
+    input: str = Field(..., min_length=1)
+    schema_: dict[str, Any] = Field(
+        ...,
+        description="JSON Schema for the expected output",
+        validation_alias="schema",
+        serialization_alias="schema",
+    )
+    provider: str | None = None
+    model: str | None = None
+
+
+class StructuredChatResponse(BaseModel):
+    response: dict[str, Any]

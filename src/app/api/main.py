@@ -10,6 +10,7 @@ from fastapi.routing import APIRoute
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from starlette.routing import Mount, Route, WebSocketRoute
 
+from app.api.error_handlers import install_error_handlers
 from app.api.middleware.correlation import install_correlation_middleware
 from app.api.middleware.rate_limiter import RateLimitConfig, RateLimiter
 from app.api.routes.audit import router as audit_router
@@ -34,6 +35,10 @@ app = FastAPI(title="DevOps AI API", version=APP_VERSION)
 instrument_app(app)
 init_tracing("devops-ai-api")
 FastAPIInstrumentor.instrument_app(app)
+
+
+install_error_handlers(app)
+
 origins_raw = os.getenv("CORS_ORIGINS", "*").strip()
 if origins_raw in {"", "*"}:
     allow_origins = ["*"]

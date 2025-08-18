@@ -30,7 +30,7 @@ async def generate_response(
         messages.extend(memory)
     messages.append(_msg("user", user_input))
 
-    llm, selected_model = get_provider_and_model(provider, model)
+    llm, selected_model = await get_provider_and_model(provider, model)
     logger.debug("llm=%s model=%s", provider or "auto", selected_model)
     try:
         return await llm.chat(selected_model, messages)

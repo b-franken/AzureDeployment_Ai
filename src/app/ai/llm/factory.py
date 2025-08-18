@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 import httpx
 
 from app.ai.llm.base import LLMProvider
@@ -20,41 +22,51 @@ _GEMINI_MODELS = ["gemini-1.5-pro", "gemini-1.5-flash"]
 
 _FALLBACK_OLLAMA_MODELS = ["llama3.1", "mistral", "gemma"]
 
+_OLLAMA_MODELS_CACHE: tuple[list[str], float] | None = None
+_OLLAMA_MODELS_TTL = 300  # seconds
+
 
 def available_providers() -> list[str]:
     return ["openai", "gemini", "ollama"]
 
 
-def _ollama_models() -> list[str]:
+async def _ollama_models() -> list[str]:
+    global _OLLAMA_MODELS_CACHE
+    now = time.time()
+    if _OLLAMA_MODELS_CACHE and now - _OLLAMA_MODELS_CACHE[1] < _OLLAMA_MODELS_TTL:
+        return _OLLAMA_MODELS_CACHE[0]
+    models = _FALLBACK_OLLAMA_MODELS
     try:
-        with httpx.Client(timeout=5.0) as client:
-            resp = client.get(f"{OLLAMA_BASE_URL.rstrip('/')}/api/tags")
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{OLLAMA_BASE_URL.rstrip('/')}/api/tags")
             resp.raise_for_status()
             data = resp.json()
-            models = data.get("models", [])
-            if models and isinstance(models, list):
-                model_names = []
-                for m in models:
+            items = data.get("models", [])
+            if items and isinstance(items, list):
+                model_names: list[str] = []
+                for m in items:
                     if isinstance(m, dict) and "name" in m:
                         model_names.append(m["name"])
-                return model_names if model_names else _FALLBACK_OLLAMA_MODELS
-            return _FALLBACK_OLLAMA_MODELS
+                if model_names:
+                    models = model_names
     except Exception:
-        return _FALLBACK_OLLAMA_MODELS
+        pass
+    _OLLAMA_MODELS_CACHE = (models, now)
+    return models
 
 
-def available_models(provider: str) -> list[str]:
+async def available_models(provider: str) -> list[str]:
     name = provider.lower()
     if name == "openai":
         return _OPENAI_MODELS
     if name == "gemini":
         return _GEMINI_MODELS
     if name == "ollama":
-        return _ollama_models()
+        return await _ollama_models()
     return []
 
 
-def get_provider_and_model(
+async def get_provider_and_model(
     provider: str | None = None, model: str | None = None
 ) -> tuple[LLMProvider, str]:
     selected_provider = (provider or LLM_PROVIDER).lower()
@@ -73,6 +85,7 @@ def get_provider_and_model(
     if selected_provider == "gemini":
         return GeminiProvider(), select_model(_GEMINI_MODELS, GEMINI_MODEL, model)
     if selected_provider == "ollama":
-        return OllamaProvider(), select_model(_ollama_models(), OLLAMA_MODEL, model)
+        models = await _ollama_models()
+        return OllamaProvider(), select_model(models, OLLAMA_MODEL, model)
 
     raise RuntimeError(f"Unsupported LLM provider: {selected_provider}")

@@ -264,7 +264,7 @@ async def _openai_tools_orchestrator(
     tools = build_openai_tools()
     if not tools:
         return None
-    llm, selected_model = get_provider_and_model(provider, model)
+    llm, selected_model = await get_provider_and_model(provider, model)
     if not isinstance(llm, SupportsChatRaw):
         return None
     messages: list[dict[str, object]] = [

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+import logging
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -10,6 +11,8 @@ from enum import Enum
 from typing import Any, cast
 
 from app.cache.redis_cache import CacheManager
+
+logger = logging.getLogger(__name__)
 
 
 class JobStatus(Enum):
@@ -145,7 +148,7 @@ class JobQueue:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                print(f"Worker {worker_id} error: {e}")
+                logger.exception("Worker %d error: %s", worker_id, e)
                 await asyncio.sleep(self.poll_interval)
 
     async def _get_next_job(self) -> Job | None:

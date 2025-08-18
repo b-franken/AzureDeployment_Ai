@@ -3,10 +3,13 @@ from __future__ import annotations
 import asyncio
 from contextlib import AsyncExitStack
 from typing import Any
+import logging
 
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from pydantic import AnyUrl
+
+logger = logging.getLogger(__name__)
 
 
 class MCPClient:
@@ -92,7 +95,7 @@ async def main() -> None:
     try:
         await client.connect()
         tools = await client.list_tools()
-        print(f"Available tools: {len(tools)}")
+        logger.info("Available tools: %d", len(tools))
         result = await client.execute_tool(
             "execute_tool",
             {
@@ -102,10 +105,11 @@ async def main() -> None:
                 "dry_run": True,
             },
         )
-        print(f"Result: {result}")
+        logger.info("Result: %s", result)
     finally:
         await client.disconnect()
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     asyncio.run(main())

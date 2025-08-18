@@ -5,10 +5,13 @@ import json
 import sqlite3
 import threading
 import uuid
+import logging
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 class AuditEventType(Enum):
@@ -210,7 +213,7 @@ class AuditLogger:
         except sqlite3.IntegrityError:
             return False
         except Exception as e:
-            print(f"Failed to log audit event: {e}")
+            logger.exception("Failed to log audit event: %s", e)
             return False
 
     async def query_events(self, query: AuditQuery) -> list[AuditEvent]:

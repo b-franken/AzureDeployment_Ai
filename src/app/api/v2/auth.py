@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
@@ -23,17 +24,16 @@ from app.platform.audit.logger import (
 
 router = APIRouter()
 security = HTTPBearer(auto_error=False)
-alog = AuditLogger()
+AUDIT_DB_PATH = os.getenv("AUDIT_DB_PATH", "/data/audit.db")
+alog = AuditLogger(AUDIT_DB_PATH)
 ph = PasswordHasher()
 
 
 def _resolve_jwt_secret() -> str:
-    # Prefer settings.security.jwt_secret if present
     secret = None
     sec = getattr(settings, "security", None)
     if sec is not None:
         secret = getattr(sec, "jwt_secret", None)
-        # Support SecretStr
         try:
             from pydantic import SecretStr  # type: ignore
 
@@ -78,10 +78,6 @@ def _issue_token(payload: dict[str, Any]) -> str:
 
 
 def _load_users_from_config() -> dict[str, dict[str, Any]]:
-    """
-    Bootstrap users only via central config accessors.
-    Accepts either API_USERS_JSON or individual API_USER_* variables.
-    """
     users: dict[str, dict[str, Any]] = {}
 
     raw = get_env_var("API_USERS_JSON", "").strip()

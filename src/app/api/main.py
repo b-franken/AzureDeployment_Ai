@@ -6,7 +6,6 @@ from collections.abc import Awaitable, Callable
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
-from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from starlette.routing import Mount, Route, WebSocketRoute
 
 from app.api.middleware.rate_limiter import RateLimitConfig, RateLimiter
@@ -15,22 +14,20 @@ from app.api.routes.review import router as review_router
 from app.api.v2 import router as v2_router
 from app.core.config import settings
 from app.observability.prometheus import instrument_app
+from app.observability.tracing import init as init_tracing
 
-print("MAIN FILE:", __file__)
+env_is_dev = settings.app.env in {"dev", "development", "local"}
+
 
 APP_VERSION = os.getenv("APP_VERSION", "2.0.0")
 app = FastAPI(title="DevOps AI API", version=APP_VERSION)
 instrument_app(app)
+init_tracing("devops-ai-api")
 
 
 @app.get("/_routes")
 def _routes() -> list[str]:
     return [r.path for r in app.routes if isinstance(r, APIRoute | Route | Mount | WebSocketRoute)]
-
-
-@app.get("/metrics")
-def metrics() -> Response:
-    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 origins_raw = os.getenv("CORS_ORIGINS", "*").strip()
@@ -56,7 +53,11 @@ limiter = RateLimiter(
         burst_size=10,
         enable_ip_tracking=True,
         enable_user_tracking=True,
-        redis_url=str(settings.database.redis_dsn) if settings.database.redis_dsn else None,
+        redis_url=(
+            str(settings.database.redis_dsn)
+            if (settings.database.redis_dsn or not env_is_dev)
+            else None
+        ),
     )
 )
 

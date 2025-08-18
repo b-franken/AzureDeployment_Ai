@@ -70,6 +70,7 @@ dependencies = [
   "azure-mgmt-recoveryservices",
   "azure-mgmt-resourcegraph",
   "azure-mgmt-subscription",
+  "azure-mgmt-costmanagement",
   "mcp>=1.0.0"
 ]
 

@@ -52,7 +52,7 @@ class CacheManager:
         if not deserialize:
             return value
 
-        if isinstance(value, (bytes | bytearray | memoryview)):
+        if isinstance(value, bytes | bytearray | memoryview):
             raw = bytes(value).decode()
         else:
             raw = str(value)
@@ -63,11 +63,13 @@ class CacheManager:
             return raw
 
         if isinstance(data, dict) and data.get("__type__") == "bytes":
-            b64 = data.get("data")
+            b64_val = data.get("data")
+            if not isinstance(b64_val, str | bytes | bytearray | memoryview):
+                return b64_val
             try:
-                return base64.b64decode(b64)
+                return base64.b64decode(b64_val)
             except (binascii.Error, TypeError):
-                return b64
+                return b64_val
         return data
 
     async def set(
@@ -80,7 +82,7 @@ class CacheManager:
         client = await self._ensure_client()
 
         if serialize:
-            if isinstance(value, (bytes | bytearray | memoryview)):
+            if isinstance(value, bytes | bytearray | memoryview):
                 b64 = base64.b64encode(bytes(value)).decode()
                 value = json.dumps({"__type__": "bytes", "data": b64})
             else:

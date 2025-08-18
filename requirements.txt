@@ -56,7 +56,7 @@ transformers
 PyJWT
 asyncpg
 redis
-mcp.server  
+mcp.server
 structlog
 prometheus_client
 pymongo

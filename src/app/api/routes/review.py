@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from app.api.schemas import ReviewRequest, ReviewResponse
 from app.api.services import run_review
 
-router = APIRouter(prefix="/review", tags=["review"])
+router = APIRouter()
 
 
 @router.post("", response_model=ReviewResponse)

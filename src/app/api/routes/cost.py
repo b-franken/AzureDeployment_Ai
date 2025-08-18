@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
 
-from app.api.v2.auth import require_role, token_data
+from app.api.routes.auth import TokenData, require_role
+from app.api.schemas import CostAnalysisRequest
 from app.tools.finops.analyzer import CostManagementSystem
 
 router = APIRouter()
@@ -14,19 +13,10 @@ cms = CostManagementSystem()
 cost_viewer_dependency = require_role("cost_viewer")
 
 
-class cost_analysis_request(BaseModel):
-    subscription_id: str
-    start_date: datetime
-    end_date: datetime
-    group_by: list[str] | None = None
-    include_forecast: bool = False
-    include_recommendations: bool = False
-
-
-@router.post("/cost/analysis")
+@router.post("/analysis")
 async def analyze(
-    req: cost_analysis_request,
-    td: Annotated[token_data, Depends(cost_viewer_dependency)],
+    req: CostAnalysisRequest,
+    td: Annotated[TokenData, Depends(cost_viewer_dependency)],
 ) -> dict[str, Any]:
     analysis = await cms.analyze_costs(
         req.subscription_id,

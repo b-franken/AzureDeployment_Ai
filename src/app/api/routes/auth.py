@@ -13,7 +13,7 @@ from argon2.exceptions import InvalidHash, VerifyMismatchError
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer
 
-from app.api.v2.model import auth_request, token_data
+from app.api.schemas import AuthRequest, TokenData
 from app.core.config import get_env_var, settings
 from app.platform.audit.logger import (
     AuditEvent,
@@ -35,7 +35,7 @@ def _resolve_jwt_secret() -> str:
     if sec is not None:
         secret = getattr(sec, "jwt_secret", None)
         try:
-            from pydantic import SecretStr  # type: ignore
+            from pydantic import SecretStr
 
             if isinstance(secret, SecretStr):
                 secret = secret.get_secret_value()
@@ -137,7 +137,7 @@ async def _validate_credentials(email: str, password: str) -> dict[str, Any] | N
     return None
 
 
-async def auth_required(request: Request) -> token_data:
+async def auth_required(request: Request) -> TokenData:
     creds = await security(request)
     if not creds or not creds.credentials:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="auth required")
@@ -148,7 +148,7 @@ async def auth_required(request: Request) -> token_data:
             status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid token"
         ) from err
 
-    td = token_data(
+    td = TokenData(
         user_id=str(raw["user_id"]),
         email=str(raw["email"]),
         subscription_id=(str(raw["subscription_id"]) if raw.get("subscription_id") else None),
@@ -160,8 +160,8 @@ async def auth_required(request: Request) -> token_data:
     return td
 
 
-def require_role(role: str) -> Callable[[Request], Awaitable[token_data]]:
-    async def checker(request: Request) -> token_data:
+def require_role(role: str) -> Callable[[Request], Awaitable[TokenData]]:
+    async def checker(request: Request) -> TokenData:
         td = await auth_required(request)
         if "admin" in td.roles or role in td.roles:
             return td
@@ -170,8 +170,23 @@ def require_role(role: str) -> Callable[[Request], Awaitable[token_data]]:
     return checker
 
 
+def get_api_token() -> str:
+    token = get_env_var("API_TOKEN", "").strip()
+    if not token:
+        raise RuntimeError("API_TOKEN must be set in non-dev environments")
+    return token
+
+
+def require_bearer_token(request: Request) -> None:
+    expected = get_api_token()
+    auth = request.headers.get("authorization", "")
+    provided = auth.split(None, 1)[1] if auth.lower().startswith("bearer ") else None
+    if provided is None or provided != expected:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+
+
 @router.post("/login")
-async def login(req: Request, body: auth_request) -> dict[str, Any]:
+async def login(req: Request, body: AuthRequest) -> dict[str, Any]:
     user = await _validate_credentials(body.email, body.password)
     if not user:
         await alog.log_event(
@@ -213,7 +228,7 @@ auth_dependency = auth_required
 
 @router.post("/logout")
 async def logout(
-    req: Request, td: Annotated[token_data, Depends(auth_dependency)]
+    req: Request, td: Annotated[TokenData, Depends(auth_dependency)]
 ) -> dict[str, str]:
     await alog.log_event(
         AuditEvent(
@@ -227,10 +242,3 @@ async def logout(
         )
     )
     return {"message": "ok"}
-
-
-def get_api_token() -> str:
-    token = get_env_var("API_TOKEN", "").strip()
-    if not token:
-        raise RuntimeError("API_TOKEN must be set in non-dev environments")
-    return token

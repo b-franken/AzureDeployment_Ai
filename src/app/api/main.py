@@ -9,15 +9,20 @@ from fastapi.routing import APIRoute
 from starlette.routing import Mount, Route, WebSocketRoute
 
 from app.api.middleware.rate_limiter import RateLimitConfig, RateLimiter
+from app.api.routes.audit import router as audit_router
+from app.api.routes.auth import router as auth_router
 from app.api.routes.chat import router as chat_router
+from app.api.routes.cost import router as cost_router
+from app.api.routes.deploy import router as deploy_router
+from app.api.routes.health import router as health_router
+from app.api.routes.metrics import router as metrics_router
 from app.api.routes.review import router as review_router
-from app.api.v2 import router as v2_router
+from app.api.routes.status import router as status_router
 from app.core.config import settings
 from app.observability.prometheus import instrument_app
 from app.observability.tracing import init as init_tracing
 
 env_is_dev = settings.app.env in {"dev", "development", "local"}
-
 
 APP_VERSION = os.getenv("APP_VERSION", "2.0.0")
 app = FastAPI(title="DevOps AI API", version=APP_VERSION)
@@ -76,9 +81,15 @@ async def _rl_mw(
         raise
 
 
-app.include_router(chat_router, prefix="/api")
-app.include_router(review_router, prefix="/api")
-app.include_router(v2_router, prefix="/api/v2")
+app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
+app.include_router(chat_router, prefix="/api/chat", tags=["chat"])
+app.include_router(review_router, prefix="/api/review", tags=["review"])
+app.include_router(deploy_router, prefix="/api/deploy", tags=["deploy"])
+app.include_router(cost_router, prefix="/api/cost", tags=["cost"])
+app.include_router(audit_router, prefix="/api/audit", tags=["audit"])
+app.include_router(metrics_router, prefix="/api/metrics", tags=["metrics"])
+app.include_router(health_router, prefix="/api", tags=["health"])
+app.include_router(status_router, prefix="/api", tags=["status"])
 
 
 @app.get("/healthz")

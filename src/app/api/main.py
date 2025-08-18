@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Awaitable, Callable
 
@@ -21,6 +22,8 @@ from app.api.routes.status import router as status_router
 from app.core.config import settings
 from app.observability.prometheus import instrument_app
 from app.observability.tracing import init as init_tracing
+
+logger = logging.getLogger(__name__)
 
 env_is_dev = settings.environment == "development"
 
@@ -74,13 +77,12 @@ async def _rl_mw(
     request: Request,
     call_next: Callable[[Request], Awaitable[Response]],
 ) -> Response:
+    await limiter.check_rate_limit(request)
     try:
-        await limiter.check_rate_limit(request)
         return await call_next(request)
-    except HTTPException:
-        raise
-    except Exception:
-        raise
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.exception("Middleware error")
+        raise HTTPException(status_code=500, detail="Internal Server Error") from exc
 
 
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])

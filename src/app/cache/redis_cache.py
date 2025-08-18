@@ -1,7 +1,16 @@
 from __future__ import annotations
 
+"""Redis-based cache utilities.
+
+This module accepts JSON-compatible primitives (``str``, ``int``, ``float``,
+``bool``, ``None``), lists and dictionaries. Bytes-like objects are supported by
+base64 encoding their contents within a JSON object. This avoids the security
+risks associated with ``pickle`` while still allowing binary data to be cached.
+"""
+
+import base64
+import binascii
 import json
-import pickle
 from collections.abc import Awaitable
 from typing import Any, cast
 
@@ -47,22 +56,26 @@ class CacheManager:
         if value is None:
             return None
 
-        if deserialize:
-            try:
-                if isinstance(value, bytes):
-                    return json.loads(value.decode())
-                return json.loads(value)
-            except (json.JSONDecodeError, TypeError, UnicodeDecodeError):
-                try:
-                    return (
-                        pickle.loads(value)
-                        if isinstance(value, bytes | bytearray | memoryview)
-                        else value
-                    )
-                except (pickle.PickleError, TypeError):
-                    return value.decode() if isinstance(value, bytes) else value
+        if not deserialize:
+            return value
 
-        return value
+        if isinstance(value, (bytes, bytearray, memoryview)):
+            raw = bytes(value).decode()
+        else:
+            raw = str(value)
+
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return raw
+
+        if isinstance(data, dict) and data.get("__type__") == "bytes":
+            b64 = data.get("data")
+            try:
+                return base64.b64decode(b64)
+            except (binascii.Error, TypeError):
+                return b64
+        return data
 
     async def set(
         self,
@@ -75,10 +88,14 @@ class CacheManager:
         ttl = ttl or self.default_ttl
 
         if serialize:
-            try:
-                value = json.dumps(value)
-            except (TypeError, ValueError):
-                value = pickle.dumps(value)
+            if isinstance(value, (bytes, bytearray, memoryview)):
+                b64 = base64.b64encode(bytes(value)).decode()
+                value = json.dumps({"__type__": "bytes", "data": b64})
+            else:
+                try:
+                    value = json.dumps(value)
+                except (TypeError, ValueError) as exc:
+                    raise TypeError("Unsupported value type") from exc
 
         return await client.setex(key, ttl, value)
 

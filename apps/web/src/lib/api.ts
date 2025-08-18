@@ -1,6 +1,37 @@
 const base =
     process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000"
 
+const REQUEST_TIMEOUT_MS = 15000
+
+export class ApiError extends Error {
+    constructor(message: string, public cause?: unknown) {
+        super(message)
+        this.name = "ApiError"
+    }
+}
+
+async function fetchWithTimeout(
+    url: string,
+    options: RequestInit,
+    context: string,
+    timeout = REQUEST_TIMEOUT_MS,
+) {
+    const controller = new AbortController()
+    const id = setTimeout(() => controller.abort(), timeout)
+    try {
+        const res = await fetch(url, { ...options, signal: controller.signal })
+        if (!res.ok) throw new ApiError(`${context} failed ${res.status}`)
+        return res
+    } catch (err: any) {
+        if (err instanceof ApiError) throw err
+        if (err?.name === "AbortError")
+            throw new ApiError(`${context} timed out`, err)
+        throw new ApiError(`${context} error`, err)
+    } finally {
+        clearTimeout(id)
+    }
+}
+
 export type ChatMsg = {
     role: "user" | "assistant" | "system"
     content: string
@@ -32,21 +63,38 @@ export async function login(
     email: string,
     password: string
 ): Promise<AuthResult> {
-    const res = await fetch(`${base}/api/v2/auth/login`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email, password }),
-    })
-    if (!res.ok) throw new Error(`login failed ${res.status}`)
-    return res.json()
+    try {
+        const res = await fetchWithTimeout(
+            `${base}/api/v2/auth/login`,
+            {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ email, password }),
+            },
+            "login",
+        )
+        return res.json()
+    } catch (err) {
+        throw err
+    }
 }
 
 export async function logout(token: string): Promise<void> {
-    const res = await fetch(`${base}/api/v2/auth/logout`, {
-        method: "POST",
-        headers: { "content-type": "application/json", ...withAuth(token) },
-    })
-    if (!res.ok) throw new Error(`logout failed ${res.status}`)
+    try {
+        await fetchWithTimeout(
+            `${base}/api/v2/auth/logout`,
+            {
+                method: "POST",
+                headers: {
+                    "content-type": "application/json",
+                    ...withAuth(token),
+                },
+            },
+            "logout",
+        )
+    } catch (err) {
+        throw err
+    }
 }
 
 export type ChatV2Response = {
@@ -65,19 +113,29 @@ export async function chatV2(
         enable_tools?: boolean
     }
 ): Promise<ChatV2Response> {
-    const res = await fetch(`${base}/api/v2/chat/chat`, {
-        method: "POST",
-        headers: { "content-type": "application/json", ...withAuth(token) },
-        body: JSON.stringify({
-            input: args.input,
-            memory: args.memory ?? [],
-            provider: args.provider ?? null,
-            model: args.model ?? null,
-            enable_tools: !!args.enable_tools,
-        }),
-    })
-    if (!res.ok) throw new Error(`chatV2 failed ${res.status}`)
-    return res.json()
+    try {
+        const res = await fetchWithTimeout(
+            `${base}/api/v2/chat/chat`,
+            {
+                method: "POST",
+                headers: {
+                    "content-type": "application/json",
+                    ...withAuth(token),
+                },
+                body: JSON.stringify({
+                    input: args.input,
+                    memory: args.memory ?? [],
+                    provider: args.provider ?? null,
+                    model: args.model ?? null,
+                    enable_tools: !!args.enable_tools,
+                }),
+            },
+            "chatV2",
+        )
+        return res.json()
+    } catch (err) {
+        throw err
+    }
 }
 
 export async function chat(
@@ -100,14 +158,21 @@ export async function chat(
         preferred_tool: opts?.preferred_tool ?? null,
         allowlist: opts?.allowlist ?? [],
     }
-    const res = await fetch(`${base}/api/chat`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-    })
-    if (!res.ok) throw new Error(`chat failed ${res.status}`)
-    const data = await res.json()
-    return String(data?.output ?? "")
+    try {
+        const res = await fetchWithTimeout(
+            `${base}/api/chat`,
+            {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify(body),
+            },
+            "chat",
+        )
+        const data = await res.json()
+        return String(data?.output ?? "")
+    } catch (err) {
+        throw err
+    }
 }
 
 export async function review_once(
@@ -115,19 +180,26 @@ export async function review_once(
     assistant: string,
     opts?: { provider?: string | null; model?: string | null }
 ): Promise<string> {
-    const res = await fetch(`${base}/api/review`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-            user_input: user,
-            assistant_reply: assistant,
-            provider: opts?.provider ?? null,
-            model: opts?.model ?? null,
-        }),
-    })
-    if (!res.ok) throw new Error(`review failed ${res.status}`)
-    const data = await res.json()
-    return String(data?.output ?? "")
+    try {
+        const res = await fetchWithTimeout(
+            `${base}/api/review`,
+            {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                    user_input: user,
+                    assistant_reply: assistant,
+                    provider: opts?.provider ?? null,
+                    model: opts?.model ?? null,
+                }),
+            },
+            "review",
+        )
+        const data = await res.json()
+        return String(data?.output ?? "")
+    } catch (err) {
+        throw err
+    }
 }
 
 export type DeployRequest = {
@@ -144,21 +216,31 @@ export async function deploy(
     token: string,
     body: DeployRequest
 ) {
-    const res = await fetch(`${base}/api/v2/deploy/deploy`, {
-        method: "POST",
-        headers: { "content-type": "application/json", ...withAuth(token) },
-        body: JSON.stringify({
-            request: body.request,
-            subscription_id: body.subscription_id,
-            resource_group: body.resource_group ?? null,
-            environment: body.environment ?? "development",
-            dry_run: body.dry_run ?? true,
-            cost_limit: body.cost_limit ?? null,
-            tags: body.tags ?? {},
-        }),
-    })
-    if (!res.ok) throw new Error(`deploy failed ${res.status}`)
-    return res.json()
+    try {
+        const res = await fetchWithTimeout(
+            `${base}/api/v2/deploy/deploy`,
+            {
+                method: "POST",
+                headers: {
+                    "content-type": "application/json",
+                    ...withAuth(token),
+                },
+                body: JSON.stringify({
+                    request: body.request,
+                    subscription_id: body.subscription_id,
+                    resource_group: body.resource_group ?? null,
+                    environment: body.environment ?? "development",
+                    dry_run: body.dry_run ?? true,
+                    cost_limit: body.cost_limit ?? null,
+                    tags: body.tags ?? {},
+                }),
+            },
+            "deploy",
+        )
+        return res.json()
+    } catch (err) {
+        throw err
+    }
 }
 
 export type CostAnalysisArgs = {
@@ -174,20 +256,30 @@ export async function analyzeCosts(
     token: string,
     args: CostAnalysisArgs
 ) {
-    const res = await fetch(`${base}/api/v2/cost/cost/analysis`, {
-        method: "POST",
-        headers: { "content-type": "application/json", ...withAuth(token) },
-        body: JSON.stringify({
-            subscription_id: args.subscription_id,
-            start_date: args.start_date,
-            end_date: args.end_date,
-            group_by: args.group_by ?? null,
-            include_forecast: !!args.include_forecast,
-            include_recommendations: !!args.include_recommendations,
-        }),
-    })
-    if (!res.ok) throw new Error(`cost analysis failed ${res.status}`)
-    return res.json()
+    try {
+        const res = await fetchWithTimeout(
+            `${base}/api/v2/cost/cost/analysis`,
+            {
+                method: "POST",
+                headers: {
+                    "content-type": "application/json",
+                    ...withAuth(token),
+                },
+                body: JSON.stringify({
+                    subscription_id: args.subscription_id,
+                    start_date: args.start_date,
+                    end_date: args.end_date,
+                    group_by: args.group_by ?? null,
+                    include_forecast: !!args.include_forecast,
+                    include_recommendations: !!args.include_recommendations,
+                }),
+            },
+            "analyze costs",
+        )
+        return res.json()
+    } catch (err) {
+        throw err
+    }
 }
 
 export async function auditLogs(
@@ -206,30 +298,51 @@ export async function auditLogs(
     if (params?.user_id) q.set("user_id", params.user_id)
     if (params?.page) q.set("page", String(params.page))
     if (params?.page_size) q.set("page_size", String(params.page_size))
-    const res = await fetch(
-        `${base}/api/v2/audit/audit/logs?${q.toString()}`,
-        { headers: { ...withAuth(token) } }
-    )
-    if (!res.ok) throw new Error(`audit logs failed ${res.status}`)
-    return res.json()
+    try {
+        const res = await fetchWithTimeout(
+            `${base}/api/v2/audit/audit/logs?${q.toString()}`,
+            { headers: { ...withAuth(token) } },
+            "audit logs",
+        )
+        return res.json()
+    } catch (err) {
+        throw err
+    }
 }
 
 export async function metrics(token: string) {
-    const res = await fetch(`${base}/api/v2/metrics`, {
-        headers: { ...withAuth(token) },
-    })
-    if (!res.ok) throw new Error(`metrics failed ${res.status}`)
-    return res.json()
+    try {
+        const res = await fetchWithTimeout(
+            `${base}/api/v2/metrics`,
+            {
+                headers: { ...withAuth(token) },
+            },
+            "metrics",
+        )
+        return res.json()
+    } catch (err) {
+        throw err
+    }
 }
 
 export async function apiHealthz(): Promise<{ status: string }> {
-    const res = await fetch(`${base}/healthz`)
-    if (!res.ok) throw new Error(`healthz failed ${res.status}`)
-    return res.json()
+    try {
+        const res = await fetchWithTimeout(`${base}/healthz`, {}, "healthz")
+        return res.json()
+    } catch (err) {
+        throw err
+    }
 }
 
 export async function apiStatus(): Promise<any> {
-    const res = await fetch(`${base}/api/v2/status`)
-    if (!res.ok) throw new Error(`status failed ${res.status}`)
-    return res.json()
+    try {
+        const res = await fetchWithTimeout(
+            `${base}/api/v2/status`,
+            {},
+            "status",
+        )
+        return res.json()
+    } catch (err) {
+        throw err
+    }
 }

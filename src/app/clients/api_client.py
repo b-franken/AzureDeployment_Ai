@@ -7,6 +7,7 @@ import httpx
 from app.core.config import get_env_var
 
 API_BASE_URL = get_env_var("API_BASE_URL", "http://localhost:8000")
+API_TIMEOUT = float(get_env_var("API_TIMEOUT_SECONDS", "30"))
 
 
 async def chat(
@@ -28,7 +29,7 @@ async def chat(
         "preferred_tool": preferred_tool,
         "allowlist": list(allowlist or []),
     }
-    async with httpx.AsyncClient(base_url=API_BASE_URL, timeout=None) as client:
+    async with httpx.AsyncClient(base_url=API_BASE_URL, timeout=API_TIMEOUT) as client:
         if not stream:
             r = await client.post("/chat", json=payload)
             r.raise_for_status()
@@ -58,7 +59,7 @@ async def review(
         "provider": provider,
         "model": model,
     }
-    async with httpx.AsyncClient(base_url=API_BASE_URL, timeout=None) as client:
+    async with httpx.AsyncClient(base_url=API_BASE_URL, timeout=API_TIMEOUT) as client:
         r = await client.post("/review", json=payload)
         r.raise_for_status()
         return r.json()["output"]

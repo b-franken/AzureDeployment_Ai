@@ -8,12 +8,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, cast
 
-from emitters.cost_estimator import CostEstimator
-
 from .az_cli import AzCli
 from .emitters import EMITTERS
 from .emitters.aks import AksEmitter
 from .emitters.cosmos import CosmosEmitter
+from .emitters.cost_estimator import CostEstimator
 from .resource_mapper import ResourceMapper
 from .versions import resolve
 from .writer import BicepWriter

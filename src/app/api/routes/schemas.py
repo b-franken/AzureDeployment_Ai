@@ -1,64 +1,100 @@
 from __future__ import annotations
 
-import asyncio
-import time
-from collections.abc import AsyncGenerator
-from typing import Annotated, Any
+import uuid
+from collections.abc import Sequence
+from datetime import datetime
+from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from fastapi.responses import JSONResponse, StreamingResponse
-
-from app.api.routes.auth import auth_dependency
-from app.api.schemas import ChatRequest, ChatRequestV2, ChatResponse, TokenData
-from app.api.services import run_chat
-
-router = APIRouter()
+from pydantic import BaseModel, Field, field_validator
 
 
-@router.post("", response_model=ChatResponse)
-async def chat(req: ChatRequest, stream: bool = Query(default=False)) -> Response:
-    try:
-        text = await run_chat(
-            req.input,
-            [m.model_dump() for m in req.memory or []],
-            req.provider,
-            req.model,
-            req.enable_tools,
-            req.preferred_tool,
-            req.allowlist,
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-    if not stream:
-        return JSONResponse(ChatResponse(output=text).model_dump())
-
-    async def gen() -> AsyncGenerator[bytes, None]:
-        chunk = 2048
-        for i in range(0, len(text), chunk):
-            part = text[i : i + chunk]
-            yield f"data: {part}\n\n".encode()
-            await asyncio.sleep(0)
-        yield b"data: [DONE]\n\n"
-
-    return StreamingResponse(gen(), media_type="text/event-stream")
+class ChatMessage(BaseModel):
+    role: Literal["system", "user", "assistant"]
+    content: str
 
 
-@router.post("/v2")
-async def chat_v2(
-    request: Request, body: ChatRequestV2, td: Annotated[TokenData, Depends(auth_dependency)] = None
-) -> dict[str, Any]:
-    start = time.time()
-    out = await run_chat(
-        input_text=body.input,
-        memory=body.memory,
-        provider=body.provider,
-        model=body.model,
-        enable_tools=body.enable_tools,
-    )
-    took = time.time() - start
-    return {
-        "response": out,
-        "correlation_id": body.correlation_id,
-        "processing_time": took,
-    }
+class ChatRequest(BaseModel):
+    input: str = Field(..., min_length=1)
+    memory: Sequence[ChatMessage] | None = None
+    provider: str | None = None
+    model: str | None = None
+    enable_tools: bool = False
+    preferred_tool: str | None = None
+    allowlist: Sequence[str] | None = None
+
+
+class ChatResponse(BaseModel):
+    output: str
+
+
+class ChatRequestV2(BaseModel):
+    input: str = Field(min_length=1, max_length=5000)
+    memory: list[dict[str, str]] | None = None
+    provider: str | None = None
+    model: str | None = None
+    enable_tools: bool = True
+    correlation_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+
+
+class ReviewRequest(BaseModel):
+    user_input: str = Field(..., min_length=1)
+    assistant_reply: str = Field(..., min_length=1)
+    provider: str | None = None
+    model: str | None = None
+
+
+class ReviewResponse(BaseModel):
+    output: str
+
+
+class TokenData(BaseModel):
+    user_id: str
+    email: str
+    subscription_id: str | None = None
+    roles: list[str] = Field(default_factory=list)
+    expires_at: datetime
+
+
+class AuthRequest(BaseModel):
+    email: str = Field(..., min_length=5, max_length=255)
+    password: str = Field(..., min_length=8)
+    mfa_code: str | None = None
+
+
+class DeploymentRequest(BaseModel):
+    request: str = Field(..., min_length=1, max_length=5000)
+    subscription_id: str = Field(..., pattern=r"^[a-f0-9-]{36}$")
+    resource_group: str | None = None
+    environment: str = "development"
+    dry_run: bool = True
+    cost_limit: float | None = Field(default=None, ge=0)
+    tags: dict[str, str] = Field(default_factory=dict)
+    correlation_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+
+    @field_validator("environment")
+    @classmethod
+    def validate_environment(cls, v: str) -> str:
+        allowed = ["development", "staging", "production"]
+        if v not in allowed:
+            raise ValueError("environment must be one of development, staging, production")
+        return v
+
+
+class CostAnalysisRequest(BaseModel):
+    subscription_id: str
+    start_date: datetime
+    end_date: datetime
+    group_by: list[str] | None = None
+    include_forecast: bool = False
+    include_recommendations: bool = False
+
+
+class LogsResponse(BaseModel):
+    logs: list[dict[str, Any]]
+    count: int
+
+
+class CostAnalysisResponse(BaseModel):
+    analysis: dict[str, Any]
+    forecast: dict[str, Any] | None = None
+    recommendations: list[dict[str, Any]] | None = None

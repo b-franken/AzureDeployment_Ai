@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import NotRequired, Protocol, TypedDict, runtime_checkable
 
+from app.ai.arg_mapper import map_args_with_function_call
 from app.ai.generator import generate_response
 from app.ai.llm.factory import get_provider_and_model
 from app.ai.nlu import maybe_map_provision
@@ -25,7 +26,8 @@ _TOOLS_PLAN = (
     "When you call a tool, return only the JSON with no prose."
 )
 
-_CODEFENCE_JSON_RE = re.compile(r"(?:```(?:json)?\s*)?(\{.*?\})(?:\s*```)?\s*", re.DOTALL)
+_CODEFENCE_JSON_RE = re.compile(
+    r"(?:```(?:json)?\s*)?(\{.*?\})(?:\s*```)?\s*", re.DOTALL)
 DIRECT_TOOL_RE = re.compile(
     r"^\s*tool\s*:\s*([a-z0-9-]+)\s*(\{.*\})\s*$", re.IGNORECASE | re.DOTALL
 )
@@ -231,7 +233,8 @@ async def _run_tool(
     if not tool:
         return {"ok": False, "summary": f"tool {name} not found", "output": ""}
     raw = await tool.run(**args)
-    result = raw if isinstance(raw, dict) else {"ok": True, "summary": "", "output": raw}
+    result = raw if isinstance(raw, dict) else {
+        "ok": True, "summary": "", "output": raw}
     if isinstance(result, dict):
         result = _maybe_wrap_approval(result, context)
     return result
@@ -278,7 +281,8 @@ async def _openai_tools_orchestrator(
         }
     ]
     if memory:
-        messages.extend([{"role": m["role"], "content": m["content"]} for m in memory])
+        messages.extend([{"role": m["role"], "content": m["content"]}
+                        for m in memory])
     messages.append({"role": "user", "content": user_input})
     if not allow_chaining:
         first = await llm.chat_raw(
@@ -409,7 +413,8 @@ async def maybe_call_tool(
                 res = await _run_tool(str(mapped["tool"]), dict(mapped["args"]), context)
                 return json.dumps(res, ensure_ascii=False, indent=2)
             return await _run_tool_and_explain(
-                str(mapped["tool"]), dict(mapped["args"]), provider, model, context
+                str(mapped["tool"]), dict(
+                    mapped["args"]), provider, model, context
             )
         tools = list_tools()
         if allowlist:
@@ -422,7 +427,8 @@ async def maybe_call_tool(
             model,
             allow_chaining=True,
             max_chain_steps=4,
-            token_budget=(int(context.cost_limit) if context and context.cost_limit else 6000),
+            token_budget=(int(context.cost_limit)
+                          if context and context.cost_limit else 6000),
             context=context,
         )
         if isinstance(via_openai, str):
@@ -467,23 +473,13 @@ async def maybe_call_tool(
                 "schema",
                 {"type": "object", "properties": {}, "additionalProperties": True},
             )
-            prompt = (
-                "You are a strict argument mapper. Given a tool schema and a user request, "
-                "return only a JSON object for the tool's args. No prose."
-            )
-            args_text = await generate_response(
-                (
-                    f"{prompt}\n"
-                    f"Tool: {preferred_tool}\n"
-                    f"Schema:\n{json.dumps(schema)}\n"
-                    f"User request:\n{user_input}"
-                ),
-                memory=[],
+            mapped_args = await map_args_with_function_call(
+                tool_name=preferred_tool,
+                schema=schema,
+                user_input=user_input,
                 provider=provider,
                 model=model,
             )
-            obj = _extract_json_object(args_text)
-            mapped_args: dict[str, object] = obj if isinstance(obj, dict) else {}
             if return_json:
                 res = await _run_tool(preferred_tool, mapped_args, context)
                 return json.dumps(res, ensure_ascii=False, indent=2)
@@ -491,7 +487,8 @@ async def maybe_call_tool(
                 preferred_tool, mapped_args, provider, model, context
             )
         tools_desc = (
-            "\n".join(f"- {t.name}: {t.description} schema={t.schema}" for t in tools) or "None"
+            "\n".join(
+                f"- {t.name}: {t.description} schema={t.schema}" for t in tools) or "None"
         )
         plan = await generate_response(
             f"{_TOOLS_PLAN}\n\nAvailable tools:\n{tools_desc}\n\nUser: {user_input}",
@@ -504,7 +501,8 @@ async def maybe_call_tool(
             return plan
         name = str(req.get("tool"))
         raw_args = req.get("args")
-        args: dict[str, object] = dict(raw_args) if isinstance(raw_args, dict) else {}
+        args: dict[str, object] = dict(
+            raw_args) if isinstance(raw_args, dict) else {}
         if return_json:
             res = await _run_tool(name, args, context)
             return json.dumps(res, ensure_ascii=False, indent=2)

@@ -18,10 +18,7 @@ classifiers = [
   "Topic :: Software Development :: Build Tools",
   "Topic :: Internet"
 ]
-
-# Keep this list aligned with actual imports in src/
 dependencies = [
-  # API & web
   "fastapi>=0.110.0",
   "uvicorn[standard]>=0.29.0",
   "httpx>=0.27.0",
@@ -30,8 +27,6 @@ dependencies = [
   "aiofiles",
   "python-dotenv",
   "streamlit",
-  "torch",
-  "sentence-transformers",
   "openai>=1.0.0",
   "prometheus-client",
   "structlog",
@@ -40,16 +35,10 @@ dependencies = [
   "asyncpg",
   "redis",
   "cryptography",
-
-  # Utils
   "numpy",
   "Pygments",
   "reportlab",
-
-  # Optional integrations
   "discord.py>=2.3.2",
-
-  # Azure SDKs actually referenced
   "azure-identity",
   "azure-keyvault-secrets",
   "azure-storage-blob",
@@ -81,8 +70,6 @@ dependencies = [
   "azure-mgmt-recoveryservices",
   "azure-mgmt-resourcegraph",
   "azure-mgmt-subscription",
-
-  # Model Context Protocol (server & client used)
   "mcp>=1.0.0"
 ]
 
@@ -110,9 +97,7 @@ nlp = [
 ]
 
 [project.scripts]
-# Launches the FastAPI server with your __main__.py
 devops-ai = "app.api.__main__:main"
-# Optional: a handy entrypoint for your MCP server
 devops-ai-mcp = "app.mcp.server:main"
 
 [tool.setuptools.packages.find]

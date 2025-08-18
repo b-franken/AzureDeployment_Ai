@@ -32,7 +32,11 @@ init_tracing("devops-ai-api")
 
 @app.get("/_routes")
 def _routes() -> list[str]:
-    return [r.path for r in app.routes if isinstance(r, APIRoute | Route | Mount | WebSocketRoute)]
+    return [
+        r.path
+        for r in app.routes
+        if isinstance(r, (APIRoute, Route, Mount, WebSocketRoute))
+    ]
 
 
 origins_raw = os.getenv("CORS_ORIGINS", "*").strip()

@@ -1,0 +1,15 @@
+*.pyc
+*.pyo
+*.pyd
+.build/
+dist/
+build/
+.venv/
+venv/
+.git
+**/__pycache__/
+apps/web/.next/
+apps/web/node_modules/
+apps/web/dist/
+**/.pytest_cache/
+**/.mypy_cache/

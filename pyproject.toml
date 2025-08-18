@@ -25,24 +25,21 @@ dependencies = [
   "fastapi>=0.110.0",
   "uvicorn[standard]>=0.29.0",
   "httpx>=0.27.0",
-  "pydantic>=2.7.0",
-  "pydantic-settings>=2.2.1",
-  "aiofiles>=23.2.1",
-  "python-dotenv>=1.0.1",
-  "streamlit>=1.33.0",
+  "pydantic",
+  "pydantic-settings",
+  "aiofiles",
+  "python-dotenv",
+  "streamlit",
   "torch",
   "sentence-transformers",
   "openai>=1.0.0",
-
-  # Observability & logging
-  "prometheus-client>=0.20.0",
-  "structlog>=24.1.0",
-
-  # Auth / crypto / storage
-  "PyJWT>=2.8.0",
-  "argon2-cffi>=23.1.0",
+  "prometheus-client",
+  "structlog",
+  "PyJWT",
+  "argon2-cffi",
   "asyncpg",
   "redis",
+  "cryptography",
 
   # Utils
   "numpy",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -99,6 +100,7 @@ class AuditLogger:
     def __init__(self, db_path: str = "audit.db") -> None:
         self.db_path = db_path
         self._lock = threading.RLock()
+        self._conn: sqlite3.Connection | None = None
         self._init_database()
         self._retention_days = 2555
         self._compliance_mode = True
@@ -161,60 +163,70 @@ class AuditLogger:
             conn.commit()
             conn.close()
 
+    def _get_connection(self) -> sqlite3.Connection:
+        if not self._conn:
+            self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA synchronous=FULL")
+            self._conn.execute("PRAGMA wal_autocheckpoint=512")
+        return self._conn
+
+    async def close(self) -> None:
+        if self._conn:
+            await asyncio.to_thread(self._conn.close)
+            self._conn = None
+
     async def log_event(self, event: AuditEvent) -> bool:
         try:
-            with self._lock:
-                conn = sqlite3.connect(self.db_path)
-                cursor = conn.cursor()
-
-                cursor.execute(
-                    """
-                    INSERT INTO audit_events (
-                        id, timestamp, event_type, severity, user_id, user_email,
-                        service_principal_id, subscription_id, resource_group,
-                        resource_type, resource_name, resource_id, action, result,
-                        ip_address, user_agent, correlation_id, details, tags,
-                        compliance_frameworks, hash
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                    (
-                        event.id,
-                        event.timestamp.isoformat(),
-                        event.event_type.value,
-                        event.severity.value,
-                        event.user_id,
-                        event.user_email,
-                        event.service_principal_id,
-                        event.subscription_id,
-                        event.resource_group,
-                        event.resource_type,
-                        event.resource_name,
-                        event.resource_id,
-                        event.action,
-                        event.result,
-                        event.ip_address,
-                        event.user_agent,
-                        event.correlation_id,
-                        json.dumps(event.details),
-                        json.dumps(event.tags),
-                        json.dumps(event.compliance_frameworks),
-                        event.hash,
-                    ),
-                )
-
-                conn.commit()
-                conn.close()
-
-                if event.severity in [AuditSeverity.ERROR, AuditSeverity.CRITICAL]:
-                    await self._trigger_alert(event)
-
-                return True
-
+            await asyncio.to_thread(self._write_event, event)
+            if event.severity in [AuditSeverity.ERROR, AuditSeverity.CRITICAL]:
+                await self._trigger_alert(event)
+            return True
         except sqlite3.IntegrityError:
             return False
         except Exception as e:
             logger.exception("Failed to log audit event: %s", e)
             return False
+
+    def _write_event(self, event: AuditEvent) -> None:
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO audit_events (
+                    id, timestamp, event_type, severity, user_id, user_email,
+                    service_principal_id, subscription_id, resource_group,
+                    resource_type, resource_name, resource_id, action, result,
+                    ip_address, user_agent, correlation_id, details, tags,
+                    compliance_frameworks, hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event.id,
+                    event.timestamp.isoformat(),
+                    event.event_type.value,
+                    event.severity.value,
+                    event.user_id,
+                    event.user_email,
+                    event.service_principal_id,
+                    event.subscription_id,
+                    event.resource_group,
+                    event.resource_type,
+                    event.resource_name,
+                    event.resource_id,
+                    event.action,
+                    event.result,
+                    event.ip_address,
+                    event.user_agent,
+                    event.correlation_id,
+                    json.dumps(event.details),
+                    json.dumps(event.tags),
+                    json.dumps(event.compliance_frameworks),
+                    event.hash,
+                ),
+            )
+            conn.commit()
 
     async def query_events(self, query: AuditQuery) -> list[AuditEvent]:
         with self._lock:

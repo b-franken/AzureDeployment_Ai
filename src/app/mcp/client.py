@@ -46,23 +46,29 @@ class MCPClient:
     ) -> Any:
         if self.session is None:
             await self.connect()
-        assert self.session is not None
-        result = await self.session.call_tool(tool_name, arguments)
+        session = self.session
+        if session is None:
+            raise RuntimeError("MCP client session is not initialized")
+        result = await session.call_tool(tool_name, arguments)
         return result
 
     async def get_resource(self, uri: str | AnyUrl) -> Any:
         if self.session is None:
             await self.connect()
-        assert self.session is not None
+        session = self.session
+        if session is None:
+            raise RuntimeError("MCP client session is not initialized")
         url = AnyUrl(uri) if isinstance(uri, str) else uri
-        resource = await self.session.read_resource(url)
+        resource = await session.read_resource(url)
         return resource
 
     async def list_tools(self) -> list[dict[str, Any]]:
         if self.session is None:
             await self.connect()
-        assert self.session is not None
-        result = await self.session.list_tools()
+        session = self.session
+        if session is None:
+            raise RuntimeError("MCP client session is not initialized")
+        result = await session.list_tools()
         tools = result.tools
         return [
             {
@@ -76,8 +82,10 @@ class MCPClient:
     async def list_resources(self) -> list[dict[str, Any]]:
         if self.session is None:
             await self.connect()
-        assert self.session is not None
-        result = await self.session.list_resources()
+        session = self.session
+        if session is None:
+            raise RuntimeError("MCP client session is not initialized")
+        result = await session.list_resources()
         resources = result.resources
         return [
             {

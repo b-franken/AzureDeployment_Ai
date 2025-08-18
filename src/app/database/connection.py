@@ -51,7 +51,8 @@ class DatabasePool:
         if pool is None:
             await self.initialize()
             pool = self._pool
-        assert pool is not None
+        if pool is None:
+            raise RuntimeError("Database pool is not initialized")
         async with pool.acquire() as connection:
             yield connection
 

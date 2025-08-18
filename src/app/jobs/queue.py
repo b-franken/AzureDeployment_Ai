@@ -96,16 +96,14 @@ class JobQueue:
 
         queue_key = self._get_queue_key(priority)
         await self.cache.lpush(queue_key, self._serialize_job(job))
-        await self.cache.hset(
-            f"jobs:{self.queue_name}",
-            job.id,
-            self._serialize_job(job),
-        )
+        job_key = self._get_job_key(job.id)
+        await self.cache.set(job_key, self._serialize_job(job), ttl=0, serialize=False)
 
         return job.id
 
     async def get_job(self, job_id: str) -> Job | None:
-        data = await self.cache.hget(f"jobs:{self.queue_name}", job_id)
+        job_key = self._get_job_key(job_id)
+        data = await self.cache.get(job_key)
         return self._deserialize_job(data) if data else None
 
     async def cancel_job(self, job_id: str) -> bool:
@@ -207,11 +205,8 @@ class JobQueue:
             await self.cache.lpush(queue_key, self._serialize_job(job))
 
     async def _update_job(self, job: Job) -> None:
-        await self.cache.hset(
-            f"jobs:{self.queue_name}",
-            job.id,
-            self._serialize_job(job),
-        )
+        job_key = self._get_job_key(job.id)
+        await self.cache.set(job_key, self._serialize_job(job), ttl=0, serialize=False)
 
         if job.status in [
             JobStatus.COMPLETED,
@@ -219,10 +214,13 @@ class JobQueue:
             JobStatus.CANCELLED,
         ]:
             ttl = 86400
-            await self.cache.expire(f"jobs:{self.queue_name}:{job.id}", ttl)
+            await self.cache.expire(job_key, ttl)
 
     def _get_queue_key(self, priority: JobPriority) -> str:
         return f"queue:{self.queue_name}:{priority.name.lower()}"
+
+    def _get_job_key(self, job_id: str) -> str:
+        return f"jobs:{self.queue_name}:{job_id}"
 
     def _serialize_job(self, job: Job) -> str:
         data: dict[str, Any] = {

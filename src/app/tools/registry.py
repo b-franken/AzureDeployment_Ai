@@ -47,6 +47,7 @@ def ensure_tools_loaded() -> None:
         ("app.tools.azure.tool", "AzureProvision"),
         ("app.tools.provision.orchestrator", "ProvisionOrchestrator"),
         ("app.tools.finops.cost_tool", "AzureCosts"),
+        ("app.tools.azure.quota_check", "AzureQuotaCheck"),
     ]
     for module_path, class_name in registry:
         tool = _import_tool(module_path, class_name)

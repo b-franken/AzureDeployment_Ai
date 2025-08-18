@@ -17,6 +17,7 @@ from azure.mgmt.resourcegraph.models import QueryRequest, QueryRequestOptions
 from mcp.server.fastmcp import Context, FastMCP
 
 from app.ai.tools_router import ToolExecutionContext, maybe_call_tool
+from app.mcp.extensions import register_extensions
 from app.platform.audit.logger import AuditLogger
 from app.tools.registry import ensure_tools_loaded, list_tools
 
@@ -80,6 +81,7 @@ class MCPServer:
         self._setup_tools()
         self._setup_resources()
         self._setup_prompts()
+        register_extensions(self)
 
     def _setup_tools(self) -> None:
         ensure_tools_loaded()
@@ -422,13 +424,16 @@ Optimization strategies:
             name = str(r.get("name", "")).strip()
             rtype = str(r.get("type", "")).strip()
             if not name or not rtype:
-                invalid.append({"scope": "resource", "name": name or "", "type": rtype or ""})
+                invalid.append(
+                    {"scope": "resource", "name": name or "", "type": rtype or ""})
                 continue
             if name in seen:
-                invalid.append({"scope": "duplicate", "name": name, "type": rtype})
+                invalid.append(
+                    {"scope": "duplicate", "name": name, "type": rtype})
             seen.add(name)
             if not pattern.match(name):
-                invalid.append({"scope": "format", "name": name, "type": rtype})
+                invalid.append(
+                    {"scope": "format", "name": name, "type": rtype})
 
         passed = len(invalid) == 0
         return {
@@ -457,7 +462,8 @@ Optimization strategies:
                 https_only = bool(props.get("https_only", True))
                 tls = str(props.get("minimum_tls_version", "1.2"))
                 if not https_only:
-                    enforced.append({"name": name, "policy": "https_only", "value": True})
+                    enforced.append(
+                        {"name": name, "policy": "https_only", "value": True})
                 if tls not in {"1.2", "1.3"}:
                     enforced.append(
                         {
@@ -468,7 +474,8 @@ Optimization strategies:
                     )
 
             if rtype == "storage_account":
-                allow_public = bool(props.get("allow_blob_public_access", False))
+                allow_public = bool(
+                    props.get("allow_blob_public_access", False))
                 if allow_public:
                     enforced.append(
                         {
@@ -498,14 +505,17 @@ Optimization strategies:
 
             if subnet:
                 if "/subnets/" not in subnet:
-                    issues.append({"name": name, "issue": "invalid_subnet_ref"})
+                    issues.append(
+                        {"name": name, "issue": "invalid_subnet_ref"})
                 if not subnet.startswith("/subscriptions/"):
-                    issues.append({"name": name, "issue": "subnet_not_fully_qualified"})
+                    issues.append(
+                        {"name": name, "issue": "subnet_not_fully_qualified"})
             if vnet:
                 if "/virtualNetworks/" not in vnet:
                     issues.append({"name": name, "issue": "invalid_vnet_ref"})
                 if not vnet.startswith("/subscriptions/"):
-                    issues.append({"name": name, "issue": "vnet_not_fully_qualified"})
+                    issues.append(
+                        {"name": name, "issue": "vnet_not_fully_qualified"})
 
         return {"passed": len(issues) == 0, "details": {"issues": issues}}
 
@@ -533,7 +543,8 @@ Optimization strategies:
         over: list[dict[str, Any]] = []
         for rtype, cnt in counts.items():
             if rtype in limit and cnt > limit[rtype]:
-                over.append({"type": rtype, "count": cnt, "limit": limit[rtype]})
+                over.append(
+                    {"type": rtype, "count": cnt, "limit": limit[rtype]})
 
         return {"passed": len(over) == 0, "details": {"usage": counts, "exceeded": over}}
 
@@ -564,7 +575,8 @@ Optimization strategies:
                 cost = 0.0
 
             total += cost
-            breakdown.append({"name": name, "type": rtype, "monthly_cost": cost})
+            breakdown.append(
+                {"name": name, "type": rtype, "monthly_cost": cost})
 
         return {"monthly_cost": total, "currency": "USD", "items": breakdown}
 
@@ -587,7 +599,8 @@ Optimization strategies:
         self,
         request: DeploymentRequest,
     ) -> dict[str, Any]:
-        required = ["subscription_id", "resource_group", "location", "resources"]
+        required = ["subscription_id",
+                    "resource_group", "location", "resources"]
         for key in required:
             if not getattr(request, key, None):
                 raise ValueError(f"missing_required_field:{key}")
@@ -635,7 +648,8 @@ Optimization strategies:
                 if "/subnets/" in subnet and subnet.startswith("/subscriptions/"):
                     configured += 1
                 else:
-                    checks.append({"name": str(r.get("name", "")), "issue": "invalid_subnet"})
+                    checks.append(
+                        {"name": str(r.get("name", "")), "issue": "invalid_subnet"})
         return {"network_configured": configured, "issues": checks}
 
     async def _apply_security(
@@ -647,8 +661,10 @@ Optimization strategies:
             rtype = str(r.get("type", "")).lower()
             name = str(r.get("name", ""))
             if rtype == "web_app":
-                applied.append({"name": name, "setting": "https_only", "value": True})
-                applied.append({"name": name, "setting": "minimum_tls_version", "value": "1.2"})
+                applied.append(
+                    {"name": name, "setting": "https_only", "value": True})
+                applied.append(
+                    {"name": name, "setting": "minimum_tls_version", "value": "1.2"})
             if rtype == "storage_account":
                 applied.append(
                     {

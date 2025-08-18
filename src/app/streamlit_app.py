@@ -145,9 +145,9 @@ with st.sidebar:
         providers,
         index=_safe_index(providers, st.session_state.get("selected_provider") or DEFAULT_PROVIDER),
     )
-    models = run_async(
-        available_models(st.session_state.selected_provider)
-    ) or ["<no models available>"]
+    models = run_async(available_models(st.session_state.selected_provider)) or [
+        "<no models available>"
+    ]
     if st.session_state.get("selected_model") not in models:
         st.session_state.selected_model = models[0] if models else DEFAULT_MODEL
     st.session_state.selected_model = st.selectbox(
@@ -167,9 +167,9 @@ with st.sidebar:
             st.session_state.get("review_provider") or st.session_state.selected_provider,
         ),
     )
-    review_models = run_async(
-        available_models(st.session_state.review_provider)
-    ) or ["<no models available>"]
+    review_models = run_async(available_models(st.session_state.review_provider)) or [
+        "<no models available>"
+    ]
     if st.session_state.get("review_model") not in review_models:
         st.session_state.review_model = review_models[0] if review_models else DEFAULT_MODEL
     st.session_state.review_model = st.selectbox(

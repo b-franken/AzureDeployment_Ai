@@ -4,7 +4,7 @@ import logging
 import os
 from collections.abc import Awaitable, Callable
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
@@ -32,10 +32,10 @@ env_is_dev = settings.environment == "development"
 
 APP_VERSION = os.getenv("APP_VERSION", "2.0.0")
 app = FastAPI(title="DevOps AI API", version=APP_VERSION)
+
 instrument_app(app)
 init_tracing("devops-ai-api")
 FastAPIInstrumentor.instrument_app(app)
-
 
 install_error_handlers(app)
 
@@ -74,16 +74,9 @@ limiter = RateLimiter(
 
 
 @app.middleware("http")
-async def _rl_mw(
-    request: Request,
-    call_next: Callable[[Request], Awaitable[Response]],
-) -> Response:
+async def _rl_mw(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
     await limiter.check_rate_limit(request)
-    try:
-        return await call_next(request)
-    except Exception as exc:
-        logger.exception("Middleware error")
-        raise HTTPException(status_code=500, detail="Internal Server Error") from exc
+    return await call_next(request)
 
 
 @app.get("/_routes")
@@ -102,8 +95,3 @@ app.include_router(audit_router, prefix="/api/audit", tags=["audit"])
 app.include_router(metrics_router, prefix="/api/metrics", tags=["metrics"])
 app.include_router(health_router, prefix="/api", tags=["health"])
 app.include_router(status_router, prefix="/api", tags=["status"])
-
-
-@app.get("/healthz")
-async def healthz() -> dict[str, bool]:
-    return {"ok": True}

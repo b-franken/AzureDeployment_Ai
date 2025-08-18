@@ -78,6 +78,8 @@ dependencies = [
   "opentelemetry-instrumentation-asyncpg",
   "opentelemetry-instrumentation-pymongo",
   "mcp>=1.0.0",
+  "opentelemetry-instrumentation-redis",
+
 
 ]
 

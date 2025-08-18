@@ -7,9 +7,11 @@ from dataclasses import dataclass, field
 from typing import Any, cast
 
 import redis.asyncio as redis
-from fastapi import HTTPException, Request, status
+from fastapi import Request
 from redis.asyncio.client import Redis as AsyncRedis
 from redis.exceptions import NoScriptError, ResponseError
+
+from app.core.exceptions import RateLimitException
 
 
 @dataclass
@@ -149,6 +151,7 @@ class RateLimiter:
     async def check_rate_limit(self, request: Request, user_id: str | None = None) -> None:
         now = time.time()
         client_ip = request.client.host if request.client else "unknown"
+
         if self.redis_backend is not None:
             if self.config.enable_ip_tracking:
                 ok = await self.redis_backend.is_allowed(
@@ -158,13 +161,9 @@ class RateLimiter:
                     self.config.burst_size,
                 )
                 if not ok:
-                    raise HTTPException(
-                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                        detail={
-                            "error": "rate_limit_exceeded",
-                            "retry_after": 60,
-                            "limit_type": "ip",
-                        },
+                    raise RateLimitException(
+                        "Too many requests from this IP",
+                        details={"retry_after": 60, "limit_type": "ip"},
                     )
             if self.config.enable_user_tracking and user_id:
                 ok = await self.redis_backend.is_allowed(
@@ -174,36 +173,29 @@ class RateLimiter:
                     self.config.burst_size * 2,
                 )
                 if not ok:
-                    raise HTTPException(
-                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                        detail={
-                            "error": "rate_limit_exceeded",
-                            "retry_after": 3600,
-                            "limit_type": "user",
-                        },
+                    raise RateLimitException(
+                        "Too many requests for this user",
+                        details={"retry_after": 3600, "limit_type": "user"},
                     )
             return
+
         if self.config.enable_ip_tracking:
             ip_tracker = self.ip_trackers[client_ip]
             if not ip_tracker.is_allowed(
                 now, self.config.requests_per_minute, 60.0, self.config.burst_size
             ):
-                raise HTTPException(
-                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    detail={"error": "rate_limit_exceeded", "retry_after": 60, "limit_type": "ip"},
+                raise RateLimitException(
+                    "Too many requests from this IP",
+                    details={"retry_after": 60, "limit_type": "ip"},
                 )
         if self.config.enable_user_tracking and user_id:
             user_tracker = self.user_trackers[user_id]
             if not user_tracker.is_allowed(
                 now, self.config.requests_per_hour, 3600.0, self.config.burst_size * 2
             ):
-                raise HTTPException(
-                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    detail={
-                        "error": "rate_limit_exceeded",
-                        "retry_after": 3600,
-                        "limit_type": "user",
-                    },
+                raise RateLimitException(
+                    "Too many requests for this user",
+                    details={"retry_after": 3600, "limit_type": "user"},
                 )
 
     def cleanup_old_trackers(self, max_age: float = 7200.0) -> None:

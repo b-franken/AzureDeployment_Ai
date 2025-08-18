@@ -86,7 +86,6 @@ class CacheManager:
         serialize: bool = True,
     ) -> bool:
         client = await self._ensure_client()
-        ttl = ttl or self.default_ttl
 
         if serialize:
             if isinstance(value, (bytes, bytearray, memoryview)):
@@ -98,7 +97,14 @@ class CacheManager:
                 except (TypeError, ValueError) as exc:
                     raise TypeError("Unsupported value type") from exc
 
-        return await client.setex(key, ttl, value)
+        if ttl is None:
+            ttl = self.default_ttl
+
+        if ttl > 0:
+            return await client.setex(key, ttl, value)
+
+        fut = cast(Awaitable[bool], client.set(key, value))
+        return await fut
 
     async def delete(self, *keys: str) -> int:
         client = await self._ensure_client()

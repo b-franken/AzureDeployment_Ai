@@ -31,9 +31,7 @@ dependencies = [
   "python-dotenv>=1.0.1",
   "streamlit>=1.33.0",
   "torch",
-  "sentence-transformers"
-
-  # Providers / AI
+  "sentence-transformers",
   "openai>=1.0.0",
 
   # Observability & logging

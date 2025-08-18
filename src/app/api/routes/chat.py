@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import AsyncGenerator
+import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -13,10 +14,16 @@ from app.api.schemas import ChatRequest, ChatRequestV2, ChatResponse, TokenData
 from app.api.services import run_chat
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.post("", response_model=ChatResponse)
-async def chat(req: ChatRequest, stream: bool = Query(default=False)) -> Response:
+async def chat(
+    request: Request,
+    req: ChatRequest,
+    stream: bool = Query(default=False),
+    td: Annotated[TokenData, Depends(auth_dependency)] = None,
+) -> Response:
     try:
         text = await run_chat(
             req.input,
@@ -28,6 +35,14 @@ async def chat(req: ChatRequest, stream: bool = Query(default=False)) -> Respons
             req.allowlist,
         )
     except Exception as exc:
+        logger.exception(
+            "Chat request failed",
+            extra={
+                "user_id": getattr(td, "user_id", None),
+                "correlation_id": getattr(req, "correlation_id", None)
+                or request.headers.get("x-correlation-id"),
+            },
+        )
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     if not stream:

@@ -342,10 +342,14 @@ class Settings(BaseSettings):
 
     def validate_environment_settings(self) -> None:
         if self.environment == "production":
-            assert self.security.jwt_secret_key
-            assert not self.debug
-            assert self.security.enable_audit_logging
-            assert not self.api_docs_enabled
+            if not self.security.jwt_secret_key:
+                raise RuntimeError("JWT secret key must be set in production environment")
+            if self.debug:
+                raise RuntimeError("Debug mode must be disabled in production environment")
+            if not self.security.enable_audit_logging:
+                raise RuntimeError("Audit logging must be enabled in production environment")
+            if self.api_docs_enabled:
+                raise RuntimeError("API docs must be disabled in production environment")
 
 
 class ConfigManager:

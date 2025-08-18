@@ -22,7 +22,7 @@ from app.core.config import settings
 from app.observability.prometheus import instrument_app
 from app.observability.tracing import init as init_tracing
 
-env_is_dev = settings.app.env in {"dev", "development", "local"}
+env_is_dev = settings.environment == "development"
 
 APP_VERSION = os.getenv("APP_VERSION", "2.0.0")
 app = FastAPI(title="DevOps AI API", version=APP_VERSION)
@@ -33,9 +33,7 @@ init_tracing("devops-ai-api")
 @app.get("/_routes")
 def _routes() -> list[str]:
     return [
-        r.path
-        for r in app.routes
-        if isinstance(r, (APIRoute, Route, Mount, WebSocketRoute))
+        r.path for r in app.routes if isinstance(r, (APIRoute | Route | Mount | WebSocketRoute))
     ]
 
 

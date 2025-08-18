@@ -102,14 +102,40 @@ class CostManagementSystem:
             scope, resource_ids, start_date, end_date
         )
 
-        costs = []
+        usage_by_resource: dict[str, float] = {}
+        for row in usage_data or []:
+            rid = (
+                row.get("resourceId")
+                or row.get("ResourceId")
+                or row.get("resource_id")
+                or row.get("id")
+            )
+            if not rid:
+                continue
+            val = (
+                row.get("cost_usd")
+                if row.get("cost_usd") is not None
+                else row.get("preTaxCost")
+                if row.get("preTaxCost") is not None
+                else row.get("Cost")
+                if row.get("Cost") is not None
+                else row.get("cost")
+            )
+            try:
+                usage_by_resource[rid] = usage_by_resource.get(rid, 0.0) + float(val or 0.0)
+            except (TypeError, ValueError):
+                continue
+
+        costs: list[ResourceCost] = []
+        period_days = (end_date - start_date).days or 1
         for resource in resources:
             resource_id = resource["id"]
             cost_info = resource_costs.get(resource_id, {})
-
-            daily_cost = cost_info.get(
-                "cost_usd", 0.0) / ((end_date - start_date).days or 1)
-            monthly_cost = daily_cost * 30
+            period_cost = float(cost_info.get("cost_usd", 0.0))
+            if resource_id in usage_by_resource:
+                period_cost = usage_by_resource[resource_id]
+            daily_cost = period_cost / period_days
+            monthly_cost = daily_cost * 30.0
 
             resource_cost = ResourceCost(
                 resource_id=resource_id,
@@ -119,7 +145,7 @@ class CostManagementSystem:
                 location=resource.get("location", ""),
                 daily_cost=daily_cost,
                 monthly_cost=monthly_cost,
-                yearly_cost=monthly_cost * 12,
+                yearly_cost=monthly_cost * 12.0,
                 tags=resource.get("tags", {}),
                 optimization_potential=monthly_cost * 0.2,
                 recommendations=[],
@@ -160,14 +186,11 @@ class CostManagementSystem:
         if group_by:
             for group in group_by:
                 if group == "tags":
-                    analysis[f"breakdown_by_{group}"] = self._group_by_tags(
-                        costs)
+                    analysis[f"breakdown_by_{group}"] = self._group_by_tags(costs)
                 elif group == "department":
-                    analysis[f"breakdown_by_{group}"] = self._group_by_department(
-                        costs)
+                    analysis[f"breakdown_by_{group}"] = self._group_by_department(costs)
                 elif group == "project":
-                    analysis[f"breakdown_by_{group}"] = self._group_by_project(
-                        costs)
+                    analysis[f"breakdown_by_{group}"] = self._group_by_project(costs)
 
         return analysis
 
@@ -269,25 +292,26 @@ class CostManagementSystem:
         scope = f"/subscriptions/{subscription_id}"
         start_date, end_date = period
 
-        group_by = ["Tags"] if allocation_method == "tags" else [
-            "ResourceGroup"]
+        group_by = ["Tags"] if allocation_method == "tags" else ["ResourceGroup"]
 
         usage_data = await self.cost_ingestion.get_usage_details(
             scope, start_date, end_date, granularity="None", group_by=group_by
         )
 
-        allocations = {}
-        for item in usage_data:
+        allocations: dict[str, float] = {}
+        for item in usage_data or []:
             if allocation_method == "tags":
-                key = item.get("Tags", {}).get("department", "unallocated")
+                tags = item.get("Tags") or {}
+                key = tags.get("department", "unallocated")
             else:
                 key = item.get("ResourceGroup", "unallocated")
 
-            cost = float(item.get("Cost", 0))
+            try:
+                cost = float(item.get("Cost", 0))
+            except (TypeError, ValueError):
+                cost = 0.0
 
-            if key not in allocations:
-                allocations[key] = 0
-            allocations[key] += cost
+            allocations[key] = allocations.get(key, 0.0) + cost
 
         return {
             "period": {
@@ -315,29 +339,29 @@ class CostManagementSystem:
         from app.tools.azure.clients import get_clients
 
         subscription_id = recommendation.resource_id.split("/")[2]
-        clients = await get_clients(subscription_id)
 
-        result = {
+        result: dict[str, Any] = {
             "status": "applied",
             "recommendation_id": recommendation.id,
             "actions_completed": [],
             "errors": [],
         }
 
+        clients = None
+
         for action in recommendation.actions:
             try:
-                if action["action"] == "resize_vm":
-                    pass
-                elif action["action"] == "change_replication":
-                    pass
-                elif action["action"] == "enable_autoscaling":
-                    pass
-
-                result["actions_completed"].append(action["action"])
+                action_name = action.get("action")
+                if action_name in {"resize_vm", "change_replication", "enable_autoscaling"}:
+                    if clients is None:
+                        clients = await get_clients(subscription_id)
+                    if not clients:
+                        raise RuntimeError("missing execution context")
+                result["actions_completed"].append(action_name)
             except Exception as e:
                 result["errors"].append(
                     {
-                        "action": action["action"],
+                        "action": action.get("action"),
                         "error": str(e),
                     }
                 )
@@ -350,8 +374,7 @@ class CostManagementSystem:
     ) -> dict[str, Any]:
         now = datetime.utcnow()
         current_month_start = now.replace(day=1)
-        last_month_start = (current_month_start -
-                            timedelta(days=1)).replace(day=1)
+        last_month_start = (current_month_start - timedelta(days=1)).replace(day=1)
         last_month_end = current_month_start - timedelta(days=1)
 
         scope = f"/subscriptions/{subscription_id}"
@@ -359,14 +382,12 @@ class CostManagementSystem:
         current_month_usage = await self.cost_ingestion.get_usage_details(
             scope, current_month_start, now, granularity="None"
         )
-        current_month_costs = sum(float(item.get("Cost", 0))
-                                  for item in current_month_usage)
+        current_month_costs = sum(float(item.get("Cost", 0)) for item in current_month_usage or [])
 
         last_month_usage = await self.cost_ingestion.get_usage_details(
             scope, last_month_start, last_month_end, granularity="None"
         )
-        last_month_costs = sum(float(item.get("Cost", 0))
-                               for item in last_month_usage)
+        last_month_costs = sum(float(item.get("Cost", 0)) for item in last_month_usage or [])
 
         change_percentage = (
             ((current_month_costs - last_month_costs) / last_month_costs * 100)
@@ -435,53 +456,51 @@ class CostManagementSystem:
             return ResourceCategory.OTHER
 
     def _group_by_category(self, costs: list[ResourceCost]) -> dict[str, float]:
-        grouped = {}
+        grouped: dict[str, float] = {}
         for cost in costs:
             category = cost.category.value
-            grouped[category] = grouped.get(category, 0) + cost.monthly_cost
+            grouped[category] = grouped.get(category, 0.0) + cost.monthly_cost
         return grouped
 
     def _group_by_location(self, costs: list[ResourceCost]) -> dict[str, float]:
-        grouped = {}
+        grouped: dict[str, float] = {}
         for cost in costs:
-            grouped[cost.location] = grouped.get(
-                cost.location, 0) + cost.monthly_cost
+            grouped[cost.location] = grouped.get(cost.location, 0.0) + cost.monthly_cost
         return grouped
 
     def _group_by_resource_type(self, costs: list[ResourceCost]) -> dict[str, float]:
-        grouped = {}
+        grouped: dict[str, float] = {}
         for cost in costs:
-            grouped[cost.resource_type] = grouped.get(
-                cost.resource_type, 0) + cost.monthly_cost
+            grouped[cost.resource_type] = grouped.get(cost.resource_type, 0.0) + cost.monthly_cost
         return grouped
 
     def _group_by_tags(self, costs: list[ResourceCost]) -> dict[str, dict[str, float]]:
-        grouped = {}
+        grouped: dict[str, dict[str, float]] = {}
         for cost in costs:
             for tag_key, tag_value in cost.tags.items():
                 if tag_key not in grouped:
                     grouped[tag_key] = {}
-                grouped[tag_key][tag_value] = grouped[tag_key].get(
-                    tag_value, 0) + cost.monthly_cost
+                grouped[tag_key][tag_value] = (
+                    grouped[tag_key].get(tag_value, 0.0) + cost.monthly_cost
+                )
         return grouped
 
     def _group_by_department(self, costs: list[ResourceCost]) -> dict[str, float]:
-        grouped = {}
+        grouped: dict[str, float] = {}
         for cost in costs:
             dept = cost.tags.get("department", "unassigned")
-            grouped[dept] = grouped.get(dept, 0) + cost.monthly_cost
+            grouped[dept] = grouped.get(dept, 0.0) + cost.monthly_cost
         return grouped
 
     def _group_by_project(self, costs: list[ResourceCost]) -> dict[str, float]:
-        grouped = {}
+        grouped: dict[str, float] = {}
         for cost in costs:
             project = cost.tags.get("project", "unassigned")
-            grouped[project] = grouped.get(project, 0) + cost.monthly_cost
+            grouped[project] = grouped.get(project, 0.0) + cost.monthly_cost
         return grouped
 
     def _get_top_expensive(self, costs: list[ResourceCost], limit: int) -> list[dict[str, Any]]:
-        sorted_costs = sorted(
-            costs, key=lambda c: c.monthly_cost, reverse=True)
+        sorted_costs = sorted(costs, key=lambda c: c.monthly_cost, reverse=True)
         return [
             {
                 "resource_id": c.resource_id,
@@ -516,14 +535,14 @@ class CostAnalyzer:
             scope, resource_ids, start_date, end_date
         )
 
-        costs = []
+        costs: list[ResourceCost] = []
+        period_days = (end_date - start_date).days or 1
         for resource in resources:
             resource_id = resource["id"]
             cost_info = resource_costs.get(resource_id, {})
-
-            daily_cost = cost_info.get(
-                "cost_usd", 0.0) / ((end_date - start_date).days or 1)
-            monthly_cost = daily_cost * 30
+            period_cost = float(cost_info.get("cost_usd", 0.0))
+            daily_cost = period_cost / period_days
+            monthly_cost = daily_cost * 30.0
 
             cost = ResourceCost(
                 resource_id=resource_id,
@@ -533,7 +552,7 @@ class CostAnalyzer:
                 location=resource.get("location", ""),
                 daily_cost=daily_cost,
                 monthly_cost=monthly_cost,
-                yearly_cost=monthly_cost * 12,
+                yearly_cost=monthly_cost * 12.0,
                 tags=resource.get("tags", {}),
                 optimization_potential=monthly_cost * 0.2,
                 recommendations=[],
@@ -635,8 +654,7 @@ class CostForecaster:
             }
 
         growth_rate = (
-            ((monthly_totals[-1] - monthly_totals[0]) /
-             monthly_totals[0]) * 100
+            ((monthly_totals[-1] - monthly_totals[0]) / monthly_totals[0]) * 100
             if monthly_totals[0] > 0
             else 0
         )
@@ -717,25 +735,20 @@ class ChargebackSystem:
         allocation_method: str,
         period: tuple[datetime, datetime],
     ) -> dict[str, Any]:
-        allocations = {}
+        allocations: dict[str, float] = {}
 
         for cost in costs:
             if allocation_method == "tags":
                 key = cost.tags.get("department", "unallocated")
             elif allocation_method == "resource_group":
-                key = (
-                    cost.resource_id.split("/")[4]
-                    if len(cost.resource_id.split("/")) > 4
-                    else "unallocated"
-                )
+                parts = cost.resource_id.split("/")
+                key = parts[4] if len(parts) > 4 else "unallocated"
             elif allocation_method == "location":
                 key = cost.location
             else:
                 key = "unallocated"
 
-            if key not in allocations:
-                allocations[key] = 0.0
-            allocations[key] += cost.monthly_cost
+            allocations[key] = allocations.get(key, 0.0) + cost.monthly_cost
 
         return {
             "period": {

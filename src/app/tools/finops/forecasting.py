@@ -27,6 +27,7 @@ class CostForecast:
 
 @dataclass
 class AnomalyDetection:
+    index: int
     timestamp: datetime
     actual_value: float
     expected_value: float
@@ -64,7 +65,8 @@ class ForecastingService:
             model, accuracy = self._fit_trend_model(X, y)
             seasonality = False
 
-        future_X = np.array(range(len(dates), len(dates) + forecast_days)).reshape(-1, 1)
+        future_X = np.array(range(len(dates), len(
+            dates) + forecast_days)).reshape(-1, 1)
 
         predictions = model.predict(future_X)
 
@@ -115,14 +117,16 @@ class ForecastingService:
         std_residual = np.std(residuals)
         mean_residual = np.mean(residuals)
 
-        anomalies = []
-        for i, (date, actual, expected) in enumerate(zip(dates, costs, predictions, strict=False)):
+        anomalies: list[AnomalyDetection] = []
+        for idx, (date, actual, expected) in enumerate(
+            zip(dates, costs, predictions, strict=False)
+        ):
             z_score = abs((actual - expected - mean_residual) / std_residual)
-
             if z_score > sensitivity:
-                deviation = ((actual - expected) / expected) * 100
-
+                deviation = ((actual - expected) / expected) * \
+                    100 if expected != 0 else 0.0
                 anomaly = AnomalyDetection(
+                    index=idx,
                     timestamp=date,
                     actual_value=float(actual),
                     expected_value=float(expected),
@@ -144,7 +148,8 @@ class ForecastingService:
         current_month_cost = await self._get_current_month_cost(subscription_id)
         forecast = await self.forecast_costs(subscription_id, forecast_days=30)
 
-        target_budget = current_month_cost * (1 - target_reduction_percentage / 100)
+        target_budget = current_month_cost * \
+            (1 - target_reduction_percentage / 100)
 
         recommendations = {
             "current_monthly_cost": current_month_cost,
@@ -152,14 +157,17 @@ class ForecastingService:
             "recommended_budget": target_budget,
             "confidence_level": forecast.confidence_level,
             "budget_thresholds": [
-                {"percentage": 50, "action": "notification", "recipients": ["finance_team"]},
+                {"percentage": 50, "action": "notification",
+                    "recipients": ["finance_team"]},
                 {
                     "percentage": 75,
                     "action": "alert",
                     "recipients": ["finance_team", "engineering_leads"],
                 },
-                {"percentage": 90, "action": "critical_alert", "recipients": ["all_stakeholders"]},
-                {"percentage": 100, "action": "cost_controls", "recipients": ["executives"]},
+                {"percentage": 90, "action": "critical_alert",
+                    "recipients": ["all_stakeholders"]},
+                {"percentage": 100, "action": "cost_controls",
+                    "recipients": ["executives"]},
             ],
             "cost_reduction_strategies": await self._identify_reduction_strategies(
                 subscription_id, target_reduction_percentage
@@ -190,20 +198,29 @@ class ForecastingService:
 
             if action == "add":
                 monthly_impact = unit_cost * quantity * 30
+                old_cost = 0.0
+                new_cost = monthly_impact
             elif action == "remove":
                 monthly_impact = -unit_cost * quantity * 30
+                old_cost = -monthly_impact
+                new_cost = 0.0
             elif action == "modify":
                 old_cost = unit_cost * quantity * 30
                 new_sku = change.get("new_sku")
                 new_unit_cost = await self._get_resource_unit_cost(resource_type, new_sku)
-                monthly_impact = (new_unit_cost - unit_cost) * quantity * 30
+                new_cost = new_unit_cost * quantity * 30
+                monthly_impact = new_cost - old_cost
             else:
                 monthly_impact = 0.0
+                old_cost = 0.0
+                new_cost = 0.0
 
             impact_analysis["changes"].append(
                 {
                     "resource_type": resource_type,
                     "action": action,
+                    "old_monthly_cost": old_cost,
+                    "new_monthly_cost": new_cost,
                     "monthly_impact": monthly_impact,
                     "annual_impact": monthly_impact * 12,
                 }
@@ -212,10 +229,12 @@ class ForecastingService:
             impact_analysis["total_impact"] += monthly_impact
 
         impact_analysis["predicted_monthly_cost"] = (
-            impact_analysis["current_monthly_cost"] + impact_analysis["total_impact"]
+            impact_analysis["current_monthly_cost"] +
+            impact_analysis["total_impact"]
         )
         impact_analysis["percentage_change"] = (
-            (impact_analysis["total_impact"] / impact_analysis["current_monthly_cost"]) * 100
+            (impact_analysis["total_impact"] /
+             impact_analysis["current_monthly_cost"]) * 100
             if impact_analysis["current_monthly_cost"] > 0
             else 0
         )
@@ -225,53 +244,41 @@ class ForecastingService:
     def _fit_trend_model(self, X: np.ndarray, y: np.ndarray) -> tuple[Any, float]:
         model = LinearRegression()
         model.fit(X, y)
-
-        predictions = model.predict(X)
         r2_score = model.score(X, y)
-
         return model, r2_score
 
     def _fit_seasonal_model(self, X: np.ndarray, y: np.ndarray) -> tuple[Any, float]:
         poly_features = PolynomialFeatures(degree=3)
         X_poly = poly_features.fit_transform(X)
-
         model = LinearRegression()
         model.fit(X_poly, y)
-
-        predictions = model.predict(X_poly)
         r2_score = model.score(X_poly, y)
-
         wrapped_model = SeasonalModelWrapper(model, poly_features)
-
         return wrapped_model, r2_score
 
     def _detect_seasonality(self, y: np.ndarray) -> bool:
         if len(y) < 14:
             return False
-
         weekly_pattern = []
         for i in range(7):
             daily_values = y[i::7]
             if len(daily_values) > 1:
                 weekly_pattern.append(np.mean(daily_values))
-
         if len(weekly_pattern) >= 7:
             pattern_variance = np.var(weekly_pattern)
             total_variance = np.var(y)
-
             return pattern_variance / total_variance > 0.1 if total_variance > 0 else False
-
         return False
 
     def _determine_trend(self, predictions: np.ndarray) -> str:
         if len(predictions) < 2:
             return "stable"
-
-        first_week = np.mean(predictions[:7]) if len(predictions) >= 7 else predictions[0]
-        last_week = np.mean(predictions[-7:]) if len(predictions) >= 7 else predictions[-1]
-
-        change_percentage = ((last_week - first_week) / first_week) * 100 if first_week > 0 else 0
-
+        first_week = np.mean(predictions[:7]) if len(
+            predictions) >= 7 else predictions[0]
+        last_week = np.mean(
+            predictions[-7:]) if len(predictions) >= 7 else predictions[-1]
+        change_percentage = ((last_week - first_week) /
+                             first_week) * 100 if first_week > 0 else 0
         if change_percentage > 5:
             return "increasing"
         elif change_percentage < -5:
@@ -287,19 +294,18 @@ class ForecastingService:
     ) -> list[dict[str, Any]]:
         if not historical_data:
             return []
-
         predictions = model.predict(X)
-        anomalies = []
-
-        for i, (data_point, prediction) in enumerate(
+        anomalies: list[dict[str, Any]] = []
+        for idx, (data_point, prediction) in enumerate(
             zip(historical_data, predictions, strict=False)
         ):
             actual = data_point["cost"]
-            deviation = abs(actual - prediction) / prediction if prediction > 0 else 0
-
+            deviation = abs(actual - prediction) / \
+                prediction if prediction > 0 else 0
             if deviation > 0.3:
                 anomalies.append(
                     {
+                        "index": idx,
                         "date": data_point["date"].isoformat(),
                         "actual_cost": actual,
                         "expected_cost": float(prediction),
@@ -307,7 +313,6 @@ class ForecastingService:
                         "severity": "high" if deviation > 0.5 else "medium",
                     }
                 )
-
         return anomalies
 
     def _classify_severity(self, z_score: float) -> str:
@@ -342,7 +347,6 @@ class ForecastingService:
     ) -> list[dict[str, Any]]:
         end_date = datetime.utcnow()
         start_date = end_date - timedelta(days=days)
-
         scope = f"/subscriptions/{subscription_id}"
         usage_data = await self.cost_ingestion.get_usage_details(
             scope,
@@ -350,19 +354,15 @@ class ForecastingService:
             end_date,
             granularity="Daily",
         )
-
-        daily_costs = {}
+        daily_costs: dict[Any, float] = {}
         for item in usage_data:
             date_str = item.get("UsageDate", item.get("Date", ""))
-            if date_str:
-                date = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-                date_key = date.date()
-                cost = float(item.get("Cost", 0))
-
-                if date_key not in daily_costs:
-                    daily_costs[date_key] = 0
-                daily_costs[date_key] += cost
-
+            if not date_str:
+                continue
+            date = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+            date_key = date.date()
+            cost = float(item.get("Cost", 0))
+            daily_costs[date_key] = daily_costs.get(date_key, 0.0) + cost
         return [
             {"date": datetime.combine(date, datetime.min.time()), "cost": cost}
             for date, cost in sorted(daily_costs.items())
@@ -371,7 +371,6 @@ class ForecastingService:
     async def _get_current_month_cost(self, subscription_id: str) -> float:
         now = datetime.utcnow()
         start_date = now.replace(day=1)
-
         scope = f"/subscriptions/{subscription_id}"
         usage_data = await self.cost_ingestion.get_usage_details(
             scope,
@@ -379,9 +378,7 @@ class ForecastingService:
             now,
             granularity="None",
         )
-
-        total_cost = sum(float(item.get("Cost", 0)) for item in usage_data)
-        return total_cost
+        return sum(float(item.get("Cost", 0)) for item in usage_data)
 
     async def _get_current_costs_by_resource_type(
         self,
@@ -389,7 +386,6 @@ class ForecastingService:
     ) -> dict[str, float]:
         now = datetime.utcnow()
         start_date = now.replace(day=1)
-
         scope = f"/subscriptions/{subscription_id}"
         usage_data = await self.cost_ingestion.get_usage_details(
             scope,
@@ -398,16 +394,12 @@ class ForecastingService:
             granularity="None",
             group_by=["ResourceType"],
         )
-
-        costs_by_type = {}
+        costs_by_type: dict[str, float] = {}
         for item in usage_data:
             resource_type = item.get("ResourceType", "Unknown")
             cost = float(item.get("Cost", 0))
-
-            if resource_type not in costs_by_type:
-                costs_by_type[resource_type] = 0
-            costs_by_type[resource_type] += cost
-
+            costs_by_type[resource_type] = costs_by_type.get(
+                resource_type, 0.0) + cost
         return costs_by_type
 
     async def _identify_reduction_strategies(
@@ -418,27 +410,22 @@ class ForecastingService:
         from app.tools.finops.optimization import OptimizationService, OptimizationStrategy
 
         optimizer = OptimizationService()
-
         if target_percentage > 20:
             strategy = OptimizationStrategy.AGGRESSIVE
         elif target_percentage > 10:
             strategy = OptimizationStrategy.BALANCED
         else:
             strategy = OptimizationStrategy.CONSERVATIVE
-
         recommendations = await optimizer.analyze_optimization_opportunities(
             subscription_id, strategy, min_savings_threshold=0
         )
-
-        strategies = []
+        strategies: list[dict[str, Any]] = []
         cumulative_savings = 0.0
         current_monthly_cost = await self._get_current_month_cost(subscription_id)
         target_savings = current_monthly_cost * (target_percentage / 100)
-
         for rec in recommendations:
             if cumulative_savings >= target_savings:
                 break
-
             strategies.append(
                 {
                     "action": rec.recommendation_type,
@@ -449,7 +436,6 @@ class ForecastingService:
                 }
             )
             cumulative_savings += rec.estimated_monthly_savings
-
         return strategies
 
     async def _get_resource_unit_cost(
@@ -492,7 +478,6 @@ class ForecastingService:
                 "default": 10.00,
             },
         }
-
         resource_costs = cost_mapping.get(resource_type, {})
         if sku and sku in resource_costs:
             return resource_costs[sku]

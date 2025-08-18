@@ -385,8 +385,8 @@ class OptimizationService:
                                 resource_type="SQL Database",
                                 recommendation_type="elastic_pool",
                                 description=(
-                                    "SQL Database has low usage. Consider elastic pool for multiple "
-                                    "databases."
+                                    "SQL Database has low usage. "
+                                    "Consider elastic pool for multiple databases."
                                 ),
                                 estimated_monthly_savings=monthly_cost * 0.4,
                                 estimated_savings_percentage=40.0,

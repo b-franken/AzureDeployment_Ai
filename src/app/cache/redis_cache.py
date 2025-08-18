@@ -47,7 +47,8 @@ class CacheManager:
         if self._client is None:
             await self.initialize()
         client = self._client
-        assert client is not None
+        if client is None:
+            raise RuntimeError("Redis client is not initialized")
         return client
 
     async def get(self, key: str, deserialize: bool = True) -> Any:

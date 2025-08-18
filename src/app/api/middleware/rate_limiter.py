@@ -118,7 +118,8 @@ return allowed
         if sha is None:
             self._sha = await client.script_load(self._script)
             sha = self._sha
-        assert sha is not None
+        if sha is None:
+            raise RuntimeError("Failed to load rate limiter script in Redis")
         try:
             call = client.evalsha(
                 sha, 1, key, now_s, str(float(limit)), str(float(window)), str(int(burst))
@@ -127,7 +128,8 @@ return allowed
         except (NoScriptError, ResponseError):
             self._sha = await client.script_load(self._script)
             sha2 = self._sha
-            assert sha2 is not None
+            if sha2 is None:
+                raise RuntimeError("Failed to reload rate limiter script in Redis") from None
             call2 = client.evalsha(
                 sha2, 1, key, now_s, str(float(limit)), str(float(window)), str(int(burst))
             )

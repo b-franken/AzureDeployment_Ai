@@ -7,7 +7,11 @@ from typing import Any
 
 from app.tools.finops.cost_ingestion import CostIngestionService
 from app.tools.finops.forecasting import ForecastingService
-from app.tools.finops.optimization import OptimizationRecommendation, OptimizationService, OptimizationStrategy
+from app.tools.finops.optimization import (
+    OptimizationRecommendation,
+    OptimizationService,
+    OptimizationStrategy,
+)
 from app.tools.finops.resource_discovery import ResourceDiscoveryService
 
 
@@ -331,10 +335,12 @@ class CostManagementSystem:
 
                 result["actions_completed"].append(action["action"])
             except Exception as e:
-                result["errors"].append({
-                    "action": action["action"],
-                    "error": str(e),
-                })
+                result["errors"].append(
+                    {
+                        "action": action["action"],
+                        "error": str(e),
+                    }
+                )
 
         return result
 
@@ -628,11 +634,19 @@ class CostForecaster:
                 "outliers": [],
             }
 
-        growth_rate = ((monthly_totals[-1] - monthly_totals[0]) /
-                       monthly_totals[0]) * 100 if monthly_totals[0] > 0 else 0
+        growth_rate = (
+            ((monthly_totals[-1] - monthly_totals[0]) /
+             monthly_totals[0]) * 100
+            if monthly_totals[0] > 0
+            else 0
+        )
 
         return {
-            "overall_trend": "increasing" if growth_rate > 5 else "decreasing" if growth_rate < -5 else "stable",
+            "overall_trend": "increasing"
+            if growth_rate > 5
+            else "decreasing"
+            if growth_rate < -5
+            else "stable",
             "growth_rate": growth_rate,
             "seasonal_patterns": [],
             "outliers": [],
@@ -680,7 +694,13 @@ class BudgetManager:
         scope = f"/subscriptions/{subscription_id}"
         budget_name = f"budget-{period}-{datetime.utcnow().strftime('%Y%m')}"
 
-        time_grain = "Monthly" if period == "monthly" else "Quarterly" if period == "quarterly" else "Annually"
+        time_grain = (
+            "Monthly"
+            if period == "monthly"
+            else "Quarterly"
+            if period == "quarterly"
+            else "Annually"
+        )
 
         return await self.cost_ingestion.create_budget(
             scope, budget_name, amount, time_grain=time_grain
@@ -703,8 +723,11 @@ class ChargebackSystem:
             if allocation_method == "tags":
                 key = cost.tags.get("department", "unallocated")
             elif allocation_method == "resource_group":
-                key = cost.resource_id.split(
-                    "/")[4] if len(cost.resource_id.split("/")) > 4 else "unallocated"
+                key = (
+                    cost.resource_id.split("/")[4]
+                    if len(cost.resource_id.split("/")) > 4
+                    else "unallocated"
+                )
             elif allocation_method == "location":
                 key = cost.location
             else:

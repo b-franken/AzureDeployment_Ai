@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
@@ -65,9 +64,7 @@ class ForecastingService:
             model, accuracy = self._fit_trend_model(X, y)
             seasonality = False
 
-        future_X = np.array(
-            range(len(dates), len(dates) + forecast_days)
-        ).reshape(-1, 1)
+        future_X = np.array(range(len(dates), len(dates) + forecast_days)).reshape(-1, 1)
 
         predictions = model.predict(future_X)
 
@@ -119,7 +116,7 @@ class ForecastingService:
         mean_residual = np.mean(residuals)
 
         anomalies = []
-        for i, (date, actual, expected) in enumerate(zip(dates, costs, predictions)):
+        for i, (date, actual, expected) in enumerate(zip(dates, costs, predictions, strict=False)):
             z_score = abs((actual - expected - mean_residual) / std_residual)
 
             if z_score > sensitivity:
@@ -147,8 +144,7 @@ class ForecastingService:
         current_month_cost = await self._get_current_month_cost(subscription_id)
         forecast = await self.forecast_costs(subscription_id, forecast_days=30)
 
-        target_budget = current_month_cost * \
-            (1 - target_reduction_percentage / 100)
+        target_budget = current_month_cost * (1 - target_reduction_percentage / 100)
 
         recommendations = {
             "current_monthly_cost": current_month_cost,
@@ -156,14 +152,14 @@ class ForecastingService:
             "recommended_budget": target_budget,
             "confidence_level": forecast.confidence_level,
             "budget_thresholds": [
-                {"percentage": 50, "action": "notification",
-                    "recipients": ["finance_team"]},
-                {"percentage": 75, "action": "alert", "recipients": [
-                    "finance_team", "engineering_leads"]},
-                {"percentage": 90, "action": "critical_alert",
-                    "recipients": ["all_stakeholders"]},
-                {"percentage": 100, "action": "cost_controls",
-                    "recipients": ["executives"]},
+                {"percentage": 50, "action": "notification", "recipients": ["finance_team"]},
+                {
+                    "percentage": 75,
+                    "action": "alert",
+                    "recipients": ["finance_team", "engineering_leads"],
+                },
+                {"percentage": 90, "action": "critical_alert", "recipients": ["all_stakeholders"]},
+                {"percentage": 100, "action": "cost_controls", "recipients": ["executives"]},
             ],
             "cost_reduction_strategies": await self._identify_reduction_strategies(
                 subscription_id, target_reduction_percentage
@@ -204,22 +200,22 @@ class ForecastingService:
             else:
                 monthly_impact = 0.0
 
-            impact_analysis["changes"].append({
-                "resource_type": resource_type,
-                "action": action,
-                "monthly_impact": monthly_impact,
-                "annual_impact": monthly_impact * 12,
-            })
+            impact_analysis["changes"].append(
+                {
+                    "resource_type": resource_type,
+                    "action": action,
+                    "monthly_impact": monthly_impact,
+                    "annual_impact": monthly_impact * 12,
+                }
+            )
 
             impact_analysis["total_impact"] += monthly_impact
 
         impact_analysis["predicted_monthly_cost"] = (
-            impact_analysis["current_monthly_cost"] +
-            impact_analysis["total_impact"]
+            impact_analysis["current_monthly_cost"] + impact_analysis["total_impact"]
         )
         impact_analysis["percentage_change"] = (
-            (impact_analysis["total_impact"] /
-             impact_analysis["current_monthly_cost"]) * 100
+            (impact_analysis["total_impact"] / impact_analysis["current_monthly_cost"]) * 100
             if impact_analysis["current_monthly_cost"] > 0
             else 0
         )
@@ -271,13 +267,10 @@ class ForecastingService:
         if len(predictions) < 2:
             return "stable"
 
-        first_week = np.mean(predictions[:7]) if len(
-            predictions) >= 7 else predictions[0]
-        last_week = np.mean(
-            predictions[-7:]) if len(predictions) >= 7 else predictions[-1]
+        first_week = np.mean(predictions[:7]) if len(predictions) >= 7 else predictions[0]
+        last_week = np.mean(predictions[-7:]) if len(predictions) >= 7 else predictions[-1]
 
-        change_percentage = ((last_week - first_week) /
-                             first_week) * 100 if first_week > 0 else 0
+        change_percentage = ((last_week - first_week) / first_week) * 100 if first_week > 0 else 0
 
         if change_percentage > 5:
             return "increasing"
@@ -298,19 +291,22 @@ class ForecastingService:
         predictions = model.predict(X)
         anomalies = []
 
-        for i, (data_point, prediction) in enumerate(zip(historical_data, predictions)):
+        for i, (data_point, prediction) in enumerate(
+            zip(historical_data, predictions, strict=False)
+        ):
             actual = data_point["cost"]
-            deviation = abs(actual - prediction) / \
-                prediction if prediction > 0 else 0
+            deviation = abs(actual - prediction) / prediction if prediction > 0 else 0
 
             if deviation > 0.3:
-                anomalies.append({
-                    "date": data_point["date"].isoformat(),
-                    "actual_cost": actual,
-                    "expected_cost": float(prediction),
-                    "deviation_percentage": deviation * 100,
-                    "severity": "high" if deviation > 0.5 else "medium",
-                })
+                anomalies.append(
+                    {
+                        "date": data_point["date"].isoformat(),
+                        "actual_cost": actual,
+                        "expected_cost": float(prediction),
+                        "deviation_percentage": deviation * 100,
+                        "severity": "high" if deviation > 0.5 else "medium",
+                    }
+                )
 
         return anomalies
 
@@ -443,13 +439,15 @@ class ForecastingService:
             if cumulative_savings >= target_savings:
                 break
 
-            strategies.append({
-                "action": rec.recommendation_type,
-                "resource": rec.resource_id,
-                "estimated_savings": rec.estimated_monthly_savings,
-                "implementation_effort": rec.implementation_effort,
-                "risk_level": rec.risk_level,
-            })
+            strategies.append(
+                {
+                    "action": rec.recommendation_type,
+                    "resource": rec.resource_id,
+                    "estimated_savings": rec.estimated_monthly_savings,
+                    "implementation_effort": rec.implementation_effort,
+                    "risk_level": rec.risk_level,
+                }
+            )
             cumulative_savings += rec.estimated_monthly_savings
 
         return strategies

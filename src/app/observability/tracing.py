@@ -26,11 +26,9 @@ def init_tracing(service_name: str = "devops-ai-api") -> None:
 
     os.environ.setdefault("OTEL_SERVICE_NAME", service_name)
     os.environ.setdefault("OTEL_TRACES_SAMPLER", "traceidratio")
-    os.environ.setdefault("OTEL_TRACES_SAMPLER_ARG", str(
-        settings.observability.trace_sample_rate))
+    os.environ.setdefault("OTEL_TRACES_SAMPLER_ARG", str(settings.observability.trace_sample_rate))
 
-    configure_azure_monitor(connection_string=os.getenv(
-        "APPLICATIONINSIGHTS_CONNECTION_STRING"))
+    configure_azure_monitor(connection_string=os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"))
 
     try:
         HTTPXClientInstrumentor().instrument()
@@ -49,6 +47,7 @@ def init_tracing(service_name: str = "devops-ai-api") -> None:
 
     try:
         from opentelemetry.instrumentation.redis import RedisInstrumentor
+
         RedisInstrumentor().instrument()
     except Exception:
         pass

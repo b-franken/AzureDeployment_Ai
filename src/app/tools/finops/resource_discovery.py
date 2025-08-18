@@ -22,8 +22,7 @@ class ResourceDiscoveryService:
     def _get_resource_client(self, subscription_id: str) -> ResourceManagementClient:
         key = f"resource_{subscription_id}"
         if key not in self._clients:
-            self._clients[key] = ResourceManagementClient(
-                self._credential, subscription_id)
+            self._clients[key] = ResourceManagementClient(self._credential, subscription_id)
         return self._clients[key]
 
     def _get_graph_client(self) -> ResourceGraphClient:
@@ -47,8 +46,7 @@ class ResourceDiscoveryService:
             if time.time() - cached_time < self._cache_ttl:
                 return cached_data
 
-        query = self._build_kql_query(
-            subscription_id, resource_group, resource_type, tags)
+        query = self._build_kql_query(subscription_id, resource_group, resource_type, tags)
         resources = await self._execute_graph_query(query, [subscription_id])
 
         self._cache[cache_key] = (resources, time.time())
@@ -78,8 +76,7 @@ class ResourceDiscoveryService:
                 "managed_by": getattr(resource, "managed_by", None),
             }
         except AzureError as e:
-            raise ExternalServiceException(
-                f"Failed to get resource details: {e}") from e
+            raise ExternalServiceException(f"Failed to get resource details: {e}") from e
 
     async def list_resource_groups(
         self,
@@ -98,8 +95,7 @@ class ResourceDiscoveryService:
                 for rg in groups
             ]
         except AzureError as e:
-            raise ExternalServiceException(
-                f"Failed to list resource groups: {e}") from e
+            raise ExternalServiceException(f"Failed to list resource groups: {e}") from e
 
     async def get_resource_metrics(
         self,
@@ -111,8 +107,7 @@ class ResourceDiscoveryService:
         from azure.mgmt.monitor import MonitorManagementClient
 
         if "monitor" not in self._clients:
-            self._clients["monitor"] = MonitorManagementClient(
-                self._credential, subscription_id)
+            self._clients["monitor"] = MonitorManagementClient(self._credential, subscription_id)
 
         monitor_client = self._clients["monitor"]
 
@@ -143,8 +138,7 @@ class ResourceDiscoveryService:
 
             return result
         except AzureError as e:
-            raise ExternalServiceException(
-                f"Failed to get resource metrics: {e}") from e
+            raise ExternalServiceException(f"Failed to get resource metrics: {e}") from e
 
     def _build_kql_query(
         self,
@@ -206,8 +200,7 @@ class ResourceDiscoveryService:
 
                 skip_token = result.skip_token
             except AzureError as e:
-                raise ExternalServiceException(
-                    f"Failed to execute graph query: {e}") from e
+                raise ExternalServiceException(f"Failed to execute graph query: {e}") from e
 
         return all_results
 
@@ -226,8 +219,7 @@ class ResourceDiscoveryService:
 
         results = await self._execute_graph_query(query, [subscription_id])
 
-        dependencies = [r.get("dependency", "")
-                        for r in results if r.get("dependency")]
+        dependencies = [r.get("dependency", "") for r in results if r.get("dependency")]
 
         query_dependents = f"""
         Resources
@@ -236,8 +228,7 @@ class ResourceDiscoveryService:
         """
 
         dependent_results = await self._execute_graph_query(query_dependents, [subscription_id])
-        dependents = [r.get("id", "")
-                      for r in dependent_results if r.get("id")]
+        dependents = [r.get("id", "") for r in dependent_results if r.get("id")]
 
         return {
             "dependencies": dependencies,
@@ -253,7 +244,7 @@ class ResourceDiscoveryService:
         results = []
 
         for i in range(0, len(resource_ids), batch_size):
-            batch = resource_ids[i: i + batch_size]
+            batch = resource_ids[i : i + batch_size]
             batch_query = " or ".join([f"id =~ '{rid}'" for rid in batch])
 
             query = f"""

@@ -14,10 +14,10 @@ logger = get_logger(__name__)
 
 
 class ApplicationInsights:
-    _instance: "ApplicationInsights" | None = None
+    _instance: ApplicationInsights | None = None
     _initialized: bool = False
 
-    def __new__(cls) -> "ApplicationInsights":
+    def __new__(cls) -> ApplicationInsights:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
@@ -76,7 +76,7 @@ class ApplicationInsights:
                 environment=settings.environment,
             )
 
-        except Exception as e:
+        except Exception:
             logger.error("Failed to initialize Application Insights", exc_info=True)
 
     def _setup_custom_metrics(self) -> None:

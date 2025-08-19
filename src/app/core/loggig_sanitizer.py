@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Mapping, Sequence
-
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 _SIMPLE_TYPES = (type(None), bool, int, float, str, bytes)
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
+import json  # Required for RSAAlgorithm.from_jwk
 import os
 import time
 from collections.abc import Awaitable, Callable

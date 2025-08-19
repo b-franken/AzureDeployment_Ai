@@ -17,7 +17,6 @@ import aiosqlite
 from app.core.config import MAX_MEMORY, MAX_TOTAL_MEMORY
 from src.app.core.logging import get_logger
 
-
 logger = get_logger(__name__)
 
 Role = Literal["user", "assistant", "system", "tool", "reviewer"]

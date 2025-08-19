@@ -487,6 +487,31 @@ def handle_errors(
                 return func(*args, **kwargs)
             except Exception as e:
                 try:
+                    try:
+                        loop = asyncio.get_running_loop()
+                    except RuntimeError:
+                        loop = None
+                    if loop and loop.is_running():
+                        async def run_handler(exc: Exception = e) -> Any:
+                            try:
+                                return await handler.handle_error(exc, recover=recover)
+                            except Exception:
+                                if default_return is not None:
+                                    logger = structlog.get_logger()
+                                    if log_level == ErrorSeverity.DEBUG:
+                                        logger.debug("Handled error with default return", error=str(exc))
+                                    elif log_level == ErrorSeverity.INFO:
+                                        logger.info("Handled error with default return", error=str(exc))
+                                    elif log_level == ErrorSeverity.WARNING:
+                                        logger.warning("Handled error with default return", error=str(exc))
+                                    elif log_level in (ErrorSeverity.CRITICAL, ErrorSeverity.FATAL):
+                                        logger.critical("Handled error with default return", error=str(exc))
+                                    else:
+                                        logger.error("Handled error with default return", error=str(exc))
+                                    return default_return
+                                raise
+
+                        return loop.create_task(run_handler())
                     return asyncio.run(handler.handle_error(e, recover=recover))
                 except Exception:
                     if default_return is not None:

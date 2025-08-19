@@ -12,13 +12,12 @@ import structlog
 from structlog.contextvars import bind_contextvars, clear_contextvars, merge_contextvars
 from structlog.stdlib import ProcessorFormatter
 
-from app.observability.logging_sanitizer import install_log_record_sanitizer  # NEW
+from app.observability.logging_sanitizer import install_log_record_sanitizer
 
 PreProcessor = Callable[
     [Any, str, MutableMapping[str, Any]],
     Mapping[str, Any] | str | bytes | bytearray | tuple[Any, ...],
 ]
-
 
 class ContextFilter(logging.Filter):
     def __init__(self, context: dict[str, Any] | None = None):
@@ -29,7 +28,6 @@ class ContextFilter(logging.Filter):
         for key, value in self.context.items():
             setattr(record, key, value)
         return True
-
 
 class LoggerFactory:
     _instance: LoggerFactory | None = None
@@ -55,8 +53,7 @@ class LoggerFactory:
         if self._configured:
             return
 
-        # Ensure OTEL sees sanitized LogRecords
-        install_log_record_sanitizer()  # NEW
+        install_log_record_sanitizer()
 
         log_level = getattr(logging, level.upper(), logging.INFO)
 
@@ -127,6 +124,9 @@ class LoggerFactory:
         if context:
             bind_contextvars(**context)
 
+        logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
+        logging.getLogger("azure.monitor.opentelemetry").setLevel(logging.WARNING)
+
         self._configured = True
 
     def get_logger(self, name: str) -> structlog.BoundLogger:
@@ -139,7 +139,6 @@ class LoggerFactory:
 
     def clear_context(self) -> None:
         clear_contextvars()
-
 
 class LoggingMiddleware:
     def __init__(self, logger: structlog.BoundLogger):
@@ -189,7 +188,7 @@ class LoggingMiddleware:
             error_type=type(error).__name__,
             error_message=str(error),
             context=context,
-            exc_info=error,
+            exc_info=True,
             **kwargs,
         )
 
@@ -213,7 +212,6 @@ class LoggingMiddleware:
             else:
                 sanitized[key] = value
         return sanitized
-
 
 class AuditLogger:
     def __init__(self, logger: structlog.BoundLogger):
@@ -264,49 +262,7 @@ class AuditLogger:
             **kwargs,
         )
 
-
-class PerformanceLogger:
-    def __init__(self, logger: structlog.BoundLogger):
-        self.logger = logger
-
-    async def log_operation(
-        self,
-        operation: str,
-        duration_ms: float,
-        success: bool = True,
-        metadata: dict[str, Any] | None = None,
-        **kwargs: Any,
-    ) -> None:
-        level = "info" if duration_ms < 1000 else "warning" if duration_ms < 5000 else "error"
-        getattr(self.logger, level)(
-            "Operation completed",
-            performance=True,
-            operation=operation,
-            duration_ms=duration_ms,
-            success=success,
-            metadata=metadata,
-            **kwargs,
-        )
-
-    async def log_slow_query(
-        self,
-        query: str,
-        duration_ms: float,
-        rows_affected: int | None = None,
-        **kwargs: Any,
-    ) -> None:
-        self.logger.warning(
-            "Slow query detected",
-            performance=True,
-            query=query[:500],
-            duration_ms=duration_ms,
-            rows_affected=rows_affected,
-            **kwargs,
-        )
-
-
 _factory = LoggerFactory()
-
 
 def configure_logging(
     level: str = "INFO",
@@ -331,14 +287,11 @@ def configure_logging(
         context=context,
     )
 
-
 def get_logger(name: str) -> structlog.BoundLogger:
     return _factory.get_logger(name)
 
-
 def add_context(**kwargs: Any) -> None:
     _factory.add_context(**kwargs)
-
 
 def clear_context() -> None:
     _factory.clear_context()

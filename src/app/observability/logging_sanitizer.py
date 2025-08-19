@@ -1,61 +1,44 @@
 from __future__ import annotations
-
 import logging
+from collections.abc import Mapping, Sequence
 from typing import Any
 
-_installed = False
-
-_PRIMITIVES = (type(None), bool, int, float, str, bytes)
-_STANDARD_ATTRS = {
-    "name", "msg", "args", "levelname", "levelno", "pathname", "filename",
-    "module", "exc_info", "exc_text", "stack_info", "lineno", "funcName",
-    "created", "msecs", "relativeCreated", "thread", "threadName",
-    "processName", "process",
-}
-
-def _is_safe(value: Any) -> bool:
-    if isinstance(value, _PRIMITIVES):
+def _is_allowed_value(v: Any) -> bool:
+    if v is None:
         return True
-    if isinstance(value, (list, tuple)):
-        try:
-            return all(_is_safe(v) for v in value)
-        except Exception:
-            return False
-    if isinstance(value, dict):
-        try:
-            return all(isinstance(k, str) and _is_safe(v) for k, v in value.items())
-        except Exception:
-            return False
+    if isinstance(v, (str, int, float, bool, bytes)):
+        return True
+    if isinstance(v, Mapping):
+        return all(isinstance(k, str) and _is_allowed_value(val) for k, val in v.items())
+    if isinstance(v, Sequence) and not isinstance(v, (str, bytes, bytearray)):
+        return all(isinstance(x, (str, int, float, bool, bytes)) for x in v)
     return False
 
-class SanitizeRecordFilter(logging.Filter):
-    """
-    Drop private attrs (like '_logger') and stringify non-primitive extras,
-    but NEVER touch 'msg' or 'args' so stdlib formatting stays intact.
-    """
-    def filter(self, record: logging.LogRecord) -> bool:
-        for key in [k for k in list(record.__dict__.keys()) if k.startswith("_")]:
-            record.__dict__.pop(key, None)
-
-
-        for key, value in list(record.__dict__.items()):
-            if key in ("msg", "args", "exc_info") or key in _STANDARD_ATTRS:
-                continue
-            if not _is_safe(value):
-                try:
-                    record.__dict__[key] = str(value)
-                except Exception:
-                    record.__dict__.pop(key, None)
-        return True
+def _sanitize_record(record: logging.LogRecord) -> None:
+    std = {
+        "name","msg","args","levelname","levelno","pathname","filename","module",
+        "exc_info","exc_text","stack_info","lineno","funcName","created","msecs",
+        "relativeCreated","thread","threadName","processName","process","asctime"
+    }
+    to_delete: list[str] = []
+    for key, value in list(record.__dict__.items()):
+        if key in std:
+            continue
+        if key.startswith("_"):
+            to_delete.append(key)
+            continue
+        if key == "exc_info" and value and value is not True and not isinstance(value, tuple):
+            record.__dict__[key] = True
+            continue
+        if not _is_allowed_value(value):
+            record.__dict__[key] = str(value)
+    for key in to_delete:
+        del record.__dict__[key]
 
 def install_log_record_sanitizer() -> None:
-    """
-    Install a root-logger filter that sanitizes every LogRecord before any handler sees it.
-    Idempotent.
-    """
-    global _installed
-    if _installed:
-        return
-    root = logging.getLogger()
-    root.addFilter(SanitizeRecordFilter())
-    _installed = True
+    orig = logging.getLogRecordFactory()
+    def factory(*args: Any, **kwargs: Any) -> logging.LogRecord:
+        rec = orig(*args, **kwargs)
+        _sanitize_record(rec)
+        return rec
+    logging.setLogRecordFactory(factory)

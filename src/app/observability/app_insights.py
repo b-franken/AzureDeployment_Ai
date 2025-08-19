@@ -12,12 +12,11 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-
 class ApplicationInsights:
-    _instance: ApplicationInsights | None = None
+    _instance: "ApplicationInsights" | None = None
     _initialized: bool = False
 
-    def __new__(cls) -> ApplicationInsights:
+    def __new__(cls) -> "ApplicationInsights":
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
@@ -44,40 +43,41 @@ class ApplicationInsights:
             or os.getenv("OTEL_SERVICE_NAME", "devops-ai-api")
         )
 
-        try:
-            resource = Resource.create(
-                {
-                    "service.name": service_name,
-                    "service.version": settings.app_version,
-                    "deployment.environment": settings.environment,
-                    "cloud.provider": "azure",
-                    "cloud.platform": "azure_app_service",
-                }
-            )
+        if settings.environment == "development":
+            os.environ.setdefault("OTEL_BSP_SCHEDULE_DELAY", "15000")
+            os.environ.setdefault("OTEL_BLRP_SCHEDULE_DELAY", "15000")
 
-            configure_azure_monitor(
-                connection_string=connection_string,
-                resource=resource,
-                instrumentation_options={
-                    "fastapi": {"enabled": True},
-                    "psycopg2": {"enabled": True},
-                    "django": {"enabled": False},
-                    "flask": {"enabled": False},
-                    "azure_sdk": {"enabled": True},
-                },
-            )
+        resource = Resource.create(
+            {
+                "service.name": service_name,
+                "service.version": settings.app_version,
+                "deployment.environment": settings.environment,
+                "cloud.provider": "azure",
+                "cloud.platform": "azure_app_service",
+            }
+        )
 
-            self._setup_custom_metrics()
+        configure_azure_monitor(
+            connection_string=connection_string,
+            resource=resource,
+            logger_name="app",
+            instrumentation_options={
+                "fastapi": {"enabled": True},
+                "psycopg2": {"enabled": True},
+                "django": {"enabled": False},
+                "flask": {"enabled": False},
+                "azure_sdk": {"enabled": True},
+            },
+        )
 
-            self._initialized = True
-            logger.info(
-                "Application Insights initialized",
-                service_name=service_name,
-                environment=settings.environment,
-            )
+        self._setup_custom_metrics()
 
-        except Exception:
-            logger.error("Failed to initialize Application Insights", exc_info=True)
+        self._initialized = True
+        logger.info(
+            "Application Insights initialized",
+            service_name=service_name,
+            environment=settings.environment,
+        )
 
     def _setup_custom_metrics(self) -> None:
         meter = metrics.get_meter(__name__)

@@ -24,9 +24,17 @@ def init_tracing(service_name: str = "devops-ai-api") -> None:
     load_dotenv(override=False)
     settings = get_settings()
 
+    if getattr(settings, "environment", "development") == "development":
+        load_dotenv(dotenv_path=".env.development", override=False)
+        os.environ.setdefault("OTEL_BSP_SCHEDULE_DELAY", "15000")
+        os.environ.setdefault("OTEL_BLRP_SCHEDULE_DELAY", "15000")
+
     os.environ.setdefault("OTEL_SERVICE_NAME", service_name)
     os.environ.setdefault("OTEL_TRACES_SAMPLER", "traceidratio")
-    os.environ.setdefault("OTEL_TRACES_SAMPLER_ARG", str(settings.observability.trace_sample_rate))
+    os.environ.setdefault(
+        "OTEL_TRACES_SAMPLER_ARG",
+        str(settings.observability.trace_sample_rate),
+    )
 
     configure_azure_monitor(connection_string=os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"))
 

@@ -1,7 +1,9 @@
 from __future__ import annotations
+
 import logging
 from collections.abc import Mapping, Sequence
 from typing import Any
+
 
 def _is_allowed_value(v: Any) -> bool:
     if v is None:

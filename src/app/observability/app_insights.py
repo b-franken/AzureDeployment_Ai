@@ -13,10 +13,10 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 class ApplicationInsights:
-    _instance: "ApplicationInsights" | None = None
+    _instance: ApplicationInsights | None = None
     _initialized: bool = False
 
-    def __new__(cls) -> "ApplicationInsights":
+    def __new__(cls) -> ApplicationInsights:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance

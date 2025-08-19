@@ -8,8 +8,8 @@ from opentelemetry import metrics, trace
 from opentelemetry.sdk.resources import Resource
 
 from app.core.config import settings
-from app.core.loging import get_logger
-from app.observability.loging_sanitizer import install_log_record_sanitizer
+from app.core.logging import get_logger
+from app.observability.logging_sanitizer import install_log_record_sanitizer
 
 logger = get_logger(__name__)
 

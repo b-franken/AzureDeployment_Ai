@@ -15,7 +15,7 @@ from fastapi import HTTPException, Request, status
 from fastapi.security import HTTPBearer
 from jwt import PyJWTError
 from jwt.algorithms import RSAAlgorithm
-from app.core.loging import get_logger
+from src.app.core.logging import get_logger
 
 from app.api.schemas import TokenData
 from app.observability.tracing import get_tracer

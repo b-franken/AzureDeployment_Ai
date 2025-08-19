@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime, timedelta
 from typing import Annotated
@@ -32,6 +33,7 @@ except Exception:
     pwd_context = SimplePwdContext()
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-secret-key-change-this-in-production")
@@ -100,7 +102,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     try:
         return pwd_context.verify(plain_password, hashed_password)
     except Exception as e:
-        print(f"Password verification error: {e}")
+        logger.exception("Password verification error: %s", e)
         return False
 
 

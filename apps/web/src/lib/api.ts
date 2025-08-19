@@ -63,38 +63,30 @@ export async function login(
     email: string,
     password: string
 ): Promise<AuthResult> {
-    try {
-        const res = await fetchWithTimeout(
-            `${base}/api/v2/auth/login`,
-            {
-                method: "POST",
-                headers: { "content-type": "application/json" },
-                body: JSON.stringify({ email, password }),
-            },
-            "login",
-        )
-        return res.json()
-    } catch (err) {
-        throw err
-    }
+    const res = await fetchWithTimeout(
+        `${base}/api/auth/login`,
+        {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ email, password }),
+        },
+        "login",
+    )
+    return res.json()
 }
 
 export async function logout(token: string): Promise<void> {
-    try {
-        await fetchWithTimeout(
-            `${base}/api/v2/auth/logout`,
-            {
-                method: "POST",
-                headers: {
-                    "content-type": "application/json",
-                    ...withAuth(token),
-                },
+    await fetchWithTimeout(
+        `${base}/api/auth/logout`,
+        {
+            method: "POST",
+            headers: {
+                "content-type": "application/json",
+                ...withAuth(token),
             },
-            "logout",
-        )
-    } catch (err) {
-        throw err
-    }
+        },
+        "logout",
+    )
 }
 
 export type ChatV2Response = {
@@ -113,29 +105,25 @@ export async function chatV2(
         enable_tools?: boolean
     }
 ): Promise<ChatV2Response> {
-    try {
-        const res = await fetchWithTimeout(
-            `${base}/api/v2/chat/chat`,
-            {
-                method: "POST",
-                headers: {
-                    "content-type": "application/json",
-                    ...withAuth(token),
-                },
-                body: JSON.stringify({
-                    input: args.input,
-                    memory: args.memory ?? [],
-                    provider: args.provider ?? null,
-                    model: args.model ?? null,
-                    enable_tools: !!args.enable_tools,
-                }),
+    const res = await fetchWithTimeout(
+        `${base}/api/chat/v2`,
+        {
+            method: "POST",
+            headers: {
+                "content-type": "application/json",
+                ...withAuth(token),
             },
-            "chatV2",
-        )
-        return res.json()
-    } catch (err) {
-        throw err
-    }
+            body: JSON.stringify({
+                input: args.input,
+                memory: args.memory ?? [],
+                provider: args.provider ?? null,
+                model: args.model ?? null,
+                enable_tools: !!args.enable_tools,
+            }),
+        },
+        "chatV2",
+    )
+    return res.json()
 }
 
 export async function chat(
@@ -158,21 +146,17 @@ export async function chat(
         preferred_tool: opts?.preferred_tool ?? null,
         allowlist: opts?.allowlist ?? [],
     }
-    try {
-        const res = await fetchWithTimeout(
-            `${base}/api/chat`,
-            {
-                method: "POST",
-                headers: { "content-type": "application/json" },
-                body: JSON.stringify(body),
-            },
-            "chat",
-        )
-        const data = await res.json()
-        return String(data?.output ?? "")
-    } catch (err) {
-        throw err
-    }
+    const res = await fetchWithTimeout(
+        `${base}/api/chat`,
+        {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(body),
+        },
+        "chat",
+    )
+    const data = await res.json()
+    return String(data?.output ?? "")
 }
 
 export async function review_once(
@@ -180,26 +164,22 @@ export async function review_once(
     assistant: string,
     opts?: { provider?: string | null; model?: string | null }
 ): Promise<string> {
-    try {
-        const res = await fetchWithTimeout(
-            `${base}/api/review`,
-            {
-                method: "POST",
-                headers: { "content-type": "application/json" },
-                body: JSON.stringify({
-                    user_input: user,
-                    assistant_reply: assistant,
-                    provider: opts?.provider ?? null,
-                    model: opts?.model ?? null,
-                }),
-            },
-            "review",
-        )
-        const data = await res.json()
-        return String(data?.output ?? "")
-    } catch (err) {
-        throw err
-    }
+    const res = await fetchWithTimeout(
+        `${base}/api/review`,
+        {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+                user_input: user,
+                assistant_reply: assistant,
+                provider: opts?.provider ?? null,
+                model: opts?.model ?? null,
+            }),
+        },
+        "review",
+    )
+    const data = await res.json()
+    return String(data?.output ?? "")
 }
 
 export type DeployRequest = {
@@ -216,31 +196,27 @@ export async function deploy(
     token: string,
     body: DeployRequest
 ) {
-    try {
-        const res = await fetchWithTimeout(
-            `${base}/api/v2/deploy/deploy`,
-            {
-                method: "POST",
-                headers: {
-                    "content-type": "application/json",
-                    ...withAuth(token),
-                },
-                body: JSON.stringify({
-                    request: body.request,
-                    subscription_id: body.subscription_id,
-                    resource_group: body.resource_group ?? null,
-                    environment: body.environment ?? "development",
-                    dry_run: body.dry_run ?? true,
-                    cost_limit: body.cost_limit ?? null,
-                    tags: body.tags ?? {},
-                }),
+    const res = await fetchWithTimeout(
+        `${base}/api/deploy`,
+        {
+            method: "POST",
+            headers: {
+                "content-type": "application/json",
+                ...withAuth(token),
             },
-            "deploy",
-        )
-        return res.json()
-    } catch (err) {
-        throw err
-    }
+            body: JSON.stringify({
+                request: body.request,
+                subscription_id: body.subscription_id,
+                resource_group: body.resource_group ?? null,
+                environment: body.environment ?? "development",
+                dry_run: body.dry_run ?? true,
+                cost_limit: body.cost_limit ?? null,
+                tags: body.tags ?? {},
+            }),
+        },
+        "deploy",
+    )
+    return res.json()
 }
 
 export type CostAnalysisArgs = {
@@ -256,30 +232,26 @@ export async function analyzeCosts(
     token: string,
     args: CostAnalysisArgs
 ) {
-    try {
-        const res = await fetchWithTimeout(
-            `${base}/api/v2/cost/cost/analysis`,
-            {
-                method: "POST",
-                headers: {
-                    "content-type": "application/json",
-                    ...withAuth(token),
-                },
-                body: JSON.stringify({
-                    subscription_id: args.subscription_id,
-                    start_date: args.start_date,
-                    end_date: args.end_date,
-                    group_by: args.group_by ?? null,
-                    include_forecast: !!args.include_forecast,
-                    include_recommendations: !!args.include_recommendations,
-                }),
+    const res = await fetchWithTimeout(
+        `${base}/api/cost/analysis`,
+        {
+            method: "POST",
+            headers: {
+                "content-type": "application/json",
+                ...withAuth(token),
             },
-            "analyze costs",
-        )
-        return res.json()
-    } catch (err) {
-        throw err
-    }
+            body: JSON.stringify({
+                subscription_id: args.subscription_id,
+                start_date: args.start_date,
+                end_date: args.end_date,
+                group_by: args.group_by ?? null,
+                include_forecast: !!args.include_forecast,
+                include_recommendations: !!args.include_recommendations,
+            }),
+        },
+        "analyze costs",
+    )
+    return res.json()
 }
 
 export async function auditLogs(
@@ -298,51 +270,35 @@ export async function auditLogs(
     if (params?.user_id) q.set("user_id", params.user_id)
     if (params?.page) q.set("page", String(params.page))
     if (params?.page_size) q.set("page_size", String(params.page_size))
-    try {
-        const res = await fetchWithTimeout(
-            `${base}/api/v2/audit/audit/logs?${q.toString()}`,
-            { headers: { ...withAuth(token) } },
-            "audit logs",
-        )
-        return res.json()
-    } catch (err) {
-        throw err
-    }
+    const res = await fetchWithTimeout(
+        `${base}/api/audit/logs?${q.toString()}`,
+        { headers: { ...withAuth(token) } },
+        "audit logs",
+    )
+    return res.json()
 }
 
 export async function metrics(token: string) {
-    try {
-        const res = await fetchWithTimeout(
-            `${base}/api/v2/metrics`,
-            {
-                headers: { ...withAuth(token) },
-            },
-            "metrics",
-        )
-        return res.json()
-    } catch (err) {
-        throw err
-    }
+    const res = await fetchWithTimeout(
+        `${base}/api/metrics`,
+        {
+            headers: { ...withAuth(token) },
+        },
+        "metrics",
+    )
+    return res.json()
 }
 
 export async function apiHealthz(): Promise<{ status: string }> {
-    try {
-        const res = await fetchWithTimeout(`${base}/healthz`, {}, "healthz")
-        return res.json()
-    } catch (err) {
-        throw err
-    }
+    const res = await fetchWithTimeout(`${base}/api/health`, {}, "healthz")
+    return res.json()
 }
 
 export async function apiStatus(): Promise<any> {
-    try {
-        const res = await fetchWithTimeout(
-            `${base}/api/v2/status`,
-            {},
-            "status",
-        )
-        return res.json()
-    } catch (err) {
-        throw err
-    }
+    const res = await fetchWithTimeout(
+        `${base}/api/status`,
+        {},
+        "status",
+    )
+    return res.json()
 }

@@ -5,7 +5,7 @@ import logging
 import os
 import time
 from collections.abc import AsyncGenerator
-from typing import Any, TypeAlias
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -24,7 +24,7 @@ try:
     AUTH_AVAILABLE = True
 except ImportError:
     AUTH_AVAILABLE = False
-    User: TypeAlias = Any
+    type User = Any
 
     async def get_current_active_user() -> Any:
         return None
@@ -55,7 +55,8 @@ async def get_optional_user(request: Request) -> Any:
     if AUTH_AVAILABLE:
         try:
             return await get_current_active_user()
-        except:
+        except Exception:
+            logger.exception("Failed to retrieve current active user")
             if IS_DEVELOPMENT:
                 return type(
                     "User",
@@ -76,7 +77,7 @@ async def chat(
     request: Request,
     req: ChatRequest,
     stream: bool = Query(default=False),
-    current_user: Any = Depends(get_optional_user),
+    current_user: Any = Depends(get_optional_user),  # noqa: B008
 ) -> Response:
     """Chat endpoint - authentication optional in development"""
     try:
@@ -121,7 +122,9 @@ async def chat(
 
 @router.post("/v2")
 async def chat_v2(
-    request: Request, body: ChatRequestV2, current_user: Any = Depends(get_optional_user)
+    request: Request,
+    body: ChatRequestV2,
+    current_user: Any = Depends(get_optional_user),  # noqa: B008
 ) -> dict[str, Any]:
     """Chat V2 endpoint - authentication optional in development"""
     start = time.time()

@@ -27,7 +27,8 @@ except Exception:
             try:
                 salt, hash_part = hashed_password.split("$")
                 return hashlib.sha256((salt + plain_password).encode()).hexdigest() == hash_part
-            except:
+            except ValueError as exc:
+                logger.exception("Invalid hashed password: %s", exc)
                 return False
 
     pwd_context = SimplePwdContext()

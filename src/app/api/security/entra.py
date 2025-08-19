@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import time
+from datetime import datetime
 from typing import Any, Dict, Optional
 
 import httpx
@@ -14,131 +15,272 @@ from jwt import PyJWTError
 from jwt.algorithms import RSAAlgorithm
 
 from app.api.schemas import TokenData
+from app.core.logging import get_logger
+from app.observability.tracing import get_tracer
+from opentelemetry import trace
 
-# Configuration via env (with sensible defaults)
-TENANT_ID = os.getenv("ENTRA_TENANT_ID") or os.getenv("AZURE_TENANT_ID") or ""
-AUDIENCE = os.getenv("ENTRA_AUDIENCE") or os.getenv("API_AUDIENCE") or ""
+logger = get_logger(__name__)
+tracer = get_tracer(__name__)
+
+TENANT_ID = os.getenv("ENTRA_TENANT_ID") or os.getenv("AZURE_TENANT_ID")
+CLIENT_ID = os.getenv("ENTRA_CLIENT_ID") or os.getenv("AZURE_CLIENT_ID")
+AUDIENCE = os.getenv("ENTRA_AUDIENCE") or os.getenv("API_AUDIENCE") or CLIENT_ID
 ALLOWED_ALGS = ("RS256",)
 
-if not AUDIENCE:
-    raise RuntimeError("ENTRA_AUDIENCE must be set for Entra ID validation")
+if not TENANT_ID:
+    raise RuntimeError("ENTRA_TENANT_ID or AZURE_TENANT_ID must be set")
+if not CLIENT_ID:
+    raise RuntimeError("ENTRA_CLIENT_ID or AZURE_CLIENT_ID must be set")
 
-ISSUER_TEMPLATE = "https://login.microsoftonline.com/{tenant}/v2.0"
-JWKS_URL_TEMPLATE = "https://login.microsoftonline.com/{tenant}/discovery/v2.0/keys"
+ISSUER_V1 = f"https://sts.windows.net/{TENANT_ID}/"
+ISSUER_V2 = f"https://login.microsoftonline.com/{TENANT_ID}/v2.0"
+JWKS_URL = f"https://login.microsoftonline.com/{TENANT_ID}/discovery/v2.0/keys"
 
 security = HTTPBearer(auto_error=False)
 
 
-class _JwksCache:
-    """Tiny in-memory JWKS cache with TTL and per-tenant storage."""
-
+class JwksCache:
     def __init__(self, ttl_seconds: int = 3600) -> None:
         self._ttl = ttl_seconds
         self._items: dict[str, tuple[float, dict[str, Any]]] = {}
         self._lock = asyncio.Lock()
 
     async def get(self, tenant: str) -> dict[str, Any]:
-        key = tenant or "common"
-        now = time.time()
+        with tracer.start_as_current_span("jwks_cache_get") as span:
+            span.set_attribute("tenant_id", tenant)
+            key = tenant
+            now = time.time()
+            
+            async with self._lock:
+                cached = self._items.get(key)
+                if cached and now - cached[0] < self._ttl:
+                    span.set_attribute("cache_hit", True)
+                    return cached[1]
+            
+            span.set_attribute("cache_hit", False)
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                url = f"https://login.microsoftonline.com/{tenant}/discovery/v2.0/keys"
+                resp = await client.get(url)
+                resp.raise_for_status()
+                jwks = resp.json()
+            
+            async with self._lock:
+                self._items[key] = (now, jwks)
+            return jwks
+
+    async def invalidate(self, tenant: str) -> None:
         async with self._lock:
-            cached = self._items.get(key)
-            if cached and now - cached[0] < self._ttl:
-                return cached[1]
-        # fetch outside lock to avoid long hold
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            url = JWKS_URL_TEMPLATE.format(tenant=tenant or "common")
-            resp = await client.get(url)
-            resp.raise_for_status()
-            jwks = resp.json()
-        async with self._lock:
-            self._items[key] = (now, jwks)
-        return jwks
+            self._items.pop(tenant, None)
 
 
-_jwks_cache = _JwksCache(ttl_seconds=3600)
+_jwks_cache = JwksCache(ttl_seconds=3600)
 
 
-def _pick_email(claims: dict[str, Any]) -> str:
-    for k in ("preferred_username", "upn", "email"):
+def extract_email(claims: dict[str, Any]) -> str:
+    for k in ("preferred_username", "upn", "email", "unique_name"):
         v = claims.get(k)
         if isinstance(v, str) and v:
             return v
     return ""
 
 
-def _roles_from_claims(claims: dict[str, Any]) -> list[str]:
+def extract_roles(claims: dict[str, Any]) -> list[str]:
+    roles: list[str] = []
+    
     if "roles" in claims and isinstance(claims["roles"], list):
-        return [str(r) for r in claims["roles"] if r]
-    scp = claims.get("scp")  # space-delimited scopes
+        roles.extend([str(r) for r in claims["roles"] if r])
+    
+    scp = claims.get("scp")
     if isinstance(scp, str) and scp:
-        return [s.strip() for s in scp.split() if s.strip()]
-    return []
+        roles.extend([s.strip() for s in scp.split() if s.strip()])
+    
+    app_roles = claims.get("app_roles")
+    if isinstance(app_roles, list):
+        roles.extend([str(r) for r in app_roles if r])
+    
+    groups = claims.get("groups")
+    if isinstance(groups, list):
+        for group_id in groups:
+            roles.append(f"group:{group_id}")
+    
+    return list(set(roles))
 
 
-async def _validate_jwt_with_jwks(token: str) -> dict[str, Any]:
-    try:
-        unverified_header = jwt.get_unverified_header(token)
-        unverified_claims = jwt.decode(token, options={"verify_signature": False})
-    except PyJWTError as err:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid token header") from err
+async def validate_entra_token(token: str) -> dict[str, Any]:
+    with tracer.start_as_current_span("validate_entra_token") as span:
+        try:
+            unverified_header = jwt.get_unverified_header(token)
+            unverified_claims = jwt.decode(token, options={"verify_signature": False})
+            
+            span.set_attributes({
+                "token_alg": unverified_header.get("alg"),
+                "token_kid": unverified_header.get("kid"),
+                "token_iss": unverified_claims.get("iss"),
+                "token_aud": unverified_claims.get("aud"),
+            })
+        except PyJWTError as err:
+            logger.error("Failed to decode token header", exc_info=err)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, 
+                detail="Invalid token format"
+            ) from err
 
-    alg = unverified_header.get("alg")
-    kid = unverified_header.get("kid")
-    tid = (TENANT_ID or unverified_claims.get("tid") or "").strip()
+        alg = unverified_header.get("alg")
+        kid = unverified_header.get("kid")
+        
+        if alg not in ALLOWED_ALGS:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, 
+                detail=f"Unsupported algorithm: {alg}"
+            )
+        
+        if not kid:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, 
+                detail="Missing key ID in token"
+            )
 
-    if alg not in ALLOWED_ALGS or not kid:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unsupported token")
+        tid = unverified_claims.get("tid", TENANT_ID)
+        if not tid:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, 
+                detail="Missing tenant ID"
+            )
 
-    if not tid:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="tenant not allowed")
-
-    jwks = await _jwks_cache.get(tid)
-    keys = jwks.get("keys") or []
-    jwk: Optional[Dict[str, Any]] = next((k for k in keys if k.get("kid") == kid), None)
-    if not jwk:
-        _jwks_cache._items.pop(tid, None)
         jwks = await _jwks_cache.get(tid)
         keys = jwks.get("keys") or []
-        jwk = next((k for k in keys if k.get("kid") == kid), None)
-    if not jwk:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="signing key not found")
+        jwk: Optional[Dict[str, Any]] = next((k for k in keys if k.get("kid") == kid), None)
+        
+        if not jwk:
+            await _jwks_cache.invalidate(tid)
+            jwks = await _jwks_cache.get(tid)
+            keys = jwks.get("keys") or []
+            jwk = next((k for k in keys if k.get("kid") == kid), None)
+        
+        if not jwk:
+            logger.error("Signing key not found", extra={"kid": kid, "tenant": tid})
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, 
+                detail="Signing key not found"
+            )
 
-    public_key = RSAAlgorithm.from_jwk(json.dumps(jwk))
-    issuer = ISSUER_TEMPLATE.format(tenant=tid)
-    try:
-        claims = jwt.decode(
-            token,
-            key=public_key,
-            algorithms=list(ALLOWED_ALGS),
-            audience=AUDIENCE,
-            issuer=issuer,
-            options={"require": ["exp", "iss", "aud"]},
-        )
-    except PyJWTError as err:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid token") from err
-
-    return claims
+        public_key = RSAAlgorithm.from_jwk(json.dumps(jwk))
+        
+        issuer = unverified_claims.get("iss")
+        valid_issuers = [ISSUER_V1, ISSUER_V2]
+        
+        try:
+            claims = jwt.decode(
+                token,
+                key=public_key,
+                algorithms=list(ALLOWED_ALGS),
+                audience=AUDIENCE,
+                issuer=valid_issuers,
+                options={
+                    "verify_signature": True,
+                    "verify_exp": True,
+                    "verify_nbf": True,
+                    "verify_iss": True,
+                    "verify_aud": True,
+                    "require": ["exp", "iss", "aud"]
+                },
+            )
+            span.set_attribute("validation_success", True)
+            return claims
+        except jwt.ExpiredSignatureError:
+            logger.warning("Token expired")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, 
+                detail="Token expired"
+            )
+        except jwt.InvalidAudienceError:
+            logger.warning("Invalid audience", extra={"expected": AUDIENCE})
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, 
+                detail="Invalid audience"
+            )
+        except jwt.InvalidIssuerError:
+            logger.warning("Invalid issuer", extra={"expected": valid_issuers})
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, 
+                detail="Invalid issuer"
+            )
+        except PyJWTError as err:
+            logger.error("Token validation failed", exc_info=err)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, 
+                detail="Token validation failed"
+            ) from err
 
 
 async def entra_auth_required(request: Request) -> TokenData:
-    creds = await security(request)
-    if not creds or not creds.credentials:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="auth required")
+    with tracer.start_as_current_span("entra_auth_required") as span:
+        creds = await security(request)
+        if not creds or not creds.credentials:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, 
+                detail="Authentication required"
+            )
 
-    claims = await _validate_jwt_with_jwks(creds.credentials)
+        claims = await validate_entra_token(creds.credentials)
+        
+        user_id = str(claims.get("oid") or claims.get("sub") or "")
+        email = extract_email(claims)
+        
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, 
+                detail="Invalid subject claim"
+            )
 
-    user_id = str(claims.get("oid") or claims.get("sub") or "")
-    email = _pick_email(claims)
-    if not user_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid subject")
+        roles = extract_roles(claims)
+        exp_ts = int(claims["exp"])
+        
+        subscription_id = claims.get("extension_SubscriptionId") or os.getenv("AZURE_SUBSCRIPTION_ID")
+        
+        span.set_attributes({
+            "user_id": user_id,
+            "user_email": email,
+            "user_roles_count": len(roles),
+            "token_exp": exp_ts,
+        })
+        
+        logger.info(
+            "Entra ID authentication successful",
+            extra={
+                "user_id": user_id,
+                "email": email,
+                "roles_count": len(roles),
+            }
+        )
 
-    roles = _roles_from_claims(claims)
-    exp_ts = int(claims["exp"])
+        return TokenData(
+            user_id=user_id,
+            email=email or "unknown@unknown",
+            subscription_id=subscription_id,
+            roles=roles,
+            expires_at=datetime.fromtimestamp(exp_ts),
+        )
 
-    return TokenData(
-        user_id=user_id,
-        email=email or "unknown@unknown",
-        subscription_id=None,
-        roles=roles,
-        expires_at=time.gmtime(exp_ts),  
-    )
+
+async def entra_auth_with_role(required_role: str):
+    async def verify(request: Request) -> TokenData:
+        token_data = await entra_auth_required(request)
+        
+        if required_role not in token_data.roles and "admin" not in token_data.roles:
+            logger.warning(
+                "Insufficient privileges",
+                extra={
+                    "user_id": token_data.user_id,
+                    "required_role": required_role,
+                    "user_roles": token_data.roles,
+                }
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Role '{required_role}' required"
+            )
+        
+        return token_data
+    
+    return verify

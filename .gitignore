@@ -1,6 +1,6 @@
 # Environment files
 .env
-
+.env.local
 # Databases
 *.db
 *.sqlite3

@@ -13,6 +13,7 @@ from starlette.routing import Mount, Route, WebSocketRoute
 from app.api.error_handlers import install_error_handlers
 from app.api.middleware.correlation import install_correlation_middleware
 from app.api.middleware.rate_limiter import RateLimitConfig, RateLimiter
+from app.api.middleware.telemetry import install_telemetry_middleware
 from app.api.routes.audit import router as audit_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.chat import router as chat_router
@@ -23,18 +24,23 @@ from app.api.routes.metrics import router as metrics_router
 from app.api.routes.review import router as review_router
 from app.api.routes.status import router as status_router
 from app.core.config import settings
+from app.observability.app_insights import app_insights
 from app.observability.prometheus import instrument_app
-from app.observability.tracing import init_tracing
 
 logger = logging.getLogger(__name__)
 
 env_is_dev = settings.environment == "development"
 
 APP_VERSION = os.getenv("APP_VERSION", "2.0.0")
-app = FastAPI(title="DevOps AI API", version=APP_VERSION)
+app = FastAPI(
+    title="DevOps AI API",
+    version=APP_VERSION,
+    docs_url="/docs" if settings.api_docs_enabled else None,
+    redoc_url="/redoc" if settings.api_docs_enabled else None,
+)
 
+app_insights.initialize()
 instrument_app(app)
-init_tracing("devops-ai-api")
 FastAPIInstrumentor.instrument_app(app)
 
 install_error_handlers(app)
@@ -53,9 +59,11 @@ app.add_middleware(
     allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["x-correlation-id"],
 )
 
 install_correlation_middleware(app)
+install_telemetry_middleware(app)
 
 limiter = RateLimiter(
     RateLimitConfig(
@@ -77,6 +85,23 @@ limiter = RateLimiter(
 async def _rl_mw(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
     await limiter.check_rate_limit(request)
     return await call_next(request)
+
+
+@app.on_event("startup")
+async def startup_event() -> None:
+    logger.info(
+        "API starting up",
+        extra={
+            "version": APP_VERSION,
+            "environment": settings.environment,
+            "entra_id_enabled": os.getenv("USE_ENTRA_ID", "false").lower() in {"true", "1", "yes"},
+        }
+    )
+
+
+@app.on_event("shutdown")
+async def shutdown_event() -> None:
+    logger.info("API shutting down")
 
 
 @app.get("/_routes")

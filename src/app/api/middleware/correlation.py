@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 from fastapi import FastAPI, Request, Response
 from opentelemetry import trace
 
-from app.core.loging import add_context, clear_context
+from app.core.logging import add_context, clear_context
 
 
 def install_correlation_middleware(app: FastAPI) -> None:

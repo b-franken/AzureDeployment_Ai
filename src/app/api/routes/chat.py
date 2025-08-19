@@ -55,8 +55,9 @@ async def get_optional_user(request: Request) -> Any:
     if AUTH_AVAILABLE:
         try:
             return await get_current_active_user()
-        except:
+        except Exception as exc:
             if IS_DEVELOPMENT:
+                logger.exception("Failed to retrieve current user: %s", exc)
                 return type(
                     "User",
                     (),

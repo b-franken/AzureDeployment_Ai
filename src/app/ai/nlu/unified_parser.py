@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from app.ai.nlu.embeddings_classifier import EmbeddingsClassifierService
 
 
-class deployment_intent(Enum):
+class DeploymentIntent(Enum):
     create = "create"
     update = "update"
     delete = "delete"
@@ -28,9 +28,9 @@ class deployment_intent(Enum):
 
 
 @dataclass
-class unified_parse_result:
+class UnifiedParseResult:
     text: str
-    intent: deployment_intent
+    intent: DeploymentIntent
     confidence: float
     resource_type: str
     resource_name: str | None
@@ -164,32 +164,32 @@ class unified_nlu_parser:
         ],
     }
 
-    intent_patterns: dict[deployment_intent, list[str]] = {
-        deployment_intent.create: [
+    intent_patterns: dict[DeploymentIntent, list[str]] = {
+        DeploymentIntent.create: [
             r"\b(create|make|provision|deploy|setup|add|new|build|establish|launch)\b",
             r"\bneed\s+(?:a\s+)?(?:new|fresh)\b",
             r"\bspin\s+up\b",
             r"\bstand\s+up\b",
             r"\bbring\s+up\b",
         ],
-        deployment_intent.delete: [
+        DeploymentIntent.delete: [
             r"\b(delete|remove|destroy|terminate|decommission|tear\s+down|clean\s+up)\b",
             r"\b(dispose|purge|wipe|eliminate)\b",
         ],
-        deployment_intent.update: [
+        DeploymentIntent.update: [
             r"\b(update|modify|change|alter|adjust|reconfigure|patch|upgrade|resize|expand|enhance)\b"
         ],
-        deployment_intent.scale: [r"\b(scale|resize|expand|contract|grow|shrink|autoscale)\b"],
-        deployment_intent.backup: [r"\b(backup|snapshot|archive|preserve)\b"],
-        deployment_intent.restore: [r"\b(restore|recover|revert)\b"],
-        deployment_intent.migrate: [r"\b(migrate|move|transfer|relocate|shift)\b"],
-        deployment_intent.monitor: [r"\b(monitor|watch|track|alert)\b"],
-        deployment_intent.secure: [r"\b(secure|harden|protect|encrypt|lock\s*down)\b"],
-        deployment_intent.optimize: [r"\b(optimize|tune|reduce\s+cost|improve\s+performance)\b"],
-        deployment_intent.validate: [r"\b(validate|check|verify|test|ensure|confirm)\b"],
-        deployment_intent.cost_analyze: [r"\b(cost\s+analysis|analyze\s+cost|budget|forecast)\b"],
-        deployment_intent.drift_check: [r"\b(drift|configuration\s+drift|detect\s+changes)\b"],
-        deployment_intent.rollback: [r"\b(rollback|undo\s+deployment|previous\s+version)\b"],
+        DeploymentIntent.scale: [r"\b(scale|resize|expand|contract|grow|shrink|autoscale)\b"],
+        DeploymentIntent.backup: [r"\b(backup|snapshot|archive|preserve)\b"],
+        DeploymentIntent.restore: [r"\b(restore|recover|revert)\b"],
+        DeploymentIntent.migrate: [r"\b(migrate|move|transfer|relocate|shift)\b"],
+        DeploymentIntent.monitor: [r"\b(monitor|watch|track|alert)\b"],
+        DeploymentIntent.secure: [r"\b(secure|harden|protect|encrypt|lock\s*down)\b"],
+        DeploymentIntent.optimize: [r"\b(optimize|tune|reduce\s+cost|improve\s+performance)\b"],
+        DeploymentIntent.validate: [r"\b(validate|check|verify|test|ensure|confirm)\b"],
+        DeploymentIntent.cost_analyze: [r"\b(cost\s+analysis|analyze\s+cost|budget|forecast)\b"],
+        DeploymentIntent.drift_check: [r"\b(drift|configuration\s+drift|detect\s+changes)\b"],
+        DeploymentIntent.rollback: [r"\b(rollback|undo\s+deployment|previous\s+version)\b"],
     }
 
     def __init__(
@@ -210,7 +210,7 @@ class unified_nlu_parser:
 
         return EmbeddingsClassifierService(num_labels=num_labels, model_name=model_name, ckpt=ckpt)
 
-    def parse(self, text: str) -> unified_parse_result:
+    def parse(self, text: str) -> UnifiedParseResult:
         t = text.lower().strip()
         intent = self._detect_intent(t)
         rtype = self._detect_resource_type(t)
@@ -226,7 +226,7 @@ class unified_nlu_parser:
             probs = self._emb.predict_proba([text])
             emb_scores = probs.detach().cpu().tolist()[0]
         action = self._action(intent, rtype)
-        return unified_parse_result(
+        return UnifiedParseResult(
             text=text,
             intent=intent,
             confidence=conf,
@@ -243,8 +243,8 @@ class unified_nlu_parser:
         r = self.parse(text)
         return r.action, r.parameters
 
-    def _detect_intent(self, text: str) -> deployment_intent:
-        scores: dict[deployment_intent, int] = {}
+    def _detect_intent(self, text: str) -> DeploymentIntent:
+        scores: dict[DeploymentIntent, int] = {}
         for k, pats in self.intent_patterns.items():
             s = 0
             for p in pats:
@@ -253,7 +253,7 @@ class unified_nlu_parser:
             if s > 0:
                 scores[k] = s
         if not scores:
-            return deployment_intent.create
+            return DeploymentIntent.create
         return max(scores, key=lambda k: scores[k])
 
     def _detect_resource_type(self, text: str) -> str:
@@ -351,7 +351,7 @@ class unified_nlu_parser:
         return ctx
 
     def _build_advanced_context(
-        self, text: str, intent: deployment_intent, rtype: str
+        self, text: str, intent: DeploymentIntent, rtype: str
     ) -> dict[str, Any]:
         adv: dict[str, Any] = {}
         comp = []
@@ -366,7 +366,7 @@ class unified_nlu_parser:
             adv["compliance_requirements"] = comp
         if any(s in text for s in ["encrypt", "secure", "private", "isolated"]):
             adv["security_enhanced"] = True
-        if intent in {deployment_intent.update, deployment_intent.migrate}:
+        if intent in {DeploymentIntent.update, DeploymentIntent.migrate}:
             if "blue green" in text or "blue-green" in text:
                 adv["deployment_strategy"] = "blue_green"
             elif "canary" in text:
@@ -376,10 +376,10 @@ class unified_nlu_parser:
         return adv
 
     def _confidence(
-        self, text: str, intent: deployment_intent, rtype: str, has_name: bool
+        self, text: str, intent: DeploymentIntent, rtype: str, has_name: bool
     ) -> float:
         c = 0.5
-        if intent != deployment_intent.create:
+        if intent != DeploymentIntent.create:
             c += 0.1
         if rtype != "generic":
             c += 0.2
@@ -391,7 +391,7 @@ class unified_nlu_parser:
             c += 0.05
         return min(c, 1.0)
 
-    def _action(self, intent: deployment_intent, rtype: str) -> str:
+    def _action(self, intent: DeploymentIntent, rtype: str) -> str:
         if rtype == "generic":
             return intent.value
         m: dict[str, str] = {
@@ -409,7 +409,7 @@ class unified_nlu_parser:
         return f"{intent.value}_{res}"
 
 
-def parse_provision_request(text: str) -> unified_parse_result:
+def parse_provision_request(text: str) -> UnifiedParseResult:
     return unified_nlu_parser().parse(text)
 
 

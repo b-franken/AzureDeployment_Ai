@@ -12,6 +12,7 @@ from app.api.error_handlers import install_error_handlers
 from app.api.middleware.correlation import install_correlation_middleware
 from app.api.middleware.rate_limiter import RateLimitConfig, RateLimiter
 from app.api.middleware.telemetry import install_telemetry_middleware
+from app.api.middleware.authentication import install_auth_middleware
 from app.api.routes.audit import router as audit_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.chat import router as chat_router
@@ -62,6 +63,7 @@ app.add_middleware(
 
 install_correlation_middleware(app)
 install_telemetry_middleware(app)
+install_auth_middleware(app)
 
 limiter = RateLimiter(
     RateLimitConfig(
@@ -80,8 +82,11 @@ limiter = RateLimiter(
 
 
 @app.middleware("http")
-async def _rl_mw(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
-    await limiter.check_rate_limit(request)
+async def _rl_mw(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
+    user_id = getattr(request.state, "user_id", None)
+    await limiter.check_rate_limit(request, user_id)
     return await call_next(request)
 
 

@@ -6,7 +6,12 @@ from typing import Any
 _installed = False
 
 _PRIMITIVES = (type(None), bool, int, float, str, bytes)
-
+_STANDARD_ATTRS = {
+    "name", "msg", "args", "levelname", "levelno", "pathname", "filename",
+    "module", "exc_info", "exc_text", "stack_info", "lineno", "funcName",
+    "created", "msecs", "relativeCreated", "thread", "threadName",
+    "processName", "process",
+}
 
 def _is_safe(value: Any) -> bool:
     if isinstance(value, _PRIMITIVES):
@@ -23,34 +28,34 @@ def _is_safe(value: Any) -> bool:
             return False
     return False
 
-
-def install_log_record_sanitizer() -> None:
+class SanitizeRecordFilter(logging.Filter):
     """
-    Sanitize logging.LogRecord objects so OpenTelemetry's log exporter
-    does not choke on non-primitive attributes like structlog internals.
-    Idempotent.
+    Drop private attrs (like '_logger') and stringify non-primitive extras,
+    but NEVER touch 'msg' or 'args' so stdlib formatting stays intact.
     """
-    global _installed
-    if _installed:
-        return
+    def filter(self, record: logging.LogRecord) -> bool:
+        for key in [k for k in list(record.__dict__.keys()) if k.startswith("_")]:
+            record.__dict__.pop(key, None)
 
-    base_factory = logging.getLogRecordFactory()
-
-    def record_factory(*args, **kwargs):  # type: ignore[no-untyped-def]
-        record = base_factory(*args, **kwargs)
-
-        for key in list(record.__dict__.keys()):
-            if key.startswith("_"):
-                record.__dict__.pop(key, None)
 
         for key, value in list(record.__dict__.items()):
+            if key in ("msg", "args", "exc_info") or key in _STANDARD_ATTRS:
+                continue
             if not _is_safe(value):
                 try:
                     record.__dict__[key] = str(value)
                 except Exception:
                     record.__dict__.pop(key, None)
+        return True
 
-        return record
-
-    logging.setLogRecordFactory(record_factory)
+def install_log_record_sanitizer() -> None:
+    """
+    Install a root-logger filter that sanitizes every LogRecord before any handler sees it.
+    Idempotent.
+    """
+    global _installed
+    if _installed:
+        return
+    root = logging.getLogger()
+    root.addFilter(SanitizeRecordFilter())
     _installed = True

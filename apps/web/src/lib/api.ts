@@ -1,6 +1,4 @@
-const base =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
-
+const base = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 const REQUEST_TIMEOUT_MS = 15000;
 
 export class ApiError extends Error {
@@ -26,9 +24,7 @@ async function fetchWithTimeout(
         const body = await res.clone().json();
         if (typeof body?.detail === "string") detail = body.detail;
         if (typeof body?.message === "string") detail = body.message;
-      } catch {
-        // ignore body parse errors
-      }
+      } catch {}
       throw new ApiError(detail, undefined, res.status);
     }
     return res;
@@ -43,20 +39,14 @@ async function fetchWithTimeout(
   }
 }
 
-export type ChatMsg = {
-  role: "user" | "assistant" | "system";
-  content: string;
-};
-
+export type ChatMsg = { role: "user" | "assistant" | "system"; content: string };
 type HeadersDict = { [k: string]: string };
 
 function withAuth(token?: string): HeadersDict {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-export function splitModel(
-  id: string
-): { provider: string | null; model: string | null } {
+export function splitModel(id: string): { provider: string | null; model: string | null } {
   if (!id) return { provider: null, model: null };
   const i = id.indexOf(":");
   if (i === -1) return { provider: null, model: id };
@@ -68,12 +58,6 @@ export type AuthResult = {
   token_type: "bearer";
   expires_in: number;
   user: { id: string; email: string; roles: string[] };
-};
-
-export type RefreshResult = {
-  access_token: string;
-  token_type?: "bearer";
-  expires_in?: number;
 };
 
 export async function login(email: string, password: string): Promise<AuthResult> {
@@ -94,54 +78,23 @@ export async function logout(token: string): Promise<void> {
     `${base}/api/auth/logout`,
     {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...withAuth(token),
-      },
+      headers: { "content-type": "application/json", ...withAuth(token) },
     },
     "logout"
   );
 }
 
-export async function refresh(token: string): Promise<RefreshResult> {
-  const res = await fetchWithTimeout(
-    `${base}/api/auth/refresh`,
-    {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...withAuth(token),
-      },
-    },
-    "refresh"
-  );
-  return res.json();
-}
-
-export type ChatV2Response = {
-  response: string;
-  correlation_id: string;
-  processing_time: number;
-};
+export type ChatV2Response = { response: string; correlation_id: string; processing_time: number };
 
 export async function chatV2(
   token: string,
-  args: {
-    input: string;
-    memory?: ChatMsg[];
-    provider?: string | null;
-    model?: string | null;
-    enable_tools?: boolean;
-  }
+  args: { input: string; memory?: ChatMsg[]; provider?: string | null; model?: string | null; enable_tools?: boolean }
 ): Promise<ChatV2Response> {
   const res = await fetchWithTimeout(
     `${base}/api/chat/v2`,
     {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...withAuth(token),
-      },
+      headers: { "content-type": "application/json", ...withAuth(token) },
       body: JSON.stringify({
         input: args.input,
         memory: args.memory ?? [],
@@ -156,15 +109,10 @@ export async function chatV2(
 }
 
 export async function chat(
+  token: string,
   message: string,
   history: ChatMsg[],
-  opts?: {
-    provider?: string | null;
-    model?: string | null;
-    enable_tools?: boolean;
-    preferred_tool?: string | null;
-    allowlist?: string[] | null;
-  }
+  opts?: { provider?: string | null; model?: string | null; enable_tools?: boolean; preferred_tool?: string | null; allowlist?: string[] | null }
 ): Promise<string> {
   const body = {
     input: message,
@@ -179,7 +127,7 @@ export async function chat(
     `${base}/api/chat`,
     {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...withAuth(token) },
       body: JSON.stringify(body),
     },
     "chat"
@@ -221,16 +169,12 @@ export type DeployRequest = {
   tags?: Record<string, string>;
 };
 
-// Orchestrated deploy, not the approval queue API
 export async function deploy(token: string, body: DeployRequest) {
   const res = await fetchWithTimeout(
     `${base}/api/deploy`,
     {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...withAuth(token),
-      },
+      headers: { "content-type": "application/json", ...withAuth(token) },
       body: JSON.stringify({
         request: body.request,
         subscription_id: body.subscription_id,
@@ -244,74 +188,6 @@ export async function deploy(token: string, body: DeployRequest) {
     "deploy"
   );
   return res.json();
-}
-
-/**
- * Deployment Requests API (approval workflow)
- * Endpoints assumed:
- *  - GET    /api/deploy/requests
- *  - POST   /api/deploy/requests
- *  - POST   /api/deploy/requests/:id/approve
- *  - POST   /api/deploy/requests/:id/reject
- *  - POST   /api/deploy/requests/:id/deploy
- */
-export type DeployRequestItem = {
-  id: string | number;
-  status: "pending" | "approved" | "rejected" | "deployed" | "failed";
-  request: string;
-  environment: string;
-  cost_estimate?: number | null;
-  created_at: string; // ISO
-  updated_at: string; // ISO
-};
-
-export async function listDeployRequests(token: string) {
-  const res = await fetchWithTimeout(
-    `${base}/api/deploy/requests`,
-    { headers: { "content-type": "application/json", ...withAuth(token) } },
-    "list deploy requests"
-  );
-  return res.json() as Promise<{ requests: DeployRequestItem[] } | DeployRequestItem[]>;
-}
-
-export async function createDeployRequest(
-  token: string,
-  payload: Partial<DeployRequestItem>
-) {
-  const res = await fetchWithTimeout(
-    `${base}/api/deploy/requests`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json", ...withAuth(token) },
-      body: JSON.stringify(payload),
-    },
-    "create deploy request"
-  );
-  return res.json() as Promise<DeployRequestItem>;
-}
-
-export async function approveDeployRequest(token: string, id: string | number) {
-  await fetchWithTimeout(
-    `${base}/api/deploy/requests/${id}/approve`,
-    { method: "POST", headers: { ...withAuth(token) } },
-    "approve deploy request"
-  );
-}
-
-export async function rejectDeployRequest(token: string, id: string | number) {
-  await fetchWithTimeout(
-    `${base}/api/deploy/requests/${id}/reject`,
-    { method: "POST", headers: { ...withAuth(token) } },
-    "reject deploy request"
-  );
-}
-
-export async function deployRequestById(token: string, id: string | number) {
-  await fetchWithTimeout(
-    `${base}/api/deploy/requests/${id}/deploy`,
-    { method: "POST", headers: { ...withAuth(token) } },
-    "deploy request"
-  );
 }
 
 export type CostAnalysisArgs = {
@@ -328,10 +204,7 @@ export async function analyzeCosts(token: string, args: CostAnalysisArgs) {
     `${base}/api/cost/analysis`,
     {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...withAuth(token),
-      },
+      headers: { "content-type": "application/json", ...withAuth(token) },
       body: JSON.stringify({
         subscription_id: args.subscription_id,
         start_date: args.start_date,
@@ -348,13 +221,7 @@ export async function analyzeCosts(token: string, args: CostAnalysisArgs) {
 
 export async function auditLogs(
   token: string,
-  params?: {
-    start_date?: string;
-    end_date?: string;
-    user_id?: string;
-    page?: number;
-    page_size?: number;
-  }
+  params?: { start_date?: string; end_date?: string; user_id?: string; page?: number; page_size?: number }
 ) {
   const q = new URLSearchParams();
   if (params?.start_date) q.set("start_date", params.start_date);
@@ -362,7 +229,6 @@ export async function auditLogs(
   if (params?.user_id) q.set("user_id", params.user_id);
   if (params?.page) q.set("page", String(params.page));
   if (params?.page_size) q.set("page_size", String(params.page_size));
-
   const res = await fetchWithTimeout(
     `${base}/api/audit/logs?${q.toString()}`,
     { headers: { ...withAuth(token) } },
@@ -374,9 +240,7 @@ export async function auditLogs(
 export async function metrics(token: string) {
   const res = await fetchWithTimeout(
     `${base}/api/metrics`,
-    {
-      headers: { ...withAuth(token) },
-    },
+    { headers: { ...withAuth(token) } },
     "metrics"
   );
   return res.json();

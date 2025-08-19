@@ -8,7 +8,9 @@ logger = logging.getLogger(__name__)
 
 
 class DummyLimiter:
-    async def check_rate_limit(self, request: Request) -> None:  # pragma: no cover - stub
+    async def check_rate_limit(
+        self, request: Request, user_id: str | None = None
+    ) -> None:  # pragma: no cover - stub
         return None
 
 
@@ -17,8 +19,11 @@ app = FastAPI()
 
 
 @app.middleware("http")
-async def _rl_mw(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
-    await limiter.check_rate_limit(request)
+async def _rl_mw(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
+    user_id = getattr(request.state, "user_id", None)
+    await limiter.check_rate_limit(request, user_id)
     try:
         return await call_next(request)
     except Exception as exc:  # pragma: no cover - defensive

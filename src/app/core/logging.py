@@ -12,6 +12,8 @@ import structlog
 from structlog.contextvars import bind_contextvars, clear_contextvars, merge_contextvars
 from structlog.stdlib import ProcessorFormatter
 
+from app.observability.logging_sanitizer import install_log_record_sanitizer  # NEW
+
 PreProcessor = Callable[
     [Any, str, MutableMapping[str, Any]],
     Mapping[str, Any] | str | bytes | bytearray | tuple[Any, ...],
@@ -52,6 +54,9 @@ class LoggerFactory:
     ) -> None:
         if self._configured:
             return
+
+        # Ensure OTEL sees sanitized LogRecords
+        install_log_record_sanitizer()  # NEW
 
         log_level = getattr(logging, level.upper(), logging.INFO)
 

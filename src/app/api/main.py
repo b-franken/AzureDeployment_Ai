@@ -7,7 +7,6 @@ from collections.abc import Awaitable, Callable
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
-from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from starlette.routing import Mount, Route, WebSocketRoute
 
 from app.api.error_handlers import install_error_handlers
@@ -41,7 +40,6 @@ app = FastAPI(
 
 app_insights.initialize()
 instrument_app(app)
-FastAPIInstrumentor.instrument_app(app)
 
 install_error_handlers(app)
 

@@ -5,7 +5,7 @@ import json
 import os
 import time
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any
 
 import httpx
 import jwt
@@ -17,7 +17,6 @@ from jwt.algorithms import RSAAlgorithm
 from app.api.schemas import TokenData
 from app.core.logging import get_logger
 from app.observability.tracing import get_tracer
-from opentelemetry import trace
 
 logger = get_logger(__name__)
 tracer = get_tracer(__name__)
@@ -149,7 +148,7 @@ async def validate_entra_token(token: str) -> dict[str, Any]:
 
         jwks = await _jwks_cache.get(tid)
         keys = jwks.get("keys") or []
-        jwk: Optional[Dict[str, Any]] = next((k for k in keys if k.get("kid") == kid), None)
+        jwk: dict[str, Any] | None = next((k for k in keys if k.get("kid") == kid), None)
         
         if not jwk:
             await _jwks_cache.invalidate(tid)

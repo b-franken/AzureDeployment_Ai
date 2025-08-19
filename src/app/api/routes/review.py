@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -14,7 +13,7 @@ router = APIRouter()
 IS_DEVELOPMENT = os.getenv("ENVIRONMENT", "development") == "development"
 
 
-async def get_optional_auth(request: Request) -> Optional[dict]:
+async def get_optional_auth(request: Request) -> dict | None:
     """Optional authentication for development"""
     if IS_DEVELOPMENT:
         return {"user": "dev"}
@@ -27,8 +26,7 @@ async def get_optional_auth(request: Request) -> Optional[dict]:
 
 @router.post("", response_model=ReviewResponse)
 async def review(
-    req: ReviewRequest,
-    auth: Optional[dict] = Depends(get_optional_auth)
+    req: ReviewRequest, auth: dict | None = Depends(get_optional_auth)
 ) -> JSONResponse:
     """Review endpoint - authentication optional in development"""
     try:

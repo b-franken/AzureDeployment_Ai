@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 
 from azure.monitor.opentelemetry import configure_azure_monitor
@@ -11,6 +12,8 @@ from opentelemetry.instrumentation.pymongo import PymongoInstrumentor
 from opentelemetry.sdk.trace import TracerProvider as SDKTracerProvider
 
 from app.core.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 _configured: bool = False
 _provider: SDKTracerProvider | None = None
@@ -41,24 +44,24 @@ def init_tracing(service_name: str = "devops-ai-api") -> None:
     try:
         HTTPXClientInstrumentor().instrument()
     except Exception:
-        pass
+        logger.warning("Failed to instrument HTTPX client", exc_info=True)
 
     try:
         AsyncPGInstrumentor().instrument()
     except Exception:
-        pass
+        logger.warning("Failed to instrument AsyncPG", exc_info=True)
 
     try:
         PymongoInstrumentor().instrument()
     except Exception:
-        pass
+        logger.warning("Failed to instrument Pymongo", exc_info=True)
 
     try:
         from opentelemetry.instrumentation.redis import RedisInstrumentor
 
         RedisInstrumentor().instrument()
     except Exception:
-        pass
+        logger.warning("Failed to instrument Redis", exc_info=True)
 
     provider = trace.get_tracer_provider()
     if isinstance(provider, SDKTracerProvider):

@@ -82,9 +82,7 @@ limiter = RateLimiter(
 
 
 @app.middleware("http")
-async def _rl_mw(
-    request: Request, call_next: Callable[[Request], Awaitable[Response]]
-) -> Response:
+async def _rl_mw(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
     user_id = getattr(request.state, "user_id", None)
     await limiter.check_rate_limit(request, user_id)
     return await call_next(request)

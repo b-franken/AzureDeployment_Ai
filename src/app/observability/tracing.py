@@ -59,7 +59,6 @@ def init_tracing(service_name: str = "devops-ai-api") -> None:
     except Exception as exc:
         logger.warning("Pymongo instrumentation failed", error=str(exc), exc_info=True)
 
-
     try:
         from opentelemetry.instrumentation.redis import RedisInstrumentor
 

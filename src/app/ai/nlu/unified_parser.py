@@ -375,9 +375,7 @@ class unified_nlu_parser:
                 adv["deployment_strategy"] = "rolling"
         return adv
 
-    def _confidence(
-        self, text: str, intent: DeploymentIntent, rtype: str, has_name: bool
-    ) -> float:
+    def _confidence(self, text: str, intent: DeploymentIntent, rtype: str, has_name: bool) -> float:
         c = 0.5
         if intent != DeploymentIntent.create:
             c += 0.1

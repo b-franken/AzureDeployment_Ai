@@ -43,14 +43,10 @@ async def fake_get_provider_and_model(provider, model):
 
 
 def test_map_args_with_function_call_invalid_json(monkeypatch):
-    monkeypatch.setattr(
-        "app.ai.arg_mapper.get_provider_and_model", fake_get_provider_and_model
-    )
+    monkeypatch.setattr("app.ai.arg_mapper.get_provider_and_model", fake_get_provider_and_model)
 
     async def run() -> None:
-        await map_args_with_function_call(
-            "test", None, "input", None, None
-        )
+        await map_args_with_function_call("test", None, "input", None, None)
 
     with pytest.raises(ValueError) as exc:
         asyncio.run(run())

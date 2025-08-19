@@ -12,11 +12,14 @@ from opentelemetry.instrumentation.pymongo import PymongoInstrumentor
 from opentelemetry.sdk.trace import TracerProvider as SDKTracerProvider
 
 from app.core.config import get_settings
+from app.core.loging import get_logger
 
 logger = logging.getLogger(__name__)
 
 _configured: bool = False
 _provider: SDKTracerProvider | None = None
+
+logger = get_logger(__name__)
 
 
 def init_tracing(service_name: str = "devops-ai-api") -> None:
@@ -43,25 +46,26 @@ def init_tracing(service_name: str = "devops-ai-api") -> None:
 
     try:
         HTTPXClientInstrumentor().instrument()
-    except Exception:
-        logger.warning("Failed to instrument HTTPX client", exc_info=True)
+    except Exception as exc:
+        logger.warning("HTTPX instrumentation failed", error=str(exc), exc_info=True)
 
     try:
         AsyncPGInstrumentor().instrument()
-    except Exception:
-        logger.warning("Failed to instrument AsyncPG", exc_info=True)
+    except Exception as exc:
+        logger.warning("AsyncPG instrumentation failed", error=str(exc), exc_info=True)
 
     try:
         PymongoInstrumentor().instrument()
-    except Exception:
-        logger.warning("Failed to instrument Pymongo", exc_info=True)
+    except Exception as exc:
+        logger.warning("Pymongo instrumentation failed", error=str(exc), exc_info=True)
+
 
     try:
         from opentelemetry.instrumentation.redis import RedisInstrumentor
 
         RedisInstrumentor().instrument()
-    except Exception:
-        logger.warning("Failed to instrument Redis", exc_info=True)
+    except Exception as exc:
+        logger.warning("Redis instrumentation failed", error=str(exc), exc_info=True)
 
     provider = trace.get_tracer_provider()
     if isinstance(provider, SDKTracerProvider):

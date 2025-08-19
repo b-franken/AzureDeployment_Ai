@@ -468,13 +468,16 @@ async def maybe_call_tool(
                 "schema",
                 {"type": "object", "properties": {}, "additionalProperties": True},
             )
-            mapped_args = await map_args_with_function_call(
-                tool_name=preferred_tool,
-                schema=schema,
-                user_input=user_input,
-                provider=provider,
-                model=model,
-            )
+            try:
+                mapped_args = await map_args_with_function_call(
+                    tool_name=preferred_tool,
+                    schema=schema,
+                    user_input=user_input,
+                    provider=provider,
+                    model=model,
+                )
+            except ValueError as e:
+                return f"Invalid tool arguments: {e}"
             if return_json:
                 res = await _run_tool(preferred_tool, mapped_args, context)
                 return json.dumps(res, ensure_ascii=False, indent=2)

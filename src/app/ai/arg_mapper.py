@@ -54,8 +54,8 @@ async def map_args_with_function_call(
             if isinstance(args_raw, str):
                 try:
                     args_obj = json.loads(args_raw)
-                except Exception:
-                    args_obj = {}
+                except json.JSONDecodeError as e:
+                    raise ValueError(e.msg) from e
             elif isinstance(args_raw, dict):
                 args_obj = dict(args_raw)
             else:

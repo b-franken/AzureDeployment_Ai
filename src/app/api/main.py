@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import os
 from collections.abc import Awaitable, Callable
 
@@ -23,10 +22,11 @@ from app.api.routes.metrics import router as metrics_router
 from app.api.routes.review import router as review_router
 from app.api.routes.status import router as status_router
 from app.core.config import settings
+from app.core.logging import get_logger
 from app.observability.app_insights import app_insights
 from app.observability.prometheus import instrument_app
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 env_is_dev = settings.environment == "development"
 
@@ -89,11 +89,9 @@ async def _rl_mw(request: Request, call_next: Callable[[Request], Awaitable[Resp
 async def startup_event() -> None:
     logger.info(
         "API starting up",
-        extra={
-            "version": APP_VERSION,
-            "environment": settings.environment,
-            "entra_id_enabled": os.getenv("USE_ENTRA_ID", "false").lower() in {"true", "1", "yes"},
-        }
+        version=APP_VERSION,
+        environment=settings.environment,
+        entra_id_enabled=os.getenv("USE_ENTRA_ID", "false").lower() in {"true", "1", "yes"},
     )
 
 
@@ -104,9 +102,7 @@ async def shutdown_event() -> None:
 
 @app.get("/_routes")
 def _routes() -> list[str]:
-    return [
-        r.path for r in app.routes if isinstance(r, (APIRoute | Route | Mount | WebSocketRoute))
-    ]
+    return [r.path for r in app.routes if isinstance(r, (APIRoute, Route, Mount, WebSocketRoute))]
 
 
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])

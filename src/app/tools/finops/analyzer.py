@@ -76,11 +76,11 @@ class CostForecast:
 
 
 class CostManagementSystem:
-    def __init__(self):
-        self.resource_discovery = ResourceDiscoveryService()
-        self.cost_ingestion = CostIngestionService()
-        self.optimization = OptimizationService()
-        self.forecasting = ForecastingService()
+    def __init__(self) -> None:
+        self.resource_discovery: ResourceDiscoveryService = ResourceDiscoveryService()
+        self.cost_ingestion: CostIngestionService = CostIngestionService()
+        self.optimization: OptimizationService = OptimizationService()
+        self.forecasting: ForecastingService = ForecastingService()
 
     async def analyze_costs(
         self,
@@ -91,14 +91,16 @@ class CostManagementSystem:
     ) -> dict[str, Any]:
         scope = f"/subscriptions/{subscription_id}"
 
-        usage_data = await self.cost_ingestion.get_usage_details(
+        usage_data: list[dict[str, Any]] | None = await self.cost_ingestion.get_usage_details(
             scope, start_date, end_date, granularity="Daily", group_by=group_by
         )
 
-        resources = await self.resource_discovery.discover_resources(subscription_id)
+        resources: list[dict[str, Any]] = await self.resource_discovery.discover_resources(
+            subscription_id
+        )
         resource_ids = [r["id"] for r in resources]
 
-        resource_costs = await self.cost_ingestion.get_resource_costs(
+        resource_costs: dict[str, dict[str, Any]] = await self.cost_ingestion.get_resource_costs(
             scope, resource_ids, start_date, end_date
         )
 
@@ -112,17 +114,17 @@ class CostManagementSystem:
             )
             if not rid:
                 continue
-            val = (
+            raw_val = (
                 row.get("cost_usd")
                 if row.get("cost_usd") is not None
-                else row.get("preTaxCost")
-                if row.get("preTaxCost") is not None
-                else row.get("Cost")
-                if row.get("Cost") is not None
-                else row.get("cost")
+                else (
+                    row.get("preTaxCost")
+                    if row.get("preTaxCost") is not None
+                    else row.get("Cost") if row.get("Cost") is not None else row.get("cost")
+                )
             )
             try:
-                usage_by_resource[rid] = usage_by_resource.get(rid, 0.0) + float(val or 0.0)
+                usage_by_resource[rid] = usage_by_resource.get(rid, 0.0) + float(raw_val or 0.0)
             except (TypeError, ValueError):
                 continue
 
@@ -152,10 +154,12 @@ class CostManagementSystem:
             )
             costs.append(resource_cost)
 
-        forecast = await self.forecasting.forecast_costs(subscription_id, forecast_days=30)
-        anomalies = await self.forecasting.detect_cost_anomalies(subscription_id, lookback_days=30)
+        forecast: Any = await self.forecasting.forecast_costs(subscription_id, forecast_days=30)
+        anomalies: list[Any] = await self.forecasting.detect_cost_anomalies(
+            subscription_id, lookback_days=30
+        )
 
-        analysis = {
+        analysis: dict[str, Any] = {
             "total_cost": sum(c.monthly_cost for c in costs),
             "period": {
                 "start": start_date.isoformat(),
@@ -167,17 +171,17 @@ class CostManagementSystem:
             "top_expensive_resources": self._get_top_expensive(costs, 10),
             "optimization_potential": sum(c.optimization_potential for c in costs),
             "forecast": {
-                "next_30_days": forecast.predicted_cost,
-                "confidence_interval": forecast.confidence_interval,
-                "trend": forecast.trend,
+                "next_30_days": float(forecast.predicted_cost),
+                "confidence_interval": tuple(forecast.confidence_interval),
+                "trend": str(forecast.trend),
             },
             "anomalies": [
                 {
                     "timestamp": a.timestamp.isoformat(),
-                    "actual_value": a.actual_value,
-                    "expected_value": a.expected_value,
-                    "deviation_percentage": a.deviation_percentage,
-                    "severity": a.severity,
+                    "actual_value": float(a.actual_value),
+                    "expected_value": float(a.expected_value),
+                    "deviation_percentage": float(a.deviation_percentage),
+                    "severity": str(a.severity),
                 }
                 for a in anomalies
             ],
@@ -201,11 +205,9 @@ class CostManagementSystem:
         min_savings_threshold: float = 50.0,
     ) -> list[OptimizationRecommendation]:
         opt_strategy = OptimizationStrategy[strategy.value.upper()]
-
         recommendations = await self.optimization.analyze_optimization_opportunities(
             subscription_id, opt_strategy, min_savings_threshold
         )
-
         return recommendations
 
     async def forecast_costs(
@@ -214,18 +216,17 @@ class CostManagementSystem:
         period_days: int = 30,
         include_growth_factor: bool = True,
     ) -> CostForecast:
-        forecast = await self.forecasting.forecast_costs(
+        forecast: Any = await self.forecasting.forecast_costs(
             subscription_id, forecast_days=period_days, include_seasonality=include_growth_factor
         )
-
         return CostForecast(
             period=f"{period_days} days",
             start_date=forecast.period_start,
             end_date=forecast.period_end,
-            predicted_cost=forecast.predicted_cost,
-            confidence_interval=forecast.confidence_interval,
-            trend=forecast.trend,
-            anomalies=forecast.anomalies,
+            predicted_cost=float(forecast.predicted_cost),
+            confidence_interval=tuple(forecast.confidence_interval),
+            trend=str(forecast.trend),
+            anomalies=list(forecast.anomalies),
         )
 
     async def set_budget_alert(
@@ -240,8 +241,7 @@ class CostManagementSystem:
 
         scope = f"/subscriptions/{subscription_id}"
         budget_name = f"budget-{datetime.utcnow().strftime('%Y%m')}"
-
-        notifications = {}
+        notifications: dict[str, dict[str, Any]] = {}
         for threshold in alert_thresholds:
             notifications[f"Alert{int(threshold)}"] = {
                 "enabled": True,
@@ -250,13 +250,12 @@ class CostManagementSystem:
                 "contactEmails": recipients or [],
             }
 
-        result = await self.cost_ingestion.create_budget(
+        result: dict[str, Any] = await self.cost_ingestion.create_budget(
             scope,
             budget_name,
             budget_amount,
             notifications=notifications,
         )
-
         return result
 
     async def check_anomalies(
@@ -264,21 +263,21 @@ class CostManagementSystem:
         subscription_id: str,
         sensitivity: str = "medium",
     ) -> list[dict[str, Any]]:
-        sensitivity_map = {"low": 3.0, "medium": 2.0, "high": 1.5}
+        sensitivity_map: dict[str, float] = {"low": 3.0, "medium": 2.0, "high": 1.5}
         sensitivity_value = sensitivity_map.get(sensitivity, 2.0)
 
-        anomalies = await self.forecasting.detect_cost_anomalies(
+        anomalies: list[Any] = await self.forecasting.detect_cost_anomalies(
             subscription_id, lookback_days=30, sensitivity=sensitivity_value
         )
 
         return [
             {
                 "timestamp": a.timestamp.isoformat(),
-                "actual_value": a.actual_value,
-                "expected_value": a.expected_value,
-                "deviation_percentage": a.deviation_percentage,
-                "severity": a.severity,
-                "probable_cause": a.probable_cause,
+                "actual_value": float(a.actual_value),
+                "expected_value": float(a.expected_value),
+                "deviation_percentage": float(a.deviation_percentage),
+                "severity": str(a.severity),
+                "probable_cause": getattr(a, "probable_cause", None),
             }
             for a in anomalies
         ]
@@ -291,10 +290,9 @@ class CostManagementSystem:
     ) -> dict[str, Any]:
         scope = f"/subscriptions/{subscription_id}"
         start_date, end_date = period
+        group_by: list[str] = ["Tags"] if allocation_method == "tags" else ["ResourceGroup"]
 
-        group_by = ["Tags"] if allocation_method == "tags" else ["ResourceGroup"]
-
-        usage_data = await self.cost_ingestion.get_usage_details(
+        usage_data: list[dict[str, Any]] | None = await self.cost_ingestion.get_usage_details(
             scope, start_date, end_date, granularity="None", group_by=group_by
         )
 
@@ -302,9 +300,9 @@ class CostManagementSystem:
         for item in usage_data or []:
             if allocation_method == "tags":
                 tags = item.get("Tags") or {}
-                key = tags.get("department", "unallocated")
+                key = str(tags.get("department", "unallocated"))
             else:
-                key = item.get("ResourceGroup", "unallocated")
+                key = str(item.get("ResourceGroup", "unallocated"))
 
             try:
                 cost = float(item.get("Cost", 0))
@@ -339,7 +337,6 @@ class CostManagementSystem:
         from app.tools.azure.clients import get_clients
 
         subscription_id = recommendation.resource_id.split("/")[2]
-
         result: dict[str, Any] = {
             "status": "applied",
             "recommendation_id": recommendation.id,
@@ -347,7 +344,7 @@ class CostManagementSystem:
             "errors": [],
         }
 
-        clients = None
+        clients: Any | None = None
 
         for action in recommendation.actions:
             try:
@@ -379,12 +376,14 @@ class CostManagementSystem:
 
         scope = f"/subscriptions/{subscription_id}"
 
-        current_month_usage = await self.cost_ingestion.get_usage_details(
-            scope, current_month_start, now, granularity="None"
+        current_month_usage: list[dict[str, Any]] | None = (
+            await self.cost_ingestion.get_usage_details(
+                scope, current_month_start, now, granularity="None"
+            )
         )
         current_month_costs = sum(float(item.get("Cost", 0)) for item in current_month_usage or [])
 
-        last_month_usage = await self.cost_ingestion.get_usage_details(
+        last_month_usage: list[dict[str, Any]] | None = await self.cost_ingestion.get_usage_details(
             scope, last_month_start, last_month_end, granularity="None"
         )
         last_month_costs = sum(float(item.get("Cost", 0)) for item in last_month_usage or [])
@@ -392,16 +391,18 @@ class CostManagementSystem:
         change_percentage = (
             ((current_month_costs - last_month_costs) / last_month_costs * 100)
             if last_month_costs > 0
-            else 0
+            else 0.0
         )
 
-        forecast = await self.forecasting.forecast_costs(subscription_id, forecast_days=30)
-        budget_recommendations = await self.forecasting.generate_budget_recommendations(
+        forecast: Any = await self.forecasting.forecast_costs(subscription_id, forecast_days=30)
+        budget_recommendations: Any = await self.forecasting.generate_budget_recommendations(
             subscription_id, target_reduction_percentage=10.0
         )
 
-        optimization_opportunities = await self.optimization.analyze_optimization_opportunities(
-            subscription_id, OptimizationStrategy.BALANCED, min_savings_threshold=0
+        optimization_opportunities: list[OptimizationRecommendation] = (
+            await self.optimization.analyze_optimization_opportunities(
+                subscription_id, OptimizationStrategy.BALANCED, min_savings_threshold=0
+            )
         )
 
         quick_wins = [
@@ -415,14 +416,16 @@ class CostManagementSystem:
             if rec.implementation_effort == "low"
         ]
 
-        reservation_recs = await self.cost_ingestion.get_reservation_recommendations(scope)
+        reservation_recs: list[Any] | None = (
+            await self.cost_ingestion.get_reservation_recommendations(scope)
+        )
         ri_coverage = len(reservation_recs) * 0.15 if reservation_recs else 0.0
 
-        insights = {
+        insights: dict[str, Any] = {
             "current_month_spend": current_month_costs,
             "last_month_spend": last_month_costs,
             "month_over_month_change": change_percentage,
-            "projected_month_end_spend": forecast.predicted_cost,
+            "projected_month_end_spend": float(forecast.predicted_cost),
             "unused_resources": [],
             "overprovisioned_resources": [],
             "reserved_instance_coverage": ri_coverage,
@@ -514,9 +517,9 @@ class CostManagementSystem:
 
 
 class CostAnalyzer:
-    def __init__(self):
-        self.cost_ingestion = CostIngestionService()
-        self.resource_discovery = ResourceDiscoveryService()
+    def __init__(self) -> None:
+        self.cost_ingestion: CostIngestionService = CostIngestionService()
+        self.resource_discovery: ResourceDiscoveryService = ResourceDiscoveryService()
 
     async def analyze(
         self,
@@ -531,7 +534,7 @@ class CostAnalyzer:
         scope = f"/subscriptions/{subscription_id}"
 
         resource_ids = [r["id"] for r in resources]
-        resource_costs = await self.cost_ingestion.get_resource_costs(
+        resource_costs: dict[str, dict[str, Any]] = await self.cost_ingestion.get_resource_costs(
             scope, resource_ids, start_date, end_date
         )
 
@@ -575,8 +578,8 @@ class CostAnalyzer:
 
 
 class CostOptimizer:
-    def __init__(self):
-        self.optimization = OptimizationService()
+    def __init__(self) -> None:
+        self.optimization: OptimizationService = OptimizationService()
 
     async def generate_recommendations(
         self,
@@ -589,7 +592,6 @@ class CostOptimizer:
 
         subscription_id = resources[0]["id"].split("/")[2] if resources else ""
         opt_strategy = OptimizationStrategy[strategy.value.upper()]
-
         return await self.optimization.analyze_optimization_opportunities(
             subscription_id, opt_strategy, min_savings_threshold
         )
@@ -607,8 +609,8 @@ class CostOptimizer:
 
 
 class CostForecaster:
-    def __init__(self):
-        self.forecasting = ForecastingService()
+    def __init__(self) -> None:
+        self.forecasting: ForecastingService = ForecastingService()
 
     async def forecast(
         self,
@@ -628,7 +630,7 @@ class CostForecaster:
             )
 
         subscription_id = ""
-        forecast = await self.forecasting.forecast_costs(
+        forecast: Any = await self.forecasting.forecast_costs(
             subscription_id, forecast_days=period_days, include_seasonality=include_growth_factor
         )
 
@@ -636,15 +638,14 @@ class CostForecaster:
             period=f"{period_days} days",
             start_date=forecast.period_start,
             end_date=forecast.period_end,
-            predicted_cost=forecast.predicted_cost,
-            confidence_interval=forecast.confidence_interval,
-            trend=forecast.trend,
-            anomalies=forecast.anomalies,
+            predicted_cost=float(forecast.predicted_cost),
+            confidence_interval=tuple(forecast.confidence_interval),
+            trend=str(forecast.trend),
+            anomalies=list(forecast.anomalies),
         )
 
     async def analyze_trends(self, costs: list[ResourceCost]) -> dict[str, Any]:
         monthly_totals = [c.monthly_cost for c in costs]
-
         if len(monthly_totals) < 2:
             return {
                 "overall_trend": "insufficient_data",
@@ -656,15 +657,13 @@ class CostForecaster:
         growth_rate = (
             ((monthly_totals[-1] - monthly_totals[0]) / monthly_totals[0]) * 100
             if monthly_totals[0] > 0
-            else 0
+            else 0.0
         )
 
         return {
-            "overall_trend": "increasing"
-            if growth_rate > 5
-            else "decreasing"
-            if growth_rate < -5
-            else "stable",
+            "overall_trend": (
+                "increasing" if growth_rate > 5 else "decreasing" if growth_rate < -5 else "stable"
+            ),
             "growth_rate": growth_rate,
             "seasonal_patterns": [],
             "outliers": [],
@@ -672,8 +671,8 @@ class CostForecaster:
 
 
 class AlertManager:
-    def __init__(self):
-        self.cost_ingestion = CostIngestionService()
+    def __init__(self) -> None:
+        self.cost_ingestion: CostIngestionService = CostIngestionService()
 
     async def create_budget_alert(
         self,
@@ -684,8 +683,7 @@ class AlertManager:
     ) -> dict[str, Any]:
         scope = f"/subscriptions/{subscription_id}"
         budget_name = f"budget-{datetime.utcnow().strftime('%Y%m%d')}"
-
-        notifications = {}
+        notifications: dict[str, dict[str, Any]] = {}
         for threshold in alert_thresholds:
             notifications[f"Alert{int(threshold)}"] = {
                 "enabled": True,
@@ -700,8 +698,8 @@ class AlertManager:
 
 
 class BudgetManager:
-    def __init__(self):
-        self.cost_ingestion = CostIngestionService()
+    def __init__(self) -> None:
+        self.cost_ingestion: CostIngestionService = CostIngestionService()
 
     async def set_budget(
         self,
@@ -711,23 +709,19 @@ class BudgetManager:
     ) -> dict[str, Any]:
         scope = f"/subscriptions/{subscription_id}"
         budget_name = f"budget-{period}-{datetime.utcnow().strftime('%Y%m')}"
-
         time_grain = (
             "Monthly"
             if period == "monthly"
-            else "Quarterly"
-            if period == "quarterly"
-            else "Annually"
+            else "Quarterly" if period == "quarterly" else "Annually"
         )
-
         return await self.cost_ingestion.create_budget(
             scope, budget_name, amount, time_grain=time_grain
         )
 
 
 class ChargebackSystem:
-    def __init__(self):
-        self.cost_ingestion = CostIngestionService()
+    def __init__(self) -> None:
+        self.cost_ingestion: CostIngestionService = CostIngestionService()
 
     async def generate_report(
         self,

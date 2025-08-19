@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Any, TypedDict, cast
 
 from azure.core.exceptions import AzureError
 from azure.identity import DefaultAzureCredential
@@ -12,8 +12,14 @@ from azure.mgmt.resourcegraph.models import QueryRequest, QueryRequestOptions
 from app.core.exceptions import ExternalServiceException, retry_on_error
 
 
+class ResourceGroupInfo(TypedDict):
+    name: str
+    location: str
+    tags: dict[str, str]
+
+
 class ResourceDiscoveryService:
-    def __init__(self):
+    def __init__(self) -> None:
         self._credential = DefaultAzureCredential()
         self._clients: dict[str, Any] = {}
         self._cache: dict[str, tuple[list[dict[str, Any]], float]] = {}
@@ -81,7 +87,7 @@ class ResourceDiscoveryService:
     async def list_resource_groups(
         self,
         subscription_id: str,
-    ) -> list[dict[str, str]]:
+    ) -> list[ResourceGroupInfo]:
         client = self._get_resource_client(subscription_id)
 
         try:
@@ -90,7 +96,9 @@ class ResourceDiscoveryService:
                 {
                     "name": rg.name,
                     "location": rg.location,
-                    "tags": rg.tags or {},
+                    "tags": (
+                        cast(dict[str, str], rg.tags) if rg.tags is not None else dict[str, str]()
+                    ),
                 }
                 for rg in groups
             ]
@@ -119,9 +127,9 @@ class ResourceDiscoveryService:
                 metricnames=",".join(metric_names),
             )
 
-            result = {}
+            result: dict[str, list[dict[str, Any]]] = {}
             for metric in metrics.value:
-                metric_data = []
+                metric_data: list[dict[str, Any]] = []
                 for ts in metric.timeseries:
                     for data_point in ts.data:
                         metric_data.append(
@@ -148,7 +156,7 @@ class ResourceDiscoveryService:
         tags: dict[str, str] | None,
     ) -> str:
         query_parts = ["Resources"]
-        where_clauses = []
+        where_clauses: list[str] = []
 
         if resource_group:
             where_clauses.append(f"resourceGroup =~ '{resource_group}'")
@@ -177,8 +185,8 @@ class ResourceDiscoveryService:
         max_results: int = 1000,
     ) -> list[dict[str, Any]]:
         client = self._get_graph_client()
-        all_results = []
-        skip_token = None
+        all_results: list[dict[str, Any]] = []
+        skip_token: str | None = None
 
         while True:
             request = QueryRequest(
@@ -241,7 +249,7 @@ class ResourceDiscoveryService:
         resource_ids: list[str],
         batch_size: int = 50,
     ) -> list[dict[str, Any]]:
-        results = []
+        results: list[dict[str, Any]] = []
 
         for i in range(0, len(resource_ids), batch_size):
             batch = resource_ids[i : i + batch_size]

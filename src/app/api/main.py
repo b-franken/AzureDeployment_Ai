@@ -102,7 +102,7 @@ async def shutdown_event() -> None:
 
 @app.get("/_routes")
 def _routes() -> list[str]:
-    return [r.path for r in app.routes if isinstance(r, (APIRoute, Route, Mount, WebSocketRoute))]
+    return [r.path for r in app.routes if isinstance(r, APIRoute | Route | Mount | WebSocketRoute)]
 
 
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])

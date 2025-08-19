@@ -12,7 +12,7 @@ def _is_simple(value: Any) -> bool:
         return True
     if isinstance(value, Mapping):
         return all(isinstance(k, str) and _is_simple(v) for k, v in value.items())
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+    if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
         return all(_is_simple(v) for v in value)
     return False
 
@@ -27,10 +27,6 @@ def _coerce(value: Any) -> Any:
 
 
 def install_log_record_sanitizer() -> None:
-    """
-    Strip private / problematic attributes (e.g. _logger) and coerce values
-    so third-party exporters (OpenTelemetry) don't crash during serialization.
-    """
     original_factory = logging.getLogRecordFactory()
 
     def factory(*args: Any, **kwargs: Any) -> logging.LogRecord:

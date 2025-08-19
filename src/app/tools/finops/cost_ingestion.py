@@ -1,18 +1,27 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta
-from typing import Any
+import re
+from datetime import date, datetime, timedelta
+from typing import Any, NotRequired, TypedDict, cast
 
 from azure.core.exceptions import AzureError
 from azure.identity import DefaultAzureCredential
+from azure.mgmt.consumption import ConsumptionManagementClient
+from azure.mgmt.consumption.models import Budget, BudgetTimePeriod
 from azure.mgmt.costmanagement import CostManagementClient
 from azure.mgmt.costmanagement.models import (
+    Export,
+    ExportDefinition,
     ExportDeliveryDestination,
     ExportDeliveryInfo,
     ExportRecurrencePeriod,
     ExportSchedule,
+    ForecastAggregation,
+    ForecastDataset,
     ForecastDefinition,
+    ForecastTimeframe,
+    ForecastTimePeriod,
     QueryAggregation,
     QueryComparisonExpression,
     QueryDataset,
@@ -26,17 +35,51 @@ from azure.mgmt.costmanagement.models import (
 from app.core.exceptions import ExternalServiceException, retry_on_error
 
 
-class CostIngestionService:
-    def __init__(self):
-        self._credential = DefaultAzureCredential()
-        self._client: CostManagementClient | None = None
-        self._cache: dict[str, tuple[Any, float]] = {}
-        self._cache_ttl = 3600.0
+class ResourceCost(TypedDict, total=False):
+    cost: float
+    cost_usd: float
+    currency: str
+    error: NotRequired[str]
 
-    def _get_client(self) -> CostManagementClient:
-        if self._client is None:
-            self._client = CostManagementClient(self._credential)
-        return self._client
+
+def _to_iso(value: Any) -> str | None:
+    if isinstance(value, (datetime | date)):
+        return value.isoformat()
+    return None
+
+
+def _extract_subscription_id(scope: str | None) -> str | None:
+    if not scope:
+        return None
+    m = re.match(r"^/subscriptions/([^/]+)", scope, flags=re.IGNORECASE)
+    return m.group(1) if m else None
+
+
+class CostIngestionService:
+    def __init__(self, subscription_id: str | None = None) -> None:
+        self._credential = DefaultAzureCredential()
+        self._subscription_id: str | None = subscription_id
+        self._cost_client: CostManagementClient | None = None
+        self._consumption_client: ConsumptionManagementClient | None = None
+        self._consumption_client_sub_id: str | None = None
+        self._cache: dict[str, tuple[Any, float]] = {}
+        self._cache_ttl: float = 3600.0
+
+    def _get_cost_client(self) -> CostManagementClient:
+        if self._cost_client is None:
+            self._cost_client = CostManagementClient(self._credential)
+        return self._cost_client
+
+    def _get_consumption_client(self, scope: str | None = None) -> ConsumptionManagementClient:
+        sub_id = self._subscription_id or _extract_subscription_id(scope)
+        if not sub_id:
+            raise ExternalServiceException(
+                "subscription_id is required to use the ConsumptionManagementClient"
+            )
+        if self._consumption_client is None or self._consumption_client_sub_id != sub_id:
+            self._consumption_client = ConsumptionManagementClient(self._credential, sub_id)
+            self._consumption_client_sub_id = sub_id
+        return self._consumption_client
 
     @retry_on_error(max_retries=3, delay=1.0, exceptions=(AzureError,))
     async def get_usage_details(
@@ -58,13 +101,13 @@ class CostIngestionService:
             if time.time() - cached_time < self._cache_ttl:
                 return cached_data
 
-        client = self._get_client()
+        client = self._get_cost_client()
 
         dataset = QueryDataset(
             granularity=granularity,
             aggregation={
-                "totalCost": QueryAggregation(name="Cost", function="Sum"),
-                "totalCostUSD": QueryAggregation(name="CostUSD", function="Sum"),
+                "totalCost": QueryAggregation(name="PreTaxCost", function="Sum"),
+                "totalCostUSD": QueryAggregation(name="PreTaxCostUSD", function="Sum"),
             },
         )
 
@@ -90,9 +133,13 @@ class CostIngestionService:
         try:
             result = await asyncio.to_thread(client.query.usage, scope, query_def)
 
-            usage_data = []
-            if result.rows:
-                columns = [col.name for col in result.columns]
+            usage_data: list[dict[str, Any]] = []
+            if result and result.rows:
+                columns: list[str] = []
+                if result.columns:
+                    for i, col in enumerate(result.columns):
+                        name = getattr(col, "name", None)
+                        columns.append(name if isinstance(name, str) and name else f"col_{i}")
                 for row in result.rows:
                     usage_data.append(dict(zip(columns, row, strict=False)))
 
@@ -107,16 +154,16 @@ class CostIngestionService:
         resource_ids: list[str],
         start_date: datetime,
         end_date: datetime,
-    ) -> dict[str, dict[str, float]]:
-        client = self._get_client()
-        resource_costs = {}
+    ) -> dict[str, ResourceCost]:
+        client = self._get_cost_client()
+        resource_costs: dict[str, ResourceCost] = {}
 
         for resource_id in resource_ids:
             dataset = QueryDataset(
                 granularity="None",
                 aggregation={
-                    "totalCost": QueryAggregation(name="Cost", function="Sum"),
-                    "totalCostUSD": QueryAggregation(name="CostUSD", function="Sum"),
+                    "totalCost": QueryAggregation(name="PreTaxCost", function="Sum"),
+                    "totalCostUSD": QueryAggregation(name="PreTaxCostUSD", function="Sum"),
                 },
                 filter=QueryFilter(
                     dimensions=QueryComparisonExpression(
@@ -137,7 +184,7 @@ class CostIngestionService:
             try:
                 result = await asyncio.to_thread(client.query.usage, scope, query_def)
 
-                if result.rows and len(result.rows) > 0:
+                if result and result.rows and len(result.rows) > 0:
                     cost_row = result.rows[0]
                     resource_costs[resource_id] = {
                         "cost": float(cost_row[0]) if len(cost_row) > 0 else 0.0,
@@ -166,22 +213,22 @@ class CostIngestionService:
         self,
         scope: str,
         granularity: str = "Daily",
-        metric: str = "Cost",
+        metric: str = "PreTaxCost",
         forecast_days: int = 30,
     ) -> list[dict[str, Any]]:
-        client = self._get_client()
+        client = self._get_cost_client()
 
         forecast_def = ForecastDefinition(
             type="Usage",
-            timeframe=TimeframeType.CUSTOM,
-            time_period=QueryTimePeriod(
+            timeframe=ForecastTimeframe.CUSTOM,
+            time_period=ForecastTimePeriod(
                 from_property=datetime.utcnow(),
                 to=datetime.utcnow() + timedelta(days=forecast_days),
             ),
-            dataset=QueryDataset(
+            dataset=ForecastDataset(
                 granularity=granularity,
                 aggregation={
-                    "totalCost": QueryAggregation(name=metric, function="Sum"),
+                    "totalCost": ForecastAggregation(name=metric, function="Sum"),
                 },
             ),
             include_actual_cost=False,
@@ -191,9 +238,13 @@ class CostIngestionService:
         try:
             result = await asyncio.to_thread(client.forecast.usage, scope, forecast_def)
 
-            forecast_data = []
-            if result.rows:
-                columns = [col.name for col in result.columns]
+            forecast_data: list[dict[str, Any]] = []
+            if result and result.rows:
+                columns: list[str] = []
+                if result.columns:
+                    for i, col in enumerate(result.columns):
+                        name = getattr(col, "name", None)
+                        columns.append(name if isinstance(name, str) and name else f"col_{i}")
                 for row in result.rows:
                     forecast_data.append(dict(zip(columns, row, strict=False)))
 
@@ -202,31 +253,30 @@ class CostIngestionService:
             raise ExternalServiceException(f"Failed to get forecast: {e}") from e
 
     async def get_budgets(self, scope: str) -> list[dict[str, Any]]:
-        client = self._get_client()
+        client = self._get_consumption_client(scope)
 
         try:
             budgets = await asyncio.to_thread(lambda: list(client.budgets.list(scope)))
-
-            budget_list = []
+            budget_list: list[dict[str, Any]] = []
             for budget in budgets:
+                time_period = getattr(budget, "time_period", None)
+                start_date = getattr(time_period, "start_date", None)
+                end_date = getattr(time_period, "end_date", None)
                 budget_list.append(
                     {
-                        "name": budget.name,
-                        "amount": budget.amount,
-                        "time_grain": budget.time_grain,
+                        "name": getattr(budget, "name", None),
+                        "amount": getattr(budget, "amount", None),
+                        "time_grain": getattr(budget, "time_grain", None),
                         "time_period": {
-                            "start_date": budget.time_period.start_date.isoformat()
-                            if budget.time_period.start_date
-                            else None,
-                            "end_date": budget.time_period.end_date.isoformat()
-                            if budget.time_period.end_date
-                            else None,
+                            "start_date": _to_iso(start_date),
+                            "end_date": _to_iso(end_date),
                         },
                         "current_spend": getattr(budget, "current_spend", None),
-                        "notifications": self._extract_notifications(budget.notifications),
+                        "notifications": self._extract_notifications(
+                            getattr(budget, "notifications", None)
+                        ),
                     }
                 )
-
             return budget_list
         except AzureError as e:
             raise ExternalServiceException(f"Failed to get budgets: {e}") from e
@@ -241,29 +291,30 @@ class CostIngestionService:
         end_date: datetime | None = None,
         notifications: dict[str, dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        from azure.mgmt.costmanagement.models import Budget, BudgetTimePeriod
-
-        client = self._get_client()
+        client = self._get_consumption_client(scope)
 
         budget = Budget(
             amount=amount,
             time_grain=time_grain,
             time_period=BudgetTimePeriod(
-                start_date=start_date or datetime.utcnow().replace(day=1),
+                start_date=(
+                    start_date
+                    or datetime.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                ),
                 end_date=end_date,
             ),
             notifications=notifications or {},
+            category="Cost",
         )
 
         try:
             result = await asyncio.to_thread(
                 client.budgets.create_or_update, scope, budget_name, budget
             )
-
             return {
-                "name": result.name,
-                "amount": result.amount,
-                "time_grain": result.time_grain,
+                "name": getattr(result, "name", budget_name),
+                "amount": getattr(result, "amount", amount),
+                "time_grain": getattr(result, "time_grain", time_grain),
                 "status": "created",
             }
         except AzureError as e:
@@ -273,39 +324,36 @@ class CostIngestionService:
         self,
         billing_account_name: str,
         billing_profile_name: str | None = None,
+        invoice_name: str | None = None,
     ) -> list[dict[str, Any]]:
-        client = self._get_client()
+        client = self._get_cost_client()
 
         try:
-            if billing_profile_name:
-                price_sheet = await asyncio.to_thread(
-                    client.price_sheet.get_by_billing_profile,
+            if billing_profile_name and invoice_name:
+                poller = await asyncio.to_thread(
+                    client.price_sheet.begin_download,
+                    billing_account_name,
+                    billing_profile_name,
+                    invoice_name,
+                )
+            elif billing_profile_name:
+                poller = await asyncio.to_thread(
+                    client.price_sheet.begin_download_by_billing_profile,
                     billing_account_name,
                     billing_profile_name,
                 )
             else:
-                price_sheet = await asyncio.to_thread(client.price_sheet.get, billing_account_name)
+                raise ExternalServiceException(
+                    "billing_profile_name is required when requesting price sheets"
+                )
 
-            prices = []
-            if price_sheet and price_sheet.properties and price_sheet.properties.price_sheets:
-                for price in price_sheet.properties.price_sheets:
-                    prices.append(
-                        {
-                            "meter_id": price.meter_id,
-                            "meter_name": price.meter_name,
-                            "product_name": price.product_name,
-                            "sku_name": price.sku_name,
-                            "unit_price": price.unit_price,
-                            "currency": price.currency_code,
-                            "unit_of_measure": price.unit_of_measure,
-                            "included_quantity": price.included_quantity,
-                            "effective_date": price.effective_start_date.isoformat()
-                            if price.effective_start_date
-                            else None,
-                        }
-                    )
-
-            return prices
+            download = await asyncio.to_thread(poller.result)
+            return [
+                {
+                    "download_url": getattr(download, "download_url", None),
+                    "valid_till": _to_iso(getattr(download, "valid_till", None)),
+                }
+            ]
         except AzureError as e:
             raise ExternalServiceException(f"Failed to get price sheet: {e}") from e
 
@@ -319,9 +367,7 @@ class CostIngestionService:
         recurrence: str = "Daily",
         start_date: datetime | None = None,
     ) -> dict[str, Any]:
-        from azure.mgmt.costmanagement.models import Export, ExportDefinition
-
-        client = self._get_client()
+        client = self._get_cost_client()
 
         export_def = Export(
             delivery_info=ExportDeliveryInfo(
@@ -349,13 +395,19 @@ class CostIngestionService:
                 client.exports.create_or_update, scope, export_name, export_def
             )
 
+            status: str | None = None
+            recurrence_value: str | None = None
+            schedule_any = getattr(result, "schedule", None)
+            if schedule_any is not None:
+                schedule = cast(ExportSchedule, schedule_any)
+                status = getattr(schedule, "status", None)
+                recurrence_value = getattr(schedule, "recurrence", None)
+
             return {
-                "name": result.name,
-                "status": result.schedule.status if result.schedule else None,
-                "recurrence": result.schedule.recurrence if result.schedule else None,
-                "next_run_time": result.next_run_time_estimate.isoformat()
-                if hasattr(result, "next_run_time_estimate") and result.next_run_time_estimate
-                else None,
+                "name": getattr(result, "name", export_name),
+                "status": status,
+                "recurrence": recurrence_value,
+                "next_run_time": _to_iso(getattr(result, "next_run_time_estimate", None)),
             }
         except AzureError as e:
             raise ExternalServiceException(f"Failed to create cost export: {e}") from e
@@ -363,8 +415,7 @@ class CostIngestionService:
     def _extract_notifications(self, notifications: dict[str, Any] | None) -> dict[str, Any]:
         if not notifications:
             return {}
-
-        extracted = {}
+        extracted: dict[str, Any] = {}
         for key, notification in notifications.items():
             extracted[key] = {
                 "enabled": getattr(notification, "enabled", False),
@@ -379,38 +430,28 @@ class CostIngestionService:
         self,
         scope: str,
         look_back_period: str = "Last30Days",
+        term: str | None = None,
+        scope_filter: str | None = None,
     ) -> list[dict[str, Any]]:
-        client = self._get_client()
+        client = self._get_cost_client()
+
+        filters = [f"properties/lookBackPeriod eq '{look_back_period}'"]
+        if term:
+            filters.append(f"properties/term eq '{term}'")
+        if scope_filter:
+            filters.append(f"properties/scope eq '{scope_filter}'")
+        filter_str = " and ".join(filters)
 
         try:
             recommendations = await asyncio.to_thread(
-                lambda: list(
-                    client.reservation_recommendations.list(
-                        scope, filter=f"properties/lookBackPeriod eq '{look_back_period}'"
-                    )
-                )
+                lambda: list(client.benefit_recommendations.list(scope, filter=filter_str))
             )
-
-            rec_list = []
+            rec_list: list[dict[str, Any]] = []
             for rec in recommendations:
+                to_dict = getattr(rec, "as_dict", None)
                 rec_list.append(
-                    {
-                        "id": rec.id,
-                        "sku": rec.sku,
-                        "location": rec.location,
-                        "look_back_period": rec.look_back_period,
-                        "instance_flexibility_ratio": rec.instance_flexibility_ratio,
-                        "normalized_size": rec.normalized_size,
-                        "recommended_quantity": rec.recommended_quantity,
-                        "cost_with_no_reserved_instances": rec.cost_with_no_reserved_instances,
-                        "recommended_quantity_normalized": rec.recommended_quantity_normalized,
-                        "net_savings": rec.net_savings,
-                        "first_usage_date": rec.first_usage_date.isoformat()
-                        if rec.first_usage_date
-                        else None,
-                    }
+                    to_dict() if callable(to_dict) else {"kind": getattr(rec, "kind", None)}
                 )
-
             return rec_list
         except AzureError as e:
             raise ExternalServiceException(f"Failed to get reservation recommendations: {e}") from e

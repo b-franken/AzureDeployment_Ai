@@ -33,9 +33,9 @@ class OptimizationRecommendation:
 
 
 class OptimizationService:
-    def __init__(self):
-        self.discovery = ResourceDiscoveryService()
-        self.cost_ingestion = CostIngestionService()
+    def __init__(self) -> None:
+        self.discovery: ResourceDiscoveryService = ResourceDiscoveryService()
+        self.cost_ingestion: CostIngestionService = CostIngestionService()
 
     async def analyze_optimization_opportunities(
         self,
@@ -119,12 +119,10 @@ class OptimizationService:
 
         cpu_metrics = metrics.get("Percentage CPU", [])
         if cpu_metrics:
-            # Treat missing values as None and include zeros
             valid = [m["average"] for m in cpu_metrics if m.get("average") is not None]
             if valid:
                 avg_cpu = sum(valid) / len(valid)
 
-                # Right-sizing recommendation for underutilized VMs
                 if 5 < avg_cpu < 20:
                     recommendations.append(
                         OptimizationRecommendation(
@@ -139,9 +137,9 @@ class OptimizationService:
                             estimated_monthly_savings=monthly_cost * 0.3,
                             estimated_savings_percentage=30.0,
                             implementation_effort="medium",
-                            risk_level="low"
-                            if strategy == OptimizationStrategy.CONSERVATIVE
-                            else "medium",
+                            risk_level=(
+                                "low" if strategy == OptimizationStrategy.CONSERVATIVE else "medium"
+                            ),
                             actions=[
                                 {"action": "analyze_workload_patterns", "duration": "1 week"},
                                 {"action": "identify_smaller_sku", "target": "reduce by 1-2 sizes"},
@@ -162,7 +160,6 @@ class OptimizationService:
                         )
                     )
 
-                # Auto-shutdown recommendation for very low usage VMs
                 if avg_cpu < 5 and strategy != OptimizationStrategy.CONSERVATIVE:
                     recommendations.append(
                         OptimizationRecommendation(
@@ -200,14 +197,12 @@ class OptimizationService:
                         )
                     )
 
-        # Check for reservation opportunities
         reservation_rec = await self._check_reservation_opportunity(
             subscription_id, resource, monthly_cost, strategy
         )
         if reservation_rec:
             recommendations.append(reservation_rec)
 
-        # Check for spot instance opportunities
         spot_rec = await self._check_spot_opportunity(resource, monthly_cost, strategy)
         if spot_rec:
             recommendations.append(spot_rec)
@@ -227,7 +222,6 @@ class OptimizationService:
 
         sku = resource.get("sku", {})
 
-        # Redundancy optimization
         if (
             sku.get("name", "").startswith("Standard_GRS")
             and strategy != OptimizationStrategy.CONSERVATIVE
@@ -276,7 +270,6 @@ class OptimizationService:
                 )
             )
 
-        # Lifecycle management recommendation
         lifecycle_rec = await self._analyze_storage_lifecycle(resource, monthly_cost)
         if lifecycle_rec:
             recommendations.append(lifecycle_rec)
@@ -628,7 +621,6 @@ class OptimizationService:
         subscription_id: str,
         strategy: OptimizationStrategy = OptimizationStrategy.BALANCED,
     ) -> dict[str, Any]:
-        """Generate a summary of all optimization opportunities."""
         recommendations = await self.analyze_optimization_opportunities(
             subscription_id, strategy, min_savings_threshold=0
         )
@@ -647,7 +639,7 @@ class OptimizationService:
             by_type[rec.recommendation_type]["total_savings"] += rec.estimated_monthly_savings
             by_type[rec.recommendation_type]["recommendations"].append(rec.id)
 
-        by_effort = {"low": [], "medium": [], "high": []}
+        by_effort: dict[str, list[dict[str, Any]]] = {"low": [], "medium": [], "high": []}
         for rec in recommendations:
             by_effort[rec.implementation_effort].append(
                 {"id": rec.id, "savings": rec.estimated_monthly_savings, "risk": rec.risk_level}
@@ -682,7 +674,6 @@ class OptimizationService:
         recommendations: list[OptimizationRecommendation],
         implementation_percentage: float = 100.0,
     ) -> dict[str, Any]:
-        """Simulate the impact of implementing optimization recommendations."""
         selected_count = int(len(recommendations) * (implementation_percentage / 100))
         selected = recommendations[:selected_count]
 

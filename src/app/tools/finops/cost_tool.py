@@ -27,6 +27,13 @@ class AzureCosts(Tool):
                 "enum": ["aggressive", "balanced", "conservative"],
             },
             "format": {"type": "string", "enum": ["json", "csv"]},
+            "thresholds": {
+                "type": "array",
+                "items": {"type": "number"},
+                "description": "Alert thresholds as fractions of budget, e.g. [0.8, 1.0]",
+            },
+            "amount": {"type": "number"},
+            "budget_id": {"type": "string"},
         },
         "required": ["action"],
         "additionalProperties": True,
@@ -38,16 +45,19 @@ class AzureCosts(Tool):
 
     async def run(self, **kwargs: Any) -> ToolResult:
         act = (kwargs.get("action") or "").lower()
+
         if act == "analyze":
             res = kwargs.get("resource") or {}
-            start_date = self._parse_date(
-                kwargs.get("start_date")
-            ) or datetime.utcnow() - timedelta(days=30)
+            start_date = self._parse_date(kwargs.get("start_date")) or (
+                datetime.utcnow() - timedelta(days=30)
+            )
             end_date = self._parse_date(kwargs.get("end_date")) or datetime.utcnow()
+
             items = await self.analyzer.analyze([res], start_date, end_date)
             cost = items[0] if items else None
             if not cost:
                 return {"ok": False, "summary": "no cost computed", "output": ""}
+
             return {
                 "ok": True,
                 "summary": f"analyzed {cost.resource_name}",
@@ -57,16 +67,22 @@ class AzureCosts(Tool):
         if act == "budget_status":
             bid = kwargs.get("budget_id") or ""
             amount = kwargs.get("amount")
-            period = kwargs.get("period")
-            if amount is not None and period:
-                out = await self.cms.budget_manager.set_budget(
-                    kwargs.get("subscription_id", ""), float(amount), str(period)
+
+            # thresholds can be a single number or a list; convert to list[float] | None
+            thresholds = self._parse_thresholds(kwargs.get("thresholds"))
+
+            if amount is not None:
+                out = await self.cms.set_budget_alert(
+                    kwargs.get("subscription_id", ""),
+                    float(amount),
+                    thresholds,
                 )
                 return {
                     "ok": True,
                     "summary": f"budget set {out.get('budget_id', '')}",
                     "output": out,
                 }
+
             out = {"budget_id": bid, "status": "unknown", "amount": 0.0}
             return {"ok": True, "summary": f"budget {bid} status", "output": out}
 
@@ -74,8 +90,11 @@ class AzureCosts(Tool):
             level_str = (kwargs.get("level") or "balanced").lower()
             lvl = self._map_level(level_str)
             min_savings = float(kwargs.get("min_savings", 50.0))
+
             recs = await self.cms.get_optimization_recommendations(
-                kwargs.get("subscription_id", ""), lvl, min_savings
+                kwargs.get("subscription_id", ""),
+                lvl,
+                min_savings,
             )
             return {
                 "ok": True,
@@ -108,6 +127,28 @@ class AzureCosts(Tool):
                 return datetime.fromisoformat(value)
             except ValueError:
                 return None
+        return None
+
+    def _parse_thresholds(self, value: Any) -> list[float] | None:
+        if value is None:
+            return None
+        if isinstance(value, int | float):
+            return [float(value)]
+        if isinstance(value, str):
+            try:
+                # allow comma or space separated strings like "0.8,1.0" or "0.8 1.0"
+                parts = [p for p in value.replace(",", " ").split() if p]
+                return [float(p) for p in parts] if parts else None
+            except ValueError:
+                return None
+        if isinstance(value, list):
+            out: list[float] = []
+            for v in value:
+                try:
+                    out.append(float(v))
+                except (TypeError, ValueError):
+                    continue
+            return out or None
         return None
 
     def _insights_to_csv(self, insights: dict[str, Any]) -> str:

@@ -89,19 +89,13 @@ class AzureConfig(BaseModel):
         default=3,
         ge=1,
         le=10,
-        validation_alias=AliasChoices(
-            "AZURE__MAX_RETRY_ATTEMPTS",
-            "RETRY_MAX_ATTEMPTS"
-        ),
+        validation_alias=AliasChoices("AZURE__MAX_RETRY_ATTEMPTS", "RETRY_MAX_ATTEMPTS"),
     )
     retry_backoff_seconds: float = Field(
         default=1.0,
         ge=0.1,
         le=60,
-        validation_alias=AliasChoices(
-            "AZURE__RETRY_BACKOFF_SECONDS",
-            "RETRY_BACKOFF_SECONDS"
-        ),
+        validation_alias=AliasChoices("AZURE__RETRY_BACKOFF_SECONDS", "RETRY_BACKOFF_SECONDS"),
     )
 
 
@@ -111,57 +105,35 @@ class LLMConfig(BaseModel):
     )
     openai_api_key: SecretStr | None = Field(
         default=None,
-        validation_alias=AliasChoices(
-            "LLM__OPENAI_API_KEY",
-            "OPENAI_API_KEY",
-            "OPENAI_KEY"
-        ),
+        validation_alias=AliasChoices("LLM__OPENAI_API_KEY", "OPENAI_API_KEY", "OPENAI_KEY"),
     )
     openai_api_base: str = Field(
         default="https://api.openai.com/v1",
-        validation_alias=AliasChoices(
-            "LLM__OPENAI_API_BASE",
-            "OPENAI_BASE_URL",
-            "OPENAI_API_BASE"
-        ),
+        validation_alias=AliasChoices("LLM__OPENAI_API_BASE", "OPENAI_BASE_URL", "OPENAI_API_BASE"),
     )
     openai_model: str = Field(
         default="gpt-5",
-        validation_alias=AliasChoices(
-            "LLM__OPENAI_MODEL",
-            "OPENAI_MODEL"
-        ),
+        validation_alias=AliasChoices("LLM__OPENAI_MODEL", "OPENAI_MODEL"),
     )
     openai_max_tokens: int = Field(default=4096, ge=1, le=128000)
     openai_temperature: float = Field(default=0.7, ge=0, le=2)
     gemini_api_key: SecretStr | None = Field(
         default=None,
-        validation_alias=AliasChoices(
-            "LLM__GEMINI_API_KEY",
-            "GEMINI_API_KEY"
-        ),
+        validation_alias=AliasChoices("LLM__GEMINI_API_KEY", "GEMINI_API_KEY"),
     )
     gemini_model: str = Field(
         default="gemini-1.5-pro",
-        validation_alias=AliasChoices(
-            "LLM__GEMINI_MODEL",
-            "GEMINI_MODEL"
-        ),
+        validation_alias=AliasChoices("LLM__GEMINI_MODEL", "GEMINI_MODEL"),
     )
     ollama_base_url: str = Field(
         default="http://localhost:11434",
         validation_alias=AliasChoices(
-            "LLM__OLLAMA_BASE_URL",
-            "OLLAMA_BASE_URL",
-            "LLM__OLLAMA__BASE_URL"
+            "LLM__OLLAMA_BASE_URL", "OLLAMA_BASE_URL", "LLM__OLLAMA__BASE_URL"
         ),
     )
     ollama_model: str = Field(
         default="llama3.1",
-        validation_alias=AliasChoices(
-            "LLM__OLLAMA_MODEL",
-            "OLLAMA_MODEL"
-        ),
+        validation_alias=AliasChoices("LLM__OLLAMA_MODEL", "OLLAMA_MODEL"),
     )
     requests_per_minute: int = Field(default=60, ge=1)
     tokens_per_minute: int = Field(default=90000, ge=1)
@@ -186,15 +158,12 @@ class ObservabilityConfig(BaseModel):
         default=None,
         validation_alias=AliasChoices(
             "OBSERVABILITY__APPLICATIONINSIGHTS_CONNECTION_STRING",
-            "APPLICATIONINSIGHTS_CONNECTION_STRING"
+            "APPLICATIONINSIGHTS_CONNECTION_STRING",
         ),
     )
     otel_service_name: str = Field(
         default="devops-ai-api",
-        validation_alias=AliasChoices(
-            "OBSERVABILITY__OTEL_SERVICE_NAME",
-            "OTEL_SERVICE_NAME"
-        ),
+        validation_alias=AliasChoices("OBSERVABILITY__OTEL_SERVICE_NAME", "OTEL_SERVICE_NAME"),
     )
 
 
@@ -212,18 +181,12 @@ class MemoryConfig(BaseModel):
     max_memory: int = Field(
         default=25,
         ge=1,
-        validation_alias=AliasChoices(
-            "MEMORY__MAX_MEMORY",
-            "MAX_MEMORY"
-        ),
+        validation_alias=AliasChoices("MEMORY__MAX_MEMORY", "MAX_MEMORY"),
     )
     max_total_memory: int = Field(
         default=100,
         ge=1,
-        validation_alias=AliasChoices(
-            "MEMORY__MAX_TOTAL_MEMORY",
-            "MAX_TOTAL_MEMORY"
-        ),
+        validation_alias=AliasChoices("MEMORY__MAX_TOTAL_MEMORY", "MAX_TOTAL_MEMORY"),
     )
 
 
@@ -231,26 +194,17 @@ class RetryConfig(BaseModel):
     request_timeout_seconds: float = Field(
         default=60.0,
         ge=1,
-        validation_alias=AliasChoices(
-            "HTTP__REQUEST_TIMEOUT_SECONDS",
-            "REQUEST_TIMEOUT_SECONDS"
-        ),
+        validation_alias=AliasChoices("HTTP__REQUEST_TIMEOUT_SECONDS", "REQUEST_TIMEOUT_SECONDS"),
     )
     retry_max_attempts: int = Field(
         default=3,
         ge=0,
-        validation_alias=AliasChoices(
-            "HTTP__RETRY_MAX_ATTEMPTS",
-            "RETRY_MAX_ATTEMPTS"
-        ),
+        validation_alias=AliasChoices("HTTP__RETRY_MAX_ATTEMPTS", "RETRY_MAX_ATTEMPTS"),
     )
     retry_backoff_seconds: float = Field(
         default=0.8,
         ge=0,
-        validation_alias=AliasChoices(
-            "HTTP__RETRY_BACKOFF_SECONDS",
-            "RETRY_BACKOFF_SECONDS"
-        ),
+        validation_alias=AliasChoices("HTTP__RETRY_BACKOFF_SECONDS", "RETRY_BACKOFF_SECONDS"),
     )
 
 
@@ -322,8 +276,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("APPLICATIONINSIGHTS_CONNECTION_STRING"),
     )
     otel_service_name: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("OTEL_SERVICE_NAME")
+        default=None, validation_alias=AliasChoices("OTEL_SERVICE_NAME")
     )
 
     @model_validator(mode="after")
@@ -442,36 +395,22 @@ JWT_SECRET = settings.security.jwt_secret_key.get_secret_value()
 JWT_ALGORITHM = settings.security.jwt_algorithm
 JWT_EXPIRATION_HOURS = settings.security.jwt_expiration_hours
 
-POSTGRES_DSN = (
-    str(settings.database.postgres_dsn)
-    if settings.database.postgres_dsn
-    else None
-)
-REDIS_DSN = (
-    str(settings.database.redis_dsn)
-    if settings.database.redis_dsn
-    else None
-)
+POSTGRES_DSN = str(settings.database.postgres_dsn) if settings.database.postgres_dsn else None
+REDIS_DSN = str(settings.database.redis_dsn) if settings.database.redis_dsn else None
 
 AZURE_SUBSCRIPTION_ID = settings.azure.subscription_id
 AZURE_TENANT_ID = settings.azure.tenant_id
 AZURE_CLIENT_ID = settings.azure.client_id
 AZURE_CLIENT_SECRET = (
-    settings.azure.client_secret.get_secret_value()
-    if settings.azure.client_secret
-    else None
+    settings.azure.client_secret.get_secret_value() if settings.azure.client_secret else None
 )
 
 LLM_PROVIDER = settings.llm.default_provider
 OPENAI_API_KEY = (
-    settings.llm.openai_api_key.get_secret_value()
-    if settings.llm.openai_api_key
-    else None
+    settings.llm.openai_api_key.get_secret_value() if settings.llm.openai_api_key else None
 )
 GEMINI_API_KEY = (
-    settings.llm.gemini_api_key.get_secret_value()
-    if settings.llm.gemini_api_key
-    else None
+    settings.llm.gemini_api_key.get_secret_value() if settings.llm.gemini_api_key else None
 )
 OLLAMA_BASE_URL = settings.llm.ollama_base_url
 

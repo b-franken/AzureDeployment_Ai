@@ -415,39 +415,33 @@ class AuditLogger:
         return {
             "framework": "gdpr",
             "data_access_events": [
-            asdict(e)
-            for e in events
-            if e.event_type in [
-                AuditEventType.ACCESS_GRANTED,
-                AuditEventType.ACCESS_DENIED,
-            ]
+                asdict(e)
+                for e in events
+                if e.event_type
+                in [
+                    AuditEventType.ACCESS_GRANTED,
+                    AuditEventType.ACCESS_DENIED,
+                ]
             ],
             "data_modification_events": [
-            asdict(e)
-            for e in events
-            if e.event_type in [
-                AuditEventType.RESOURCE_UPDATED,
-                AuditEventType.RESOURCE_DELETED,
-            ]
+                asdict(e)
+                for e in events
+                if e.event_type
+                in [
+                    AuditEventType.RESOURCE_UPDATED,
+                    AuditEventType.RESOURCE_DELETED,
+                ]
             ],
             "consent_events": [],
             "data_breach_events": [
-            asdict(e)
-            for e in events
-            if e.severity == AuditSeverity.CRITICAL
+                asdict(e) for e in events if e.severity == AuditSeverity.CRITICAL
             ],
         }
 
     def _format_hipaa_report(self, events: list[AuditEvent]) -> dict[str, Any]:
-        phi_access_events = [
-            asdict(e)
-            for e in events
-            if "phi" in e.tags or "healthcare" in e.tags
-        ]
+        phi_access_events = [asdict(e) for e in events if "phi" in e.tags or "healthcare" in e.tags]
         security_events = [
-            asdict(e)
-            for e in events
-            if e.event_type == AuditEventType.SECURITY_ALERT
+            asdict(e) for e in events if e.event_type == AuditEventType.SECURITY_ALERT
         ]
         audit_control_events = [asdict(e) for e in events]
         return {
@@ -461,41 +455,36 @@ class AuditLogger:
         return {
             "framework": "pci-dss",
             "cardholder_data_events": [
-            asdict(e)
-            for e in events
-            if "payment" in e.tags or "card" in e.tags
+                asdict(e) for e in events if "payment" in e.tags or "card" in e.tags
             ],
             "network_security_events": [
-            asdict(e)
-            for e in events
-            if "network" in (e.resource_type or "")
-            or "firewall" in (e.resource_type or "")
+                asdict(e)
+                for e in events
+                if "network" in (e.resource_type or "") or "firewall" in (e.resource_type or "")
             ],
             "access_control_events": [
-            asdict(e)
-            for e in events
-            if e.event_type in [
-                AuditEventType.ACCESS_GRANTED,
-                AuditEventType.ACCESS_DENIED,
-            ]
+                asdict(e)
+                for e in events
+                if e.event_type
+                in [
+                    AuditEventType.ACCESS_GRANTED,
+                    AuditEventType.ACCESS_DENIED,
+                ]
             ],
         }
 
     def _format_sox_report(self, events: list[AuditEvent]) -> dict[str, Any]:
         financial_events = [
-            asdict(e)
-            for e in events
-            if "financial" in e.tags or "accounting" in e.tags
+            asdict(e) for e in events if "financial" in e.tags or "accounting" in e.tags
         ]
         change_management_events = [
-            asdict(e)
-            for e in events
-            if e.event_type == AuditEventType.CONFIGURATION_CHANGED
+            asdict(e) for e in events if e.event_type == AuditEventType.CONFIGURATION_CHANGED
         ]
         access_control_events = [
             asdict(e)
             for e in events
-            if e.event_type in [
+            if e.event_type
+            in [
                 AuditEventType.ACCESS_GRANTED,
                 AuditEventType.ACCESS_DENIED,
             ]

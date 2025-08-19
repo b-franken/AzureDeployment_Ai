@@ -1,9 +1,10 @@
 import asyncio
+from pathlib import Path
 
 from app.platform.audit.logger import AuditEvent, AuditEventType, AuditLogger
 
 
-def test_log_event_does_not_block_event_loop(tmp_path):
+def test_log_event_does_not_block_event_loop(tmp_path: Path) -> None:
     async def run() -> None:
         db_path = tmp_path / "audit.db"
         logger = AuditLogger(str(db_path))

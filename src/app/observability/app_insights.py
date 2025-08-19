@@ -12,6 +12,7 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
+
 class ApplicationInsights:
     _instance: ApplicationInsights | None = None
     _initialized: bool = False
@@ -38,9 +39,8 @@ class ApplicationInsights:
             logger.warning("Application Insights connection string not configured")
             return
 
-        service_name = (
-            settings.observability.otel_service_name
-            or os.getenv("OTEL_SERVICE_NAME", "devops-ai-api")
+        service_name = settings.observability.otel_service_name or os.getenv(
+            "OTEL_SERVICE_NAME", "devops-ai-api"
         )
 
         if settings.environment == "development":
@@ -118,9 +118,7 @@ class ApplicationInsights:
             unit="1",
         )
 
-    def track_auth_attempt(
-        self, method: str, success: bool, user_id: str | None = None
-    ) -> None:
+    def track_auth_attempt(self, method: str, success: bool, user_id: str | None = None) -> None:
         attributes = {
             "auth.method": method,
             "auth.success": str(success),
@@ -135,13 +133,9 @@ class ApplicationInsights:
             self.auth_failure_counter.add(1, attributes)
 
     def track_token_validation(self, duration_ms: float, success: bool) -> None:
-        self.token_validation_histogram.record(
-            duration_ms, {"validation.success": str(success)}
-        )
+        self.token_validation_histogram.record(duration_ms, {"validation.success": str(success)})
 
-    def track_deployment(
-        self, environment: str, success: bool, resource_type: str
-    ) -> None:
+    def track_deployment(self, environment: str, success: bool, resource_type: str) -> None:
         self.deployment_counter.add(
             1,
             {
@@ -160,9 +154,7 @@ class ApplicationInsights:
             },
         )
 
-    def track_custom_event(
-        self, name: str, properties: dict[str, Any] | None = None
-    ) -> None:
+    def track_custom_event(self, name: str, properties: dict[str, Any] | None = None) -> None:
         span = trace.get_current_span()
         if span:
             span.add_event(name, attributes=properties or {})
@@ -173,5 +165,6 @@ class ApplicationInsights:
         span = trace.get_current_span()
         if span:
             span.record_exception(exception, attributes=properties or {})
+
 
 app_insights = ApplicationInsights()

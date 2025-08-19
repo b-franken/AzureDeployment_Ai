@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+# ruff: noqa: I001
 import os
-from functools import lru_cache
 from pathlib import Path
+from functools import lru_cache
 from typing import Any, Literal
 
 from cryptography.fernet import Fernet

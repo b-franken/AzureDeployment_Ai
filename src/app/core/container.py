@@ -13,7 +13,7 @@ from typing import Any, TypeVar, Union, cast, get_args, get_origin
 from weakref import WeakKeyDictionary, WeakValueDictionary
 
 from app.core.exceptions import ConfigurationError
-from src.app.core.loging import get_logger
+from app.core.loging import get_logger
 
 T = TypeVar("T")
 logger = get_logger(__name__)

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import structlog
-from src.app.observability.loging_sanitizer import install_log_record_sanitizer
+from app.observability.loging_sanitizer import install_log_record_sanitizer
 from structlog.contextvars import bind_contextvars, clear_contextvars, merge_contextvars
 from structlog.stdlib import ProcessorFormatter
 
@@ -69,7 +69,8 @@ class LoggerFactory:
             structlog.stdlib.add_log_level,
             structlog.processors.TimeStamper(fmt="iso", key="@timestamp"),
         ]
-        pre_chain: Sequence[PreProcessor] = cast(Sequence[PreProcessor], pre_chain_raw)
+        pre_chain: Sequence[PreProcessor] = cast(
+            Sequence[PreProcessor], pre_chain_raw)
 
         structlog.configure(
             processors=[
@@ -89,7 +90,8 @@ class LoggerFactory:
         root_logger.setLevel(log_level)
         root_logger.handlers.clear()
 
-        formatter = ProcessorFormatter(processor=renderer, foreign_pre_chain=pre_chain)
+        formatter = ProcessorFormatter(
+            processor=renderer, foreign_pre_chain=pre_chain)
 
         if enable_console:
             console_handler = logging.StreamHandler(sys.stdout)
@@ -128,7 +130,8 @@ class LoggerFactory:
         logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(
             logging.WARNING
         )
-        logging.getLogger("azure.monitor.opentelemetry").setLevel(logging.WARNING)
+        logging.getLogger("azure.monitor.opentelemetry").setLevel(
+            logging.WARNING)
 
         self._configured = True
 

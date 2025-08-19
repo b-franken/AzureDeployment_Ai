@@ -7,7 +7,7 @@ from fastapi import FastAPI, Request, Response
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
-from src.app.core.loging import get_logger
+from app.core.loging import get_logger
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)

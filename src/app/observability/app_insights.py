@@ -8,7 +8,7 @@ from opentelemetry import metrics, trace
 from opentelemetry.sdk.resources import Resource
 
 from app.core.config import settings
-from src.app.core.loging import get_logger
+from app.core.loging import get_logger
 
 logger = get_logger(__name__)
 

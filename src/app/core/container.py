@@ -46,8 +46,7 @@ class ServiceDescriptor:
     implementation: type[Any] | Callable | Any
     scope: Scope
     factory: Callable | None = None
-    dependencies: list[type[Any] | InjectionToken] = field(
-        default_factory=list)
+    dependencies: list[type[Any] | InjectionToken] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -64,8 +63,7 @@ class ServiceProvider(ABC):
     def get(self, service_type: type[T] | InjectionToken[T]) -> T: ...
 
     @abstractmethod
-    def get_all(self, service_type: type[T]
-                | InjectionToken[T]) -> list[T]: ...
+    def get_all(self, service_type: type[T] | InjectionToken[T]) -> list[T]: ...
 
     @abstractmethod
     async def aget(self, service_type: type[T] | InjectionToken[T]) -> T: ...
@@ -73,16 +71,14 @@ class ServiceProvider(ABC):
 
 class Container(ServiceProvider):
     def __init__(self) -> None:
-        self._services: dict[type | InjectionToken,
-                             list[ServiceDescriptor]] = {}
+        self._services: dict[type | InjectionToken, list[ServiceDescriptor]] = {}
         self._singletons: dict[type | InjectionToken, Any] = {}
         self._scoped_instances: WeakKeyDictionary[Any, dict[type | InjectionToken, Any]] = (
             WeakKeyDictionary()
         )
         self._resolving: set[type | InjectionToken] = set()
         self._parent: Container | None = None
-        self._children: WeakValueDictionary[str,
-                                            Container] = WeakValueDictionary()
+        self._children: WeakValueDictionary[str, Container] = WeakValueDictionary()
 
     def register(
         self,
@@ -149,8 +145,7 @@ class Container(ServiceProvider):
             asyncio.get_running_loop()
         except RuntimeError:
             return asyncio.run(coro)
-        raise RuntimeError(
-            "sync resolution is not allowed inside a running event loop")
+        raise RuntimeError("sync resolution is not allowed inside a running event loop")
 
     def get(self, service_type: type[T] | InjectionToken[T], scope_context: Any = None) -> T:
         return cast(T, self._sync_await(self.aget(service_type, scope_context)))
@@ -340,8 +335,7 @@ def inject(container: Container) -> Callable[[Callable[..., Any]], Callable[...,
                 asyncio.get_running_loop()
             except RuntimeError:
                 return asyncio.run(async_wrapper(*args, **kwargs))
-            raise RuntimeError(
-                "sync injection wrapper cannot run inside an active event loop")
+            raise RuntimeError("sync injection wrapper cannot run inside an active event loop")
 
         return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
 

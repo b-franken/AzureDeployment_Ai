@@ -15,9 +15,9 @@ from fastapi import HTTPException, Request, status
 from fastapi.security import HTTPBearer
 from jwt import PyJWTError
 from jwt.algorithms import RSAAlgorithm
+from src.app.core.loging import get_logger
 
 from app.api.schemas import TokenData
-from src.app.core.loging import get_logger
 from app.observability.tracing import get_tracer
 
 logger = get_logger(__name__)
@@ -25,8 +25,7 @@ tracer = get_tracer(__name__)
 
 TENANT_ID = os.getenv("ENTRA_TENANT_ID") or os.getenv("AZURE_TENANT_ID")
 CLIENT_ID = os.getenv("ENTRA_CLIENT_ID") or os.getenv("AZURE_CLIENT_ID")
-AUDIENCE = os.getenv("ENTRA_AUDIENCE") or os.getenv(
-    "API_AUDIENCE") or CLIENT_ID
+AUDIENCE = os.getenv("ENTRA_AUDIENCE") or os.getenv("API_AUDIENCE") or CLIENT_ID
 ALLOWED_ALGS = ("RS256",)
 
 if not TENANT_ID:
@@ -112,8 +111,7 @@ async def validate_entra_token(token: str) -> dict[str, Any]:
     with tracer.start_as_current_span("validate_entra_token") as span:
         try:
             unverified_header = jwt.get_unverified_header(token)
-            unverified_claims = jwt.decode(
-                token, options={"verify_signature": False})
+            unverified_claims = jwt.decode(token, options={"verify_signature": False})
 
             span.set_attributes(
                 {
@@ -150,8 +148,7 @@ async def validate_entra_token(token: str) -> dict[str, Any]:
 
         jwks = await _jwks_cache.get(tid)
         keys = jwks.get("keys") or []
-        jwk: dict[str, Any] | None = next(
-            (k for k in keys if k.get("kid") == kid), None)
+        jwk: dict[str, Any] | None = next((k for k in keys if k.get("kid") == kid), None)
 
         if not jwk:
             await _jwks_cache.invalidate(tid)
@@ -160,14 +157,12 @@ async def validate_entra_token(token: str) -> dict[str, Any]:
             jwk = next((k for k in keys if k.get("kid") == kid), None)
 
         if not jwk:
-            logger.error("Signing key not found", extra={
-                         "kid": kid, "tenant": tid})
+            logger.error("Signing key not found", extra={"kid": kid, "tenant": tid})
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="Signing key not found"
             )
 
-        public_key: RSAPublicKey = cast(
-            RSAPublicKey, RSAAlgorithm.from_jwk(json.dumps(jwk)))
+        public_key: RSAPublicKey = cast(RSAPublicKey, RSAAlgorithm.from_jwk(json.dumps(jwk)))
 
         valid_issuers = [ISSUER_V1, ISSUER_V2]
 

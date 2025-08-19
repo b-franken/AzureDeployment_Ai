@@ -14,8 +14,7 @@ def install_correlation_middleware(app: FastAPI) -> None:
     async def _correlation_middleware(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
-        incoming = request.headers.get(
-            "x-correlation-id") or request.headers.get("x-request-id")
+        incoming = request.headers.get("x-correlation-id") or request.headers.get("x-request-id")
         span = trace.get_current_span()
         trace_id = None
         if span and span.get_span_context() and span.get_span_context().is_valid:

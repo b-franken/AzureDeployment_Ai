@@ -91,8 +91,7 @@ async def startup_event() -> None:
         "API starting up",
         version=APP_VERSION,
         environment=settings.environment,
-        entra_id_enabled=os.getenv("USE_ENTRA_ID", "false").lower() in {
-            "true", "1", "yes"},
+        entra_id_enabled=os.getenv("USE_ENTRA_ID", "false").lower() in {"true", "1", "yes"},
     )
 
 

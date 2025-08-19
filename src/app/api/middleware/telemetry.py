@@ -59,8 +59,7 @@ def install_telemetry_middleware(app: FastAPI) -> None:
                 )
 
                 if response.status_code >= 400:
-                    span.set_status(
-                        Status(StatusCode.ERROR, f"HTTP {response.status_code}"))
+                    span.set_status(Status(StatusCode.ERROR, f"HTTP {response.status_code}"))
                 else:
                     span.set_status(Status(StatusCode.OK))
 

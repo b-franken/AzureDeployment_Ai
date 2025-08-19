@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 
 from azure.monitor.opentelemetry import configure_azure_monitor
@@ -12,6 +13,8 @@ from opentelemetry.sdk.trace import TracerProvider as SDKTracerProvider
 
 from app.core.config import get_settings
 from app.core.loging import get_logger
+
+logger = logging.getLogger(__name__)
 
 _configured: bool = False
 _provider: SDKTracerProvider | None = None
@@ -55,6 +58,7 @@ def init_tracing(service_name: str = "devops-ai-api") -> None:
         PymongoInstrumentor().instrument()
     except Exception as exc:
         logger.warning("Pymongo instrumentation failed", error=str(exc), exc_info=True)
+
 
     try:
         from opentelemetry.instrumentation.redis import RedisInstrumentor

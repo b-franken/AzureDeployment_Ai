@@ -9,10 +9,10 @@ from fastapi.routing import APIRoute
 from starlette.routing import Mount, Route, WebSocketRoute
 
 from app.api.error_handlers import install_error_handlers
+from app.api.middleware.authentication import install_auth_middleware
 from app.api.middleware.correlation import install_correlation_middleware
 from app.api.middleware.rate_limiter import RateLimitConfig, RateLimiter
 from app.api.middleware.telemetry import install_telemetry_middleware
-from app.api.middleware.authentication import install_auth_middleware
 from app.api.routes.audit import router as audit_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.chat import router as chat_router
@@ -23,7 +23,7 @@ from app.api.routes.metrics import router as metrics_router
 from app.api.routes.review import router as review_router
 from app.api.routes.status import router as status_router
 from app.core.config import settings
-from app.core.loging import get_logger
+from app.core.logging import get_logger
 from app.observability.app_insights import app_insights
 from app.observability.prometheus import instrument_app
 

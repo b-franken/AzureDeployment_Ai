@@ -12,7 +12,7 @@ import structlog
 from structlog.contextvars import bind_contextvars, clear_contextvars, merge_contextvars
 from structlog.stdlib import ProcessorFormatter
 
-from app.observability.loging_sanitizer import install_log_record_sanitizer
+from app.observability.logging_sanitizer import install_log_record_sanitizer
 
 PreProcessor = Callable[
     [Any, str, MutableMapping[str, Any]],

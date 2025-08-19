@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException
 from jsonschema import Draft202012Validator, SchemaError, ValidationError
 
 from app.ai.llm.factory import get_provider_and_model
-from app.api.routes.schemas import StructuredChatRequest, StructuredChatResponse
+from app.api.schemas import StructuredChatRequest, StructuredChatResponse
 
 router = APIRouter()
 
@@ -14,7 +14,7 @@ router = APIRouter()
 @router.post("", response_model=StructuredChatResponse)
 async def structured(req: StructuredChatRequest) -> StructuredChatResponse:
     try:
-        Draft202012Validator.check_schema(req.schema)
+        Draft202012Validator.check_schema(req.schema_)
     except SchemaError as e:
         raise HTTPException(
             status_code=400,
@@ -30,7 +30,7 @@ async def structured(req: StructuredChatRequest) -> StructuredChatResponse:
     messages = [{"role": "user", "content": req.input}]
     response_format = {
         "type": "json_schema",
-        "json_schema": {"name": "StructuredOutput", "schema": req.schema},
+        "json_schema": {"name": "StructuredOutput", "schema": req.schema_},
     }
 
     raw = await llm.chat_raw(  # type: ignore[attr-defined]
@@ -60,7 +60,7 @@ async def structured(req: StructuredChatRequest) -> StructuredChatResponse:
         raise HTTPException(status_code=400, detail="Model did not return valid JSON.") from e
 
     try:
-        Draft202012Validator(req.schema).validate(parsed)
+        Draft202012Validator(req.schema_).validate(parsed)
     except ValidationError as e:
         raise HTTPException(
             status_code=400,

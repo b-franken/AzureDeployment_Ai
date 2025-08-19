@@ -8,7 +8,7 @@ from opentelemetry import metrics, trace
 from opentelemetry.sdk.resources import Resource
 
 from app.core.config import settings
-from app.core.logging import get_logger
+from src.app.core.loging import get_logger
 
 logger = get_logger(__name__)
 
@@ -36,7 +36,8 @@ class ApplicationInsights:
         )
 
         if not connection_string:
-            logger.warning("Application Insights connection string not configured")
+            logger.warning(
+                "Application Insights connection string not configured")
             return
 
         service_name = settings.observability.otel_service_name or os.getenv(
@@ -133,7 +134,8 @@ class ApplicationInsights:
             self.auth_failure_counter.add(1, attributes)
 
     def track_token_validation(self, duration_ms: float, success: bool) -> None:
-        self.token_validation_histogram.record(duration_ms, {"validation.success": str(success)})
+        self.token_validation_histogram.record(
+            duration_ms, {"validation.success": str(success)})
 
     def track_deployment(self, environment: str, success: bool, resource_type: str) -> None:
         self.deployment_counter.add(

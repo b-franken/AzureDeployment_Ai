@@ -7,7 +7,7 @@ from fastapi import FastAPI, Request, Response
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
-from app.core.logging import get_logger
+from src.app.core.loging import get_logger
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -59,7 +59,8 @@ def install_telemetry_middleware(app: FastAPI) -> None:
                 )
 
                 if response.status_code >= 400:
-                    span.set_status(Status(StatusCode.ERROR, f"HTTP {response.status_code}"))
+                    span.set_status(
+                        Status(StatusCode.ERROR, f"HTTP {response.status_code}"))
                 else:
                     span.set_status(Status(StatusCode.OK))
 

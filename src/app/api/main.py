@@ -22,7 +22,7 @@ from app.api.routes.metrics import router as metrics_router
 from app.api.routes.review import router as review_router
 from app.api.routes.status import router as status_router
 from app.core.config import settings
-from app.core.logging import get_logger
+from src.app.core.loging import get_logger
 from app.observability.app_insights import app_insights
 from app.observability.prometheus import instrument_app
 
@@ -91,7 +91,8 @@ async def startup_event() -> None:
         "API starting up",
         version=APP_VERSION,
         environment=settings.environment,
-        entra_id_enabled=os.getenv("USE_ENTRA_ID", "false").lower() in {"true", "1", "yes"},
+        entra_id_enabled=os.getenv("USE_ENTRA_ID", "false").lower() in {
+            "true", "1", "yes"},
     )
 
 

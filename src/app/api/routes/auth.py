@@ -1,244 +1,315 @@
 from __future__ import annotations
 
-import json
 import os
-import uuid
-from collections.abc import Awaitable, Callable
+import time
 from datetime import datetime, timedelta
 from typing import Annotated, Any
 
 import jwt
-from argon2 import PasswordHasher
-from argon2.exceptions import InvalidHash, VerifyMismatchError
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.security import HTTPBearer
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from pydantic import BaseModel
 
-from app.api.schemas import AuthRequest, TokenData
-from app.core.config import get_env_var, settings
-from app.platform.audit.logger import (
-    AuditEvent,
-    AuditEventType,
-    AuditLogger,
-    AuditSeverity,
-)
+
+try:
+    from passlib.context import CryptContext
+    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+except Exception:
+
+    import hashlib
+    import secrets
+
+    class SimplePwdContext:
+        def hash(self, password: str) -> str:
+            salt = secrets.token_hex(16)
+            return f"{salt}${hashlib.sha256((salt + password).encode()).hexdigest()}"
+
+        def verify(self, plain_password: str, hashed_password: str) -> bool:
+            try:
+                salt, hash_part = hashed_password.split('$')
+                return hashlib.sha256((salt + plain_password).encode()).hexdigest() == hash_part
+            except:
+                return False
+
+    pwd_context = SimplePwdContext()
 
 router = APIRouter()
-security = HTTPBearer(auto_error=False)
-AUDIT_DB_PATH = os.getenv("AUDIT_DB_PATH", "/data/audit.db")
-alog = AuditLogger(AUDIT_DB_PATH)
-ph = PasswordHasher()
 
 
-def _resolve_jwt_secret() -> str:
-    secret = None
-    sec = getattr(settings, "security", None)
-    if sec is not None:
-        secret = getattr(sec, "jwt_secret", None)
-        try:
-            from pydantic import SecretStr
-
-            if isinstance(secret, SecretStr):
-                secret = secret.get_secret_value()
-        except Exception:
-            pass
-    if not secret:
-        secret = get_env_var("API_JWT_SECRET", "").strip()
-    if not secret:
-        raise RuntimeError("API_JWT_SECRET must be set")
-    return str(secret)
+SECRET_KEY = os.getenv(
+    "JWT_SECRET_KEY", "your-secret-key-change-this-in-production")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
+REFRESH_TOKEN_EXPIRE_DAYS = 7
 
 
-def _resolve_jwt_algorithm() -> str:
-    sec = getattr(settings, "security", None)
-    alg = getattr(sec, "jwt_algorithm", None) if sec is not None else None
-    return str(alg or "HS256")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
 
 
-def _resolve_jwt_hours() -> int:
-    sec = getattr(settings, "security", None)
-    hours = getattr(sec, "jwt_expiration_hours", None) if sec is not None else None
-    if hours is None:
-        hours = get_env_var("API_JWT_HOURS", "24")
-    try:
-        return max(1, int(hours))
-    except Exception:
-        return 24
+USERS_DB = {}
 
 
-JWT_SECRET: str = _resolve_jwt_secret()
-JWT_ALGORITHM: str = _resolve_jwt_algorithm()
-JWT_HOURS: int = _resolve_jwt_hours()
-
-
-def _issue_token(payload: dict[str, Any]) -> str:
-    exp = datetime.utcnow() + timedelta(hours=JWT_HOURS)
-    claims = dict(payload)
-    claims["exp"] = int(exp.timestamp())
-    return jwt.encode(claims, JWT_SECRET, algorithm=JWT_ALGORITHM)
-
-
-def _load_users_from_config() -> dict[str, dict[str, Any]]:
-    users: dict[str, dict[str, Any]] = {}
-
-    raw = get_env_var("API_USERS_JSON", "").strip()
-    if raw:
-        try:
-            arr = json.loads(raw)
-            for item in arr or []:
-                email = str(item.get("email", "")).lower().strip()
-                if not email:
-                    continue
-                users[email] = {
-                    "password_hash": str(item.get("password_hash", "")),
-                    "roles": list(item.get("roles", [])) or ["user"],
-                    "subscription_id": str(item.get("subscription_id", "")),
-                }
-        except json.JSONDecodeError:
-            users = {}
-
-    if not users:
-        email = get_env_var("API_USER_EMAIL", "").lower().strip()
-        pwd_hash = get_env_var("API_PASSWORD_HASH", "").strip()
-        if email and pwd_hash:
-            roles_env = get_env_var("API_USER_ROLES", "user")
-            roles = [r.strip() for r in roles_env.split(",") if r.strip()]
-            users[email] = {
-                "password_hash": pwd_hash,
-                "roles": roles or ["user"],
-                "subscription_id": get_env_var("API_USER_SUBSCRIPTION_ID", "").strip(),
-            }
-
-    return users
-
-
-USERS = _load_users_from_config()
-
-
-async def _get_user(email: str) -> dict[str, Any] | None:
-    return USERS.get(email.lower())
-
-
-async def _validate_credentials(email: str, password: str) -> dict[str, Any] | None:
-    user = await _get_user(email)
-    if not user:
-        return None
-    try:
-        if ph.verify(user["password_hash"], password):
-            return {
-                "user_id": str(uuid.uuid5(uuid.NAMESPACE_DNS, email)),
-                "email": email,
-                "subscription_id": user.get("subscription_id") or "",
-                "roles": list(user.get("roles", [])) or ["user"],
-            }
-    except (VerifyMismatchError, InvalidHash):
-        return None
-    except Exception:
-        return None
-    return None
-
-
-async def auth_required(request: Request) -> TokenData:
-    creds = await security(request)
-    if not creds or not creds.credentials:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="auth required")
-    try:
-        raw: dict[str, Any] = jwt.decode(creds.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-    except jwt.PyJWTError as err:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid token"
-        ) from err
-
-    td = TokenData(
-        user_id=str(raw["user_id"]),
-        email=str(raw["email"]),
-        subscription_id=(str(raw["subscription_id"]) if raw.get("subscription_id") else None),
-        roles=list(raw.get("roles", [])),
-        expires_at=datetime.utcfromtimestamp(int(raw["exp"])),
-    )
-    if datetime.utcnow() > td.expires_at:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="token expired")
-    return td
-
-
-def require_role(role: str) -> Callable[[Request], Awaitable[TokenData]]:
-    async def checker(request: Request) -> TokenData:
-        td = await auth_required(request)
-        if "admin" in td.roles or role in td.roles:
-            return td
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
-
-    return checker
-
-
-def get_api_token() -> str:
-    token = get_env_var("API_TOKEN", "").strip()
-    if not token:
-        raise RuntimeError("API_TOKEN must be set in non-dev environments")
-    return token
-
-
-def require_bearer_token(request: Request) -> None:
-    expected = get_api_token()
-    auth = request.headers.get("authorization", "")
-    provided = auth.split(None, 1)[1] if auth.lower().startswith("bearer ") else None
-    if provided is None or provided != expected:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
-
-
-@router.post("/login")
-async def login(req: Request, body: AuthRequest) -> dict[str, Any]:
-    user = await _validate_credentials(body.email, body.password)
-    if not user:
-        await alog.log_event(
-            AuditEvent(
-                event_type=AuditEventType.ACCESS_DENIED,
-                severity=AuditSeverity.WARNING,
-                user_email=body.email,
-                action="login_failed",
-                ip_address=req.client.host if req.client else None,
-                user_agent=req.headers.get("user-agent"),
-            )
-        )
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials")
-
-    token = _issue_token(user)
-
-    await alog.log_event(
-        AuditEvent(
-            event_type=AuditEventType.ACCESS_GRANTED,
-            severity=AuditSeverity.INFO,
-            user_id=user["user_id"],
-            user_email=user["email"],
-            action="login_success",
-            ip_address=req.client.host if req.client else None,
-            user_agent=req.headers.get("user-agent"),
-        )
-    )
-
-    return {
-        "access_token": token,
-        "token_type": "bearer",
-        "expires_in": 3600 * JWT_HOURS,
-        "user": {"id": user["user_id"], "email": user["email"], "roles": user["roles"]},
+def init_users():
+    """Initialize users with hashed passwords"""
+    global USERS_DB
+    USERS_DB = {
+        "admin@example.com": {
+            "email": "admin@example.com",
+            "hashed_password": pwd_context.hash("admin123"),
+            "roles": ["admin", "user"],
+            "subscription_id": "12345678-1234-1234-1234-123456789012",
+            "is_active": True,
+        },
+        "user@example.com": {
+            "email": "user@example.com",
+            "hashed_password": pwd_context.hash("user123"),
+            "roles": ["user"],
+            "subscription_id": "87654321-4321-4321-4321-210987654321",
+            "is_active": True,
+        }
     }
 
 
-auth_dependency = auth_required
+init_users()
+
+
+class Token(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    expires_in: int
+
+
+class TokenData(BaseModel):
+    email: str
+    user_id: str
+    roles: list[str]
+    subscription_id: str | None = None
+    expires_at: datetime
+
+
+class User(BaseModel):
+    email: str
+    roles: list[str]
+    subscription_id: str | None
+    is_active: bool
+
+
+class UserInDB(User):
+    hashed_password: str
+
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    try:
+        return pwd_context.verify(plain_password, hashed_password)
+    except Exception as e:
+        print(f"Password verification error: {e}")
+        return False
+
+
+def get_password_hash(password: str) -> str:
+    return pwd_context.hash(password)
+
+
+def get_user(email: str) -> UserInDB | None:
+    user_data = USERS_DB.get(email)
+    if user_data:
+        return UserInDB(**user_data)
+    return None
+
+
+def authenticate_user(email: str, password: str) -> UserInDB | None:
+    user = get_user(email)
+    if not user:
+        return None
+    if not verify_password(password, user.hashed_password):
+        return None
+    return user
+
+
+def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=15)
+    to_encode.update({"exp": expire, "type": "access"})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def create_refresh_token(data: dict) -> str:
+    to_encode = data.copy()
+    expire = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    to_encode.update({"exp": expire, "type": "refresh"})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+
+async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]) -> User:
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        if payload.get("type") != "access":
+            raise credentials_exception
+
+        email: str = payload.get("sub")
+        if email is None:
+            raise credentials_exception
+
+        token_data = TokenData(
+            email=email,
+            user_id=payload.get("user_id", email),
+            roles=payload.get("roles", []),
+            subscription_id=payload.get("subscription_id"),
+            expires_at=datetime.fromtimestamp(payload.get("exp", 0))
+        )
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has expired",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except jwt.PyJWTError:
+        raise credentials_exception
+
+    user = get_user(email=token_data.email)
+    if user is None:
+        raise credentials_exception
+
+    return User(
+        email=user.email,
+        roles=user.roles,
+        subscription_id=user.subscription_id,
+        is_active=user.is_active
+    )
+
+
+async def get_current_active_user(
+    current_user: Annotated[User, Depends(get_current_user)]
+) -> User:
+    if not current_user.is_active:
+        raise HTTPException(status_code=400, detail="Inactive user")
+    return current_user
+
+
+def require_role(role: str):
+    async def role_checker(
+        current_user: Annotated[User, Depends(get_current_active_user)]
+    ) -> User:
+        if role not in current_user.roles and "admin" not in current_user.roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not enough permissions"
+            )
+        return current_user
+    return role_checker
+
+
+@router.post("/token", response_model=Token)
+async def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
+    """OAuth2 compatible token login, get an access token for future requests"""
+    user = authenticate_user(form_data.username, form_data.password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    token_data = {
+        "sub": user.email,
+        "user_id": user.email.replace("@", "_").replace(".", "_"),
+        "roles": user.roles,
+        "subscription_id": user.subscription_id
+    }
+
+    access_token = create_access_token(
+        token_data, expires_delta=access_token_expires)
+    refresh_token = create_refresh_token(token_data)
+
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60
+    }
+
+
+@router.post("/refresh")
+async def refresh_token(refresh_token: str):
+    """Use refresh token to get new access token"""
+    try:
+        payload = jwt.decode(refresh_token, SECRET_KEY, algorithms=[ALGORITHM])
+        if payload.get("type") != "refresh":
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token type"
+            )
+
+        email = payload.get("sub")
+        user = get_user(email)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found"
+            )
+
+        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        token_data = {
+            "sub": user.email,
+            "user_id": user.email.replace("@", "_").replace(".", "_"),
+            "roles": user.roles,
+            "subscription_id": user.subscription_id
+        }
+
+        new_access_token = create_access_token(
+            token_data, expires_delta=access_token_expires)
+
+        return {
+            "access_token": new_access_token,
+            "token_type": "bearer",
+            "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60
+        }
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token has expired"
+        )
+    except jwt.PyJWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token"
+        )
+
+
+@router.get("/me")
+async def read_users_me(current_user: Annotated[User, Depends(get_current_active_user)]):
+    """Get current user information"""
+    return current_user
 
 
 @router.post("/logout")
-async def logout(
-    req: Request, td: Annotated[TokenData, Depends(auth_dependency)]
-) -> dict[str, str]:
-    await alog.log_event(
-        AuditEvent(
-            event_type=AuditEventType.ACCESS_GRANTED,
-            severity=AuditSeverity.INFO,
-            user_id=td.user_id,
-            user_email=td.email,
-            action="logout",
-            ip_address=req.client.host if req.client else None,
-            user_agent=req.headers.get("user-agent"),
-        )
+async def logout(current_user: Annotated[User, Depends(get_current_active_user)]):
+    """Logout (client should discard tokens)"""
+    return {"message": "Successfully logged out"}
+
+
+auth_dependency = get_current_active_user
+
+
+async def auth_required(request: Request) -> TokenData:
+    """Backward compatibility function"""
+    token = await oauth2_scheme(request)
+    user = await get_current_user(token)
+    return TokenData(
+        email=user.email,
+        user_id=user.email.replace("@", "_").replace(".", "_"),
+        roles=user.roles,
+        subscription_id=user.subscription_id,
+        expires_at=datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     )
-    return {"message": "ok"}

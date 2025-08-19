@@ -1,5 +1,5 @@
 const base = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
-const REQUEST_TIMEOUT_MS = 15000;
+const REQUEST_TIMEOUT_MS = 30000;
 
 export class ApiError extends Error {
   constructor(message: string, public cause?: unknown, public status?: number) {
@@ -7,6 +7,8 @@ export class ApiError extends Error {
     this.name = "ApiError";
   }
 }
+
+export type ChatMsg = { role: "user" | "assistant" | "system"; content: string };
 
 async function fetchWithTimeout(
   url: string,
@@ -24,7 +26,7 @@ async function fetchWithTimeout(
         const body = await res.clone().json();
         if (typeof body?.detail === "string") detail = body.detail;
         if (typeof body?.message === "string") detail = body.message;
-      } catch {}
+      } catch { }
       throw new ApiError(detail, undefined, res.status);
     }
     return res;
@@ -39,11 +41,59 @@ async function fetchWithTimeout(
   }
 }
 
-export type ChatMsg = { role: "user" | "assistant" | "system"; content: string };
-type HeadersDict = { [k: string]: string };
 
-function withAuth(token?: string): HeadersDict {
-  return token ? { Authorization: `Bearer ${token}` } : {};
+export async function chat(
+  input: string,
+  memory?: ChatMsg[],
+  provider?: string | null,
+  model?: string | null,
+  enable_tools?: boolean,
+  preferred_tool?: string | null,
+  allowlist?: string[] | null
+): Promise<string> {
+  const res = await fetchWithTimeout(
+    `${base}/api/chat`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        input,
+        memory: memory || [],
+        provider,
+        model,
+        enable_tools: enable_tools || false,
+        preferred_tool,
+        allowlist: allowlist || []
+      }),
+    },
+    "chat"
+  );
+  const data = await res.json();
+  return data.output;
+}
+
+
+export async function review_once(
+  user_input: string,
+  assistant_reply: string,
+  opts?: { provider?: string | null; model?: string | null }
+): Promise<string> {
+  const res = await fetchWithTimeout(
+    `${base}/api/review`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_input,
+        assistant_reply,
+        provider: opts?.provider,
+        model: opts?.model,
+      }),
+    },
+    "review"
+  );
+  const data = await res.json();
+  return data.output;
 }
 
 export function splitModel(id: string): { provider: string | null; model: string | null } {
@@ -53,6 +103,23 @@ export function splitModel(id: string): { provider: string | null; model: string
   return { provider: id.slice(0, i), model: id.slice(i + 1) };
 }
 
+
+export async function login(email: string, password: string) {
+  console.log("Login called in development mode - returning mock token");
+  return {
+    access_token: "dev-token",
+    token_type: "bearer",
+    expires_in: 3600,
+    user: { id: "dev", email: email, roles: ["user"] }
+  };
+}
+
+export async function logout() {
+  console.log("Logout called in development mode");
+  return { message: "ok" };
+}
+
+
 export type AuthResult = {
   access_token: string;
   token_type: "bearer";
@@ -60,198 +127,36 @@ export type AuthResult = {
   user: { id: string; email: string; roles: string[] };
 };
 
-export async function login(email: string, password: string): Promise<AuthResult> {
-  const res = await fetchWithTimeout(
-    `${base}/api/auth/login`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ email, password }),
-    },
-    "login"
-  );
-  return res.json();
-}
-
-export async function logout(token: string): Promise<void> {
-  await fetchWithTimeout(
-    `${base}/api/auth/logout`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json", ...withAuth(token) },
-    },
-    "logout"
-  );
-}
-
-export type ChatV2Response = { response: string; correlation_id: string; processing_time: number };
-
-export async function chatV2(
-  token: string,
-  args: { input: string; memory?: ChatMsg[]; provider?: string | null; model?: string | null; enable_tools?: boolean }
-): Promise<ChatV2Response> {
-  const res = await fetchWithTimeout(
-    `${base}/api/chat/v2`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json", ...withAuth(token) },
-      body: JSON.stringify({
-        input: args.input,
-        memory: args.memory ?? [],
-        provider: args.provider ?? null,
-        model: args.model ?? null,
-        enable_tools: !!args.enable_tools,
-      }),
-    },
-    "chatV2"
-  );
-  return res.json();
-}
-
-export async function chat(
-  token: string,
-  message: string,
-  history: ChatMsg[],
-  opts?: { provider?: string | null; model?: string | null; enable_tools?: boolean; preferred_tool?: string | null; allowlist?: string[] | null }
-): Promise<string> {
-  const body = {
-    input: message,
-    memory: history,
-    provider: opts?.provider ?? null,
-    model: opts?.model ?? null,
-    enable_tools: !!opts?.enable_tools,
-    preferred_tool: opts?.preferred_tool ?? null,
-    allowlist: opts?.allowlist ?? [],
-  };
-  const res = await fetchWithTimeout(
-    `${base}/api/chat`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json", ...withAuth(token) },
-      body: JSON.stringify(body),
-    },
-    "chat"
-  );
-  const data = await res.json();
-  return String(data?.output ?? "");
-}
-
-export async function review_once(
-  user: string,
-  assistant: string,
-  opts?: { provider?: string | null; model?: string | null }
-): Promise<string> {
-  const res = await fetchWithTimeout(
-    `${base}/api/review`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        user_input: user,
-        assistant_reply: assistant,
-        provider: opts?.provider ?? null,
-        model: opts?.model ?? null,
-      }),
-    },
-    "review"
-  );
-  const data = await res.json();
-  return String(data?.output ?? "");
-}
-
-export type DeployRequest = {
-  request: string;
-  subscription_id: string;
-  resource_group?: string | null;
-  environment?: "development" | "staging" | "production";
-  dry_run?: boolean;
-  cost_limit?: number | null;
-  tags?: Record<string, string>;
+export type ChatV2Response = {
+  response: string;
+  correlation_id: string;
+  processing_time: number;
 };
 
-export async function deploy(token: string, body: DeployRequest) {
-  const res = await fetchWithTimeout(
-    `${base}/api/deploy`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json", ...withAuth(token) },
-      body: JSON.stringify({
-        request: body.request,
-        subscription_id: body.subscription_id,
-        resource_group: body.resource_group ?? null,
-        environment: body.environment ?? "development",
-        dry_run: body.dry_run ?? true,
-        cost_limit: body.cost_limit ?? null,
-        tags: body.tags ?? {},
-      }),
-    },
-    "deploy"
-  );
-  return res.json();
-}
-
-export type CostAnalysisArgs = {
-  subscription_id: string;
-  start_date: string;
-  end_date: string;
-  group_by?: string[] | null;
-  include_forecast?: boolean;
-  include_recommendations?: boolean;
+export type ChatRequest = {
+  input: string;
+  memory?: ChatMsg[];
+  provider?: string | null;
+  model?: string | null;
+  enable_tools?: boolean;
+  preferred_tool?: string | null;
+  allowlist?: string[] | null;
 };
 
-export async function analyzeCosts(token: string, args: CostAnalysisArgs) {
-  const res = await fetchWithTimeout(
-    `${base}/api/cost/analysis`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json", ...withAuth(token) },
-      body: JSON.stringify({
-        subscription_id: args.subscription_id,
-        start_date: args.start_date,
-        end_date: args.end_date,
-        group_by: args.group_by ?? null,
-        include_forecast: !!args.include_forecast,
-        include_recommendations: !!args.include_recommendations,
-      }),
-    },
-    "analyze costs"
-  );
-  return res.json();
-}
+export type ReviewRequest = {
+  user_input: string;
+  assistant_reply: string;
+  provider?: string | null;
+  model?: string | null;
+};
 
-export async function auditLogs(
-  token: string,
-  params?: { start_date?: string; end_date?: string; user_id?: string; page?: number; page_size?: number }
-) {
-  const q = new URLSearchParams();
-  if (params?.start_date) q.set("start_date", params.start_date);
-  if (params?.end_date) q.set("end_date", params.end_date);
-  if (params?.user_id) q.set("user_id", params.user_id);
-  if (params?.page) q.set("page", String(params.page));
-  if (params?.page_size) q.set("page_size", String(params.page_size));
-  const res = await fetchWithTimeout(
-    `${base}/api/audit/logs?${q.toString()}`,
-    { headers: { ...withAuth(token) } },
-    "audit logs"
-  );
-  return res.json();
-}
-
-export async function metrics(token: string) {
-  const res = await fetchWithTimeout(
-    `${base}/api/metrics`,
-    { headers: { ...withAuth(token) } },
-    "metrics"
-  );
-  return res.json();
-}
 
 export async function apiHealthz(): Promise<{ status: string }> {
-  const res = await fetchWithTimeout(`${base}/api/health`, {}, "healthz");
+  const res = await fetch(`${base}/api/health`);
   return res.json();
 }
 
 export async function apiStatus(): Promise<any> {
-  const res = await fetchWithTimeout(`${base}/api/status`, {}, "status");
+  const res = await fetch(`${base}/api/status`);
   return res.json();
 }

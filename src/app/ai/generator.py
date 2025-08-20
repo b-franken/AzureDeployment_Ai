@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import logging
 
+import httpx
+
 from app.ai.llm.factory import get_provider_and_model
 from app.ai.types import ChatHistory
 from app.ai.types import Message as AIMessage
+from app.core.exceptions import BaseApplicationException
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +37,35 @@ async def generate_response(
     logger.debug("llm=%s model=%s", provider or "auto", selected_model)
     try:
         return await llm.chat(selected_model, messages)
-    except Exception:
-        logger.exception("LLM chat failed")
-        return "Failed to generate response. Please try again later."
+    except BaseApplicationException as err:
+        logger.error(
+            "LLM provider error",
+            extra={
+                "provider": provider or "auto",
+                "model": selected_model,
+                "error": str(err),
+            },
+            exc_info=err,
+        )
+        return err.user_message or "Failed to generate response. Please try again later."
+    except httpx.HTTPError as err:
+        logger.error(
+            "HTTP error while communicating with LLM provider",
+            extra={
+                "provider": provider or "auto",
+                "model": selected_model,
+                "error": str(err),
+            },
+            exc_info=err,
+        )
+        return "Failed to connect to the LLM service. Please try again later."
+    except Exception as err:
+        logger.exception(
+            "Unexpected LLM error",
+            extra={
+                "provider": provider or "auto",
+                "model": selected_model,
+                "error": str(err),
+            },
+        )
+        raise

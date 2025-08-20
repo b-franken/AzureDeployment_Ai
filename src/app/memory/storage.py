@@ -15,7 +15,7 @@ from typing import Any, Literal
 import aiosqlite
 
 from app.core.config import MAX_MEMORY, MAX_TOTAL_MEMORY
-from src.app.core.logging import get_logger
+from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -54,7 +54,8 @@ class AsyncMemoryStore:
         max_total_memory: int = MAX_TOTAL_MEMORY,
         pool_size: int = 5,
     ):
-        self.db_path = Path(db_path) if db_path else Path.home() / ".devops_ai" / "memory.db"
+        self.db_path = Path(db_path) if db_path else Path.home(
+        ) / ".devops_ai" / "memory.db"
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.max_memory = int(max_memory)
         self.max_total_memory = int(max_total_memory)
@@ -311,7 +312,8 @@ class SyncMemoryStore:
         max_memory: int = MAX_MEMORY,
         max_total_memory: int = MAX_TOTAL_MEMORY,
     ):
-        self.db_path = Path(db_path) if db_path else Path.home() / ".devops_ai" / "memory_sync.db"
+        self.db_path = Path(db_path) if db_path else Path.home(
+        ) / ".devops_ai" / "memory_sync.db"
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.max_memory = int(max_memory)
         self.max_total_memory = int(max_total_memory)

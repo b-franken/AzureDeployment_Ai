@@ -3,9 +3,8 @@ import asyncio
 from typing import Any
 from enum import Enum
 from dataclasses import dataclass, field
-from planning import PlanStep, StepType, StepResult
 from app.ai.agents.base import Agent, AgentContext, AgentStatus
-from app.ai.agents.types import ExecutionPlan, ExecutionResult
+from app.ai.agents.types import ExecutionPlan, ExecutionResult, PlanStep, StepType, StepResult
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)

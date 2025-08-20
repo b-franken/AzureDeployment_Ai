@@ -60,14 +60,14 @@ class AsyncMemoryStore:
         self.max_memory = int(max_memory)
         self.max_total_memory = int(max_total_memory)
         self.pool_size = int(pool_size)
-        self._pool: list[aiosqlite.Connection] = []
-        self._pool_lock = asyncio.Lock()
+        self._connection_queue: asyncio.Queue[aiosqlite.Connection] = asyncio.Queue(self.pool_size)
+        self._init_lock = asyncio.Lock()
         self._initialized = False
 
     async def initialize(self) -> None:
         if self._initialized:
             return
-        async with self._pool_lock:
+        async with self._init_lock:
             if self._initialized:
                 return
             async with aiosqlite.connect(str(self.db_path)) as db:
@@ -100,7 +100,7 @@ class AsyncMemoryStore:
                 conn = await aiosqlite.connect(str(self.db_path))
                 await conn.execute("PRAGMA journal_mode=WAL")
                 await conn.execute("PRAGMA synchronous=NORMAL")
-                self._pool.append(conn)
+                self._connection_queue.put_nowait(conn)
             self._initialized = True
             logger.info(f"initialized memory store pool_size={self.pool_size}")
 
@@ -109,12 +109,7 @@ class AsyncMemoryStore:
         await self.initialize()
         conn: aiosqlite.Connection | None = None
         try:
-            while True:
-                async with self._pool_lock:
-                    if self._pool:
-                        conn = self._pool.pop()
-                        break
-                await asyncio.sleep(0.01)
+            conn = await self._connection_queue.get()
             yield conn
         except Exception as e:
             logger.error(f"Connection error: {e}")
@@ -123,8 +118,7 @@ class AsyncMemoryStore:
             if conn:
                 try:
                     await asyncio.shield(conn.execute("SELECT 1"))
-                    async with self._pool_lock:
-                        self._pool.append(conn)
+                    self._connection_queue.put_nowait(conn)
                 except Exception:
                     try:
                         await asyncio.shield(conn.close())
@@ -133,8 +127,7 @@ class AsyncMemoryStore:
                     new_conn = await aiosqlite.connect(str(self.db_path))
                     await new_conn.execute("PRAGMA journal_mode=WAL")
                     await new_conn.execute("PRAGMA synchronous=NORMAL")
-                    async with self._pool_lock:
-                        self._pool.append(new_conn)
+                    self._connection_queue.put_nowait(new_conn)
 
     async def store_message(
         self,
@@ -297,11 +290,12 @@ class AsyncMemoryStore:
         }
 
     async def close(self) -> None:
-        async with self._pool_lock:
-            for conn in self._pool:
+        async with self._init_lock:
+            while not self._connection_queue.empty():
+                conn = self._connection_queue.get_nowait()
                 await conn.close()
-            self._pool.clear()
             self._initialized = False
+            self._connection_queue = asyncio.Queue(self.pool_size)
         logger.info("closed memory store connections")
 
 

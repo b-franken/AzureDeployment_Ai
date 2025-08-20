@@ -2,7 +2,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
-from app.api.schemas.events import DeploymentEvent
+from app.events.schemas import DeploymentEvent
 from app.runtime.streams import streaming_handler
 
 router = APIRouter()

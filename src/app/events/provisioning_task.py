@@ -1,6 +1,6 @@
 from __future__ import annotations
 import asyncio
-from app.ai.agents.provisioning_task import ProvisioningAgent, ProvisioningAgentConfig
+from app.ai.agents.provisioning import ProvisioningAgent, ProvisioningAgentConfig
 from app.ai.tools_router import ToolExecutionContext
 
 

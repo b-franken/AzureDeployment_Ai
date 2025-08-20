@@ -12,18 +12,22 @@ class TerraformError(Exception):
     pass
 
 
-async def _run(cmd: list[str], cwd: Path) -> tuple[int, str]:
+async def _run(cmd: list[str], cwd: Path, timeout: float = 60.0) -> tuple[int, str]:
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         cwd=str(cwd),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
     )
-    stdout_bytes, _ = await proc.communicate()
-    code = await proc.wait()
+    try:
+        stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.communicate()
+        raise
     if stdout_bytes is None:
         stdout_bytes = b""
-    return code, stdout_bytes.decode("utf-8", errors="replace")
+    return proc.returncode, stdout_bytes.decode("utf-8", errors="replace")
 
 
 def _tf_main_tf(spec: dict[str, Any]) -> str:

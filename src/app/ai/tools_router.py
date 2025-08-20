@@ -75,12 +75,13 @@ def _extract_json_object(text: str) -> dict[str, object] | None:
     s = text.strip()
     m = _CODEFENCE_JSON_RE.search(s)
     if m:
-        s = m.group(1).strip()
+        extracted = m.group(1).strip()
         try:
-            obj = json.loads(s)
+            obj = json.loads(extracted)
             return obj if isinstance(obj, dict) else None
-        except Exception:
-            pass
+        except json.JSONDecodeError:
+            # Fall back to manual extraction below
+            s = text.strip()
     start = s.find("{")
     if start == -1:
         return None
@@ -95,12 +96,12 @@ def _extract_json_object(text: str) -> dict[str, object] | None:
                 end_idx = i + 1
                 break
     if end_idx == -1:
-        return None
+        raise ValueError("Failed to parse JSON object: no closing '}' found")
     try:
         obj = json.loads(s[start:end_idx].strip())
         return obj if isinstance(obj, dict) else None
-    except Exception:
-        return None
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Failed to parse JSON object: {e.msg}") from e
 
 
 async def _log_request(user_input: str, context: ToolExecutionContext | None) -> None:
@@ -493,7 +494,11 @@ async def maybe_call_tool(
             model=model,
             provider=provider,
         )
-        req = _extract_json_object(plan)
+        try:
+            req = _extract_json_object(plan)
+        except ValueError as e:
+            await _log_error(e, context)
+            return f"Failed to parse tool request: {e}"
         if not isinstance(req, dict) or "tool" not in req:
             return plan
         name = str(req.get("tool"))

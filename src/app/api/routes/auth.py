@@ -17,17 +17,36 @@ try:
 except Exception:
     import hashlib
     import secrets
+    import base64
 
     class SimplePwdContext:
         def hash(self, password: str) -> str:
-            salt = secrets.token_hex(16)
-            return f"{salt}${hashlib.sha256((salt + password).encode()).hexdigest()}"
+            salt = secrets.token_bytes(16)
+            iterations = 100_000
+            hash_bytes = hashlib.pbkdf2_hmac(
+                "sha256",
+                password.encode(),
+                salt,
+                iterations
+            )
+            salt_b64 = base64.b64encode(salt).decode("utf-8")
+            hash_b64 = base64.b64encode(hash_bytes).decode("utf-8")
+            return f"{iterations}${salt_b64}${hash_b64}"
 
         def verify(self, plain_password: str, hashed_password: str) -> bool:
             try:
-                salt, hash_part = hashed_password.split("$")
-                return hashlib.sha256((salt + plain_password).encode()).hexdigest() == hash_part
-            except ValueError as exc:
+                iterations_str, salt_b64, hash_b64 = hashed_password.split("$")
+                iterations = int(iterations_str)
+                salt = base64.b64decode(salt_b64)
+                expected_hash = base64.b64decode(hash_b64)
+                hash_bytes = hashlib.pbkdf2_hmac(
+                    "sha256",
+                    plain_password.encode(),
+                    salt,
+                    iterations
+                )
+                return secrets.compare_digest(hash_bytes, expected_hash)
+            except Exception as exc:
                 logger.exception("Invalid hashed password: %s", exc)
                 return False
 

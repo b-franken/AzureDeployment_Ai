@@ -14,14 +14,22 @@ interface ReviewResponse {
 }
 
 class ReviewerClient {
-    private endpoint: string
+    private endpoint?: string
+    private useMock: boolean
 
     constructor() {
-        this.endpoint = process.env.REVIEWER_ENDPOINT || ''
+        this.endpoint = process.env.REVIEWER_ENDPOINT
+        this.useMock = process.env.REVIEWER_USE_MOCK === 'true'
+
+        if (!this.endpoint && !this.useMock) {
+            throw new Error(
+                'REVIEWER_ENDPOINT is not set. Set the env variable or enable mock mode with REVIEWER_USE_MOCK=true'
+            )
+        }
     }
 
     async review(request: ReviewRequest): Promise<ReviewResponse> {
-        if (!this.endpoint) {
+        if (this.useMock || !this.endpoint) {
             return this.getMockReview(request)
         }
         try {

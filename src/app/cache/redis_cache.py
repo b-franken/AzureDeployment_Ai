@@ -35,6 +35,13 @@ class CacheManager:
             await self._client.close()
             await self.pool.disconnect()
 
+    async def __aenter__(self) -> CacheManager:
+        await self.initialize()
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        await self.close()
+
     async def _ensure_client(self) -> redis.Redis:
         if self._client is None:
             await self.initialize()

@@ -74,6 +74,7 @@ _CACHE: OrderedDict[str, tuple[Clients, int]] = OrderedDict()
 _CACHE_LOCK = asyncio.Lock()
 _CACHE_MAX_SIZE = 8
 _TOKEN_SCOPE = "https://management.azure.com/.default"
+_EXPIRY_MARGIN_SECONDS = 5 * 60
 _RETRY_MAX_ATTEMPTS = int(os.getenv("AZURE_POLL_RETRY_MAX", "6"))
 _RETRY_BASE_SECONDS = float(os.getenv("AZURE_POLL_RETRY_BASE", "1.0"))
 _RETRY_CAP_SECONDS = float(os.getenv("AZURE_POLL_RETRY_CAP", "30.0"))
@@ -121,7 +122,7 @@ def _dispose(clients: Clients) -> None:
 async def _build_clients(sid: str) -> tuple[Clients, int]:
     cred = _credential()
     token = await asyncio.to_thread(cred.get_token, _TOKEN_SCOPE)
-    expiry = int(token.expires_on)
+    expiry = int(token.expires_on) - _EXPIRY_MARGIN_SECONDS
     return (
         Clients(
             subscription_id=sid,
@@ -154,11 +155,12 @@ async def get_clients(subscription_id: str | None) -> Clients:
         entry = _CACHE.get(sid)
         if entry:
             clients, expiry = entry
-            if expiry > now:
+            if expiry <= now:
+                _dispose(clients)
+                _CACHE.pop(sid, None)
+            else:
                 _CACHE.move_to_end(sid)
                 return clients
-            _dispose(clients)
-            _CACHE.pop(sid, None)
         clients, expiry = await _build_clients(sid)
         _CACHE[sid] = (clients, expiry)
         _CACHE.move_to_end(sid)

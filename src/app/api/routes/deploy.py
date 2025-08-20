@@ -18,9 +18,7 @@ deploy_role_dependency = require_role("deploy")
 
 
 @router.post("/start")
-async def start_deploy(
-    td: Annotated[TokenData, Depends(deploy_role_dependency)]
-) -> dict[str, str]:
+async def start_deploy(td: Annotated[TokenData, Depends(deploy_role_dependency)]) -> dict[str, str]:
     deployment_id = str(uuid4())
     asyncio.create_task(run_provisioning(deployment_id))
     return {"deployment_id": deployment_id}

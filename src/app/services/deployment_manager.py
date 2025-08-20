@@ -1,7 +1,8 @@
 from __future__ import annotations
+
 import asyncio
-from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 
@@ -11,9 +12,7 @@ class DeploymentManager:
 
     @asynccontextmanager
     async def stream(
-        self,
-        deployment_id: str,
-        from_seq: int | None = None
+        self, deployment_id: str, from_seq: int | None = None
     ) -> AsyncIterator[asyncio.Queue[Any]]:
         queue: asyncio.Queue[Any] = asyncio.Queue()
         self._deployments[deployment_id] = queue

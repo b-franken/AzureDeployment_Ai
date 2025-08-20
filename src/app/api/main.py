@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import os
 import asyncio
-from contextlib import asynccontextmanager, suppress
 from collections.abc import Awaitable, Callable
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,6 +14,7 @@ from app.api.middleware.authentication import install_auth_middleware
 from app.api.middleware.correlation import install_correlation_middleware
 from app.api.middleware.rate_limiter import RateLimitConfig, RateLimiter
 from app.api.middleware.telemetry import install_telemetry_middleware
+from app.api.routes.agents import router as agents_router
 from app.api.routes.audit import router as audit_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.chat import router as chat_router
@@ -24,13 +24,11 @@ from app.api.routes.health import router as health_router
 from app.api.routes.metrics import router as metrics_router
 from app.api.routes.review import router as review_router
 from app.api.routes.status import router as status_router
+from app.api.routes.ws import router as ws_router
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.observability.app_insights import app_insights
 from app.observability.prometheus import instrument_app
-from app.api.routes.ws import router as ws_router
-from app.api.routes.agents import router as agents_router
-
 
 logger = get_logger(__name__)
 
@@ -50,12 +48,8 @@ limiter = RateLimiter(
         ),
         redis_max_connections=settings.database.redis_max_connections,
         redis_socket_timeout=float(settings.database.redis_socket_timeout),
-        tracker_max_age=float(
-            settings.security.api_rate_limit_tracker_max_age_seconds
-        ),
-        cleanup_interval=float(
-            settings.security.api_rate_limit_cleanup_interval_seconds
-        ),
+        tracker_max_age=float(settings.security.api_rate_limit_tracker_max_age_seconds),
+        cleanup_interval=float(settings.security.api_rate_limit_cleanup_interval_seconds),
     )
 )
 
@@ -68,8 +62,7 @@ async def _limiter_cleanup_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("API starting up", version=settings.app_version,
-                environment=settings.environment)
+    logger.info("API starting up", version=settings.app_version, environment=settings.environment)
     app_insights.initialize()
     cleanup_task = asyncio.create_task(_limiter_cleanup_loop())
     try:

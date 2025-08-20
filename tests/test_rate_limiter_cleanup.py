@@ -1,6 +1,6 @@
+import sys
 import time
 import types
-import sys
 
 # Stub heavy modules imported by app.api.__init__ to avoid pulling large dependencies
 sys.modules.setdefault("app.api.routes", types.ModuleType("app.api.routes"))

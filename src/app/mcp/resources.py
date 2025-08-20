@@ -17,8 +17,7 @@ class ResourceManager:
 
     def _get_subscription_client(self) -> SubscriptionClient:
         if "subscription" not in self._clients:
-            self._clients["subscription"] = SubscriptionClient(
-                self._credential)
+            self._clients["subscription"] = SubscriptionClient(self._credential)
         return self._clients["subscription"]
 
     def _get_resource_client(

@@ -1,36 +1,32 @@
 from __future__ import annotations
-from typing import Any, Type
-from app.ai.agents.chain import ChainLink
+
+from typing import Any
+
 from app.ai.agents.base import Agent, AgentContext
+from app.ai.agents.chain import ChainAgent, ChainLink
+from app.ai.agents.coordinator import CoordinatorAgent
+from app.ai.agents.learning import LearningAgent
 from app.ai.agents.orchestrator import OrchestrationAgent
 from app.ai.agents.provisioning import ProvisioningAgent
 from app.ai.agents.reactive import ReactiveAgent
-from app.ai.agents.coordinator import CoordinatorAgent
-from app.ai.agents.chain import ChainAgent
-from app.ai.agents.supervisor import SupervisorAgent, SupervisionStrategy
-from app.ai.agents.learning import LearningAgent
+from app.ai.agents.supervisor import SupervisionStrategy, SupervisorAgent
 
 
 class AgentFactory:
-    _registry: dict[str, Type[Agent]] = {
+    _registry: dict[str, type[Agent]] = {
         "orchestrator": OrchestrationAgent,
         "provisioning": ProvisioningAgent,
         "reactive": ReactiveAgent,
         "coordinator": CoordinatorAgent,
         "chain": ChainAgent,
         "supervisor": SupervisorAgent,
-        "learning": LearningAgent
+        "learning": LearningAgent,
     }
 
     _instances: dict[str, Agent] = {}
 
     @classmethod
-    def create(
-        cls,
-        agent_type: str,
-        context: AgentContext | None = None,
-        **kwargs: Any
-    ) -> Agent:
+    def create(cls, agent_type: str, context: AgentContext | None = None, **kwargs: Any) -> Agent:
         agent_class = cls._registry.get(agent_type)
 
         if not agent_class:
@@ -40,7 +36,7 @@ class AgentFactory:
             return agent_class(
                 user_id=kwargs.get("user_id", "system"),
                 context=context,
-                config=kwargs.get("config")
+                config=kwargs.get("config"),
             )
 
         if agent_type == "supervisor":
@@ -50,7 +46,7 @@ class AgentFactory:
         return agent_class(context=context)
 
     @classmethod
-    def register(cls, name: str, agent_class: Type[Agent]) -> None:
+    def register(cls, name: str, agent_class: type[Agent]) -> None:
         cls._registry[name] = agent_class
 
     @classmethod
@@ -59,7 +55,7 @@ class AgentFactory:
         agent_type: str,
         instance_id: str | None = None,
         context: AgentContext | None = None,
-        **kwargs: Any
+        **kwargs: Any,
     ) -> Agent:
         key = f"{agent_type}:{instance_id or 'default'}"
 
@@ -78,9 +74,7 @@ class AgentFactory:
 
     @classmethod
     def create_pipeline(
-        cls,
-        agents: list[tuple[str, dict[str, Any]]],
-        context: AgentContext | None = None
+        cls, agents: list[tuple[str, dict[str, Any]]], context: AgentContext | None = None
     ) -> ChainAgent:
         chain = ChainAgent(context=context)
 
@@ -88,17 +82,11 @@ class AgentFactory:
             agent = cls.create(agent_type, context, **config)
 
             async def processor(data: Any, bound_agent: Agent = agent) -> Any:
-                goal = data.get("goal", "") if isinstance(
-                    data, dict) else str(data)
+                goal = data.get("goal", "") if isinstance(data, dict) else str(data)
                 result = await bound_agent.run(goal)
                 return result.result if result.success else data
 
-            chain.add_link(
-                ChainLink(
-                    name=f"{agent_type}_link",
-                    processor=processor
-                )
-            )
+            chain.add_link(ChainLink(name=f"{agent_type}_link", processor=processor))
 
         return chain
 
@@ -107,7 +95,7 @@ class AgentFactory:
         cls,
         agent_configs: list[dict[str, Any]],
         strategy: SupervisionStrategy = SupervisionStrategy.LEAST_LOADED,
-        context: AgentContext | None = None
+        context: AgentContext | None = None,
     ) -> SupervisorAgent:
         supervisor = SupervisorAgent(context=context, strategy=strategy)
 
@@ -123,10 +111,7 @@ class AgentFactory:
 
     @classmethod
     def create_with_learning(
-        cls,
-        base_agent_type: str,
-        context: AgentContext | None = None,
-        **kwargs: Any
+        cls, base_agent_type: str, context: AgentContext | None = None, **kwargs: Any
     ) -> CoordinatorAgent:
         coordinator = CoordinatorAgent(context=context)
 
@@ -148,41 +133,34 @@ class AgentFactory:
             environment=context_config.get("environment", "dev"),
             dry_run=context_config.get("dry_run", True),
             timeout_seconds=context_config.get("timeout_seconds", 300.0),
-            metadata=context_config.get("metadata", {})
+            metadata=context_config.get("metadata", {}),
         )
 
         return cls.create(agent_type, context, **config)
 
     @classmethod
-    def create_specialized(
-        cls,
-        specialization: str,
-        context: AgentContext | None = None
-    ) -> Agent:
+    def create_specialized(cls, specialization: str, context: AgentContext | None = None) -> Agent:
         specializations = {
             "infrastructure": {
                 "type": "coordinator",
                 "agents": [
                     {"type": "provisioning", "skills": {"terraform", "bicep"}},
-                    {"type": "reactive", "skills": {"monitoring", "alerting"}}
-                ]
+                    {"type": "reactive", "skills": {"monitoring", "alerting"}},
+                ],
             },
             "deployment": {
                 "type": "supervisor",
                 "strategy": SupervisionStrategy.PRIORITY_BASED,
                 "workers": [
                     {"type": "orchestrator", "priority": 1},
-                    {"type": "provisioning", "priority": 2}
-                ]
+                    {"type": "provisioning", "priority": 2},
+                ],
             },
             "monitoring": {
                 "type": "reactive",
-                "event_handlers": ["cost_threshold", "resource_failure", "security_alert"]
+                "event_handlers": ["cost_threshold", "resource_failure", "security_alert"],
             },
-            "ml_ops": {
-                "type": "learning",
-                "exploration_rate": 0.2
-            }
+            "ml_ops": {"type": "learning", "exploration_rate": 0.2},
         }
 
         spec = specializations.get(specialization)
@@ -197,14 +175,10 @@ class AgentFactory:
             return coordinator
 
         elif specialization == "deployment":
-            supervisor = SupervisorAgent(
-                context=context,
-                strategy=spec["strategy"]
-            )
+            supervisor = SupervisorAgent(context=context, strategy=spec["strategy"])
             for worker_config in spec["workers"]:
                 agent = cls.create(worker_config["type"], context)
-                supervisor.add_worker(
-                    agent, priority=worker_config["priority"])
+                supervisor.add_worker(agent, priority=worker_config["priority"])
             return supervisor
 
         else:

@@ -113,7 +113,7 @@ async def chat(
     async def gen() -> AsyncGenerator[bytes, None]:
         chunk = 2048
         for i in range(0, len(text), chunk):
-            part = text[i: i + chunk]
+            part = text[i : i + chunk]
             yield f"data: {part}\n\n".encode()
             await asyncio.sleep(0)
         yield b"data: [DONE]\n\n"
@@ -158,7 +158,7 @@ async def _stream_plain_chat(req: ChatRequest, user: Any) -> AsyncGenerator[byte
         )
         chunk = 2048
         for i in range(0, len(text), chunk):
-            yield f"data: {text[i: i + chunk]}\n\n".encode()
+            yield f"data: {text[i : i + chunk]}\n\n".encode()
             await asyncio.sleep(0)
         yield b"data: [DONE]\n\n"
         return

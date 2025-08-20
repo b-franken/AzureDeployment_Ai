@@ -1,6 +1,6 @@
+import importlib.machinery
 import sys
 import types
-import importlib.machinery
 
 import pytest
 
@@ -35,4 +35,3 @@ def test_extract_json_object_malformed_json():
     text = '{"tool": "demo", "args": {"a": 1}'  # missing closing brace
     with pytest.raises(ValueError):
         _extract_json_object(text)
-

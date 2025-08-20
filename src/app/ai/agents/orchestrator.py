@@ -1,6 +1,8 @@
 from __future__ import annotations
+
 import asyncio
 from typing import Any
+
 from app.ai.agents.base import Agent, AgentContext
 from app.ai.agents.types import ExecutionPlan, ExecutionResult, PlanStep, StepResult, StepType
 from app.ai.tools_router import maybe_call_tool
@@ -32,18 +34,12 @@ class OrchestrationAgent(Agent[dict[str, Any], dict[str, Any]]):
         """
 
         response = await generate_response(
-            planning_prompt,
-            memory=[],
-            provider="openai",
-            model="gpt-4o"
+            planning_prompt, memory=[], provider="openai", model="gpt-4o"
         )
 
         steps = self._parse_plan_response(response, goal)
 
-        return ExecutionPlan(
-            steps=steps,
-            metadata={"goal": goal, "context": self.context.metadata}
-        )
+        return ExecutionPlan(steps=steps, metadata={"goal": goal, "context": self.context.metadata})
 
     def _parse_plan_response(self, response: str, goal: str) -> list[PlanStep]:
         steps = []
@@ -54,7 +50,7 @@ class OrchestrationAgent(Agent[dict[str, Any], dict[str, Any]]):
                     type=StepType.TOOL,
                     name="validate_requirements",
                     tool="validation_tool",
-                    args={"goal": goal}
+                    args={"goal": goal},
                 )
             )
 
@@ -64,7 +60,7 @@ class OrchestrationAgent(Agent[dict[str, Any], dict[str, Any]]):
                     name="provision_resources",
                     tool="provision_orchestrator",
                     args={"request": goal},
-                    dependencies=["validate_requirements"]
+                    dependencies=["validate_requirements"],
                 )
             )
 
@@ -74,7 +70,7 @@ class OrchestrationAgent(Agent[dict[str, Any], dict[str, Any]]):
                         type=StepType.TOOL,
                         name="verify_deployment",
                         tool="verification_tool",
-                        dependencies=["provision_resources"]
+                        dependencies=["provision_resources"],
                     )
                 )
 
@@ -82,6 +78,7 @@ class OrchestrationAgent(Agent[dict[str, Any], dict[str, Any]]):
 
     async def execute(self, plan: ExecutionPlan) -> ExecutionResult[dict[str, Any]]:
         import time
+
         start_time = time.perf_counter()
 
         step_results = []
@@ -94,7 +91,7 @@ class OrchestrationAgent(Agent[dict[str, Any], dict[str, Any]]):
                         StepResult(
                             step_name=step.name or "unnamed",
                             success=False,
-                            error="Dependencies not satisfied"
+                            error="Dependencies not satisfied",
                         )
                     )
                     continue
@@ -105,14 +102,13 @@ class OrchestrationAgent(Agent[dict[str, Any], dict[str, Any]]):
                 if not result.success and step.type != StepType.MESSAGE:
                     break
 
-            success = all(
-                r.success for r in step_results if r.step_name != "message")
+            success = all(r.success for r in step_results if r.step_name != "message")
 
             return ExecutionResult(
                 success=success,
                 result=execution_state,
                 duration_ms=(time.perf_counter() - start_time) * 1000,
-                step_results=step_results
+                step_results=step_results,
             )
 
         except Exception as e:
@@ -121,15 +117,12 @@ class OrchestrationAgent(Agent[dict[str, Any], dict[str, Any]]):
                 success=False,
                 error=str(e),
                 duration_ms=(time.perf_counter() - start_time) * 1000,
-                step_results=step_results
+                step_results=step_results,
             )
 
-    async def _execute_step(
-        self,
-        step: PlanStep,
-        state: dict[str, Any]
-    ) -> StepResult:
+    async def _execute_step(self, step: PlanStep, state: dict[str, Any]) -> StepResult:
         import time
+
         start_time = time.perf_counter()
 
         try:
@@ -153,13 +146,13 @@ class OrchestrationAgent(Agent[dict[str, Any], dict[str, Any]]):
                 step_name=step.name or step.type.value,
                 success=True,
                 output=output,
-                duration_ms=duration
+                duration_ms=duration,
             )
 
         except Exception as e:
             if step.retry_count < step.max_retries:
                 step.retry_count += 1
-                await asyncio.sleep(2 ** step.retry_count)
+                await asyncio.sleep(2**step.retry_count)
                 return await self._execute_step(step, state)
 
             return StepResult(
@@ -167,14 +160,10 @@ class OrchestrationAgent(Agent[dict[str, Any], dict[str, Any]]):
                 success=False,
                 error=str(e),
                 duration_ms=(time.perf_counter() - start_time) * 1000,
-                retries_used=step.retry_count
+                retries_used=step.retry_count,
             )
 
-    async def _execute_tool(
-        self,
-        step: PlanStep,
-        state: dict[str, Any]
-    ) -> Any:
+    async def _execute_tool(self, step: PlanStep, state: dict[str, Any]) -> Any:
         if not step.tool:
             raise ValueError("Tool not specified")
 
@@ -190,7 +179,7 @@ class OrchestrationAgent(Agent[dict[str, Any], dict[str, Any]]):
             enable_tools=True,
             preferred_tool=step.tool,
             context=self.context,
-            return_json=True
+            return_json=True,
         )
 
         if self.context.enable_caching:
@@ -198,11 +187,7 @@ class OrchestrationAgent(Agent[dict[str, Any], dict[str, Any]]):
 
         return result
 
-    async def _execute_parallel(
-        self,
-        step: PlanStep,
-        state: dict[str, Any]
-    ) -> list[Any]:
+    async def _execute_parallel(self, step: PlanStep, state: dict[str, Any]) -> list[Any]:
         tasks = []
         for sub_step in step.args.get("steps", []):
             tasks.append(self._execute_step(sub_step, state))
@@ -210,11 +195,7 @@ class OrchestrationAgent(Agent[dict[str, Any], dict[str, Any]]):
         results = await asyncio.gather(*tasks, return_exceptions=True)
         return [r for r in results if not isinstance(r, Exception)]
 
-    async def _execute_conditional(
-        self,
-        step: PlanStep,
-        state: dict[str, Any]
-    ) -> Any:
+    async def _execute_conditional(self, step: PlanStep, state: dict[str, Any]) -> Any:
         condition = step.conditions or {}
         if self._evaluate_condition(condition, state):
             return await self._execute_step(step.args["then_step"], state)
@@ -222,10 +203,7 @@ class OrchestrationAgent(Agent[dict[str, Any], dict[str, Any]]):
             return await self._execute_step(step.args["else_step"], state)
         return None
 
-    def _order_steps_by_dependencies(
-        self,
-        steps: list[PlanStep]
-    ) -> list[PlanStep]:
+    def _order_steps_by_dependencies(self, steps: list[PlanStep]) -> list[PlanStep]:
         ordered = []
         completed = set()
 
@@ -234,10 +212,7 @@ class OrchestrationAgent(Agent[dict[str, Any], dict[str, Any]]):
                 if step in ordered:
                     continue
 
-                deps_satisfied = all(
-                    dep in completed
-                    for dep in step.dependencies
-                )
+                deps_satisfied = all(dep in completed for dep in step.dependencies)
 
                 if deps_satisfied:
                     ordered.append(step)
@@ -246,27 +221,12 @@ class OrchestrationAgent(Agent[dict[str, Any], dict[str, Any]]):
 
         return ordered
 
-    def _check_dependencies(
-        self,
-        step: PlanStep,
-        results: list[StepResult]
-    ) -> bool:
-        completed_steps = {
-            r.step_name
-            for r in results
-            if r.success
-        }
+    def _check_dependencies(self, step: PlanStep, results: list[StepResult]) -> bool:
+        completed_steps = {r.step_name for r in results if r.success}
 
-        return all(
-            dep in completed_steps
-            for dep in step.dependencies
-        )
+        return all(dep in completed_steps for dep in step.dependencies)
 
-    def _resolve_args(
-        self,
-        args: dict[str, Any],
-        state: dict[str, Any]
-    ) -> dict[str, Any]:
+    def _resolve_args(self, args: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
         resolved = {}
         for key, value in args.items():
             if isinstance(value, str) and value.startswith("$"):
@@ -278,11 +238,7 @@ class OrchestrationAgent(Agent[dict[str, Any], dict[str, Any]]):
                 resolved[key] = value
         return resolved
 
-    def _evaluate_condition(
-        self,
-        condition: dict[str, Any],
-        state: dict[str, Any]
-    ) -> bool:
+    def _evaluate_condition(self, condition: dict[str, Any], state: dict[str, Any]) -> bool:
         if "equals" in condition:
             return state.get(condition["field"]) == condition["equals"]
         if "not_equals" in condition:

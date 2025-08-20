@@ -1,24 +1,26 @@
-import os
-from typing import Sequence, Optional
-from azure.identity import (
-    ClientSecretCredential,
-    ManagedIdentityCredential,
-    AzureCliCredential,
-    DeviceCodeCredential,
-    AzureDeveloperCliCredential,
-    WorkloadIdentityCredential,
-    EnvironmentCredential,
-    DefaultAzureCredential,
-    ChainedTokenCredential,
-)
-from azure.core.credentials import TokenCredential
-from app.core.config import settings, AzureConfig
 import logging
+import os
+from collections.abc import Sequence
+
+from azure.core.credentials import TokenCredential
+from azure.identity import (
+    AzureCliCredential,
+    AzureDeveloperCliCredential,
+    ChainedTokenCredential,
+    ClientSecretCredential,
+    DefaultAzureCredential,
+    DeviceCodeCredential,
+    EnvironmentCredential,
+    ManagedIdentityCredential,
+    WorkloadIdentityCredential,
+)
+
+from app.core.config import AzureConfig, settings
 
 logger = logging.getLogger(__name__)
 
 _ARM_SCOPE = "https://management.azure.com/.default"
-_CREDENTIAL_CACHE: Optional[TokenCredential] = None
+_CREDENTIAL_CACHE: TokenCredential | None = None
 
 
 def _setup_environment() -> None:
@@ -28,11 +30,11 @@ def _setup_environment() -> None:
     if settings.azure.client_id:
         os.environ.setdefault("AZURE_CLIENT_ID", settings.azure.client_id)
     if settings.azure.client_secret:
-        os.environ.setdefault("AZURE_CLIENT_SECRET",
-                              settings.azure.client_secret.get_secret_value())
+        os.environ.setdefault(
+            "AZURE_CLIENT_SECRET", settings.azure.client_secret.get_secret_value()
+        )
     if settings.azure.subscription_id:
-        os.environ.setdefault("AZURE_SUBSCRIPTION_ID",
-                              settings.azure.subscription_id)
+        os.environ.setdefault("AZURE_SUBSCRIPTION_ID", settings.azure.subscription_id)
 
 
 def _authority_host(cfg: AzureConfig) -> str:
@@ -44,12 +46,12 @@ def _authority_host(cfg: AzureConfig) -> str:
         "public": "https://login.microsoftonline.com",
         "usgov": "https://login.microsoftonline.us",
         "china": "https://login.chinacloudapi.cn",
-        "germany": "https://login.microsoftonline.de"
+        "germany": "https://login.microsoftonline.de",
     }
     return cloud_hosts.get(cfg.cloud, "https://login.microsoftonline.com")
 
 
-def build_credential(cfg: Optional[AzureConfig] = None, use_cache: bool = True) -> TokenCredential:
+def build_credential(cfg: AzureConfig | None = None, use_cache: bool = True) -> TokenCredential:
     """
     Build Azure credential based on configuration.
 
@@ -72,7 +74,7 @@ def build_credential(cfg: Optional[AzureConfig] = None, use_cache: bool = True) 
     _setup_environment()
 
     authority = _authority_host(cfg)
-    credential: Optional[TokenCredential] = None
+    credential: TokenCredential | None = None
 
     try:
         if cfg.auth_mode == "service_principal":
@@ -89,9 +91,7 @@ def build_credential(cfg: Optional[AzureConfig] = None, use_cache: bool = True) 
             logger.info("Using service principal authentication")
 
         elif cfg.auth_mode == "managed_identity":
-            credential = ManagedIdentityCredential(
-                client_id=cfg.user_assigned_identity_client_id
-            )
+            credential = ManagedIdentityCredential(client_id=cfg.user_assigned_identity_client_id)
             logger.info("Using managed identity authentication")
 
         elif cfg.auth_mode == "azure_cli":
@@ -100,12 +100,9 @@ def build_credential(cfg: Optional[AzureConfig] = None, use_cache: bool = True) 
 
         elif cfg.auth_mode == "device_code":
             if not cfg.tenant_id:
-                raise ValueError(
-                    "tenant_id is required for device_code authentication")
+                raise ValueError("tenant_id is required for device_code authentication")
             credential = DeviceCodeCredential(
-                tenant_id=cfg.tenant_id,
-                client_id=cfg.client_id,
-                authority=authority
+                tenant_id=cfg.tenant_id, client_id=cfg.client_id, authority=authority
             )
             logger.info("Using device code authentication")
 
@@ -152,8 +149,7 @@ def build_credential(cfg: Optional[AzureConfig] = None, use_cache: bool = True) 
 
             if credentials:
                 credential = ChainedTokenCredential(*credentials)
-                logger.info(
-                    f"Using chained credential with {len(credentials)} providers")
+                logger.info(f"Using chained credential with {len(credentials)} providers")
             else:
                 credential = DefaultAzureCredential(authority=authority)
                 logger.info("Using default Azure credential")
@@ -181,7 +177,7 @@ def clear_credential_cache() -> None:
     logger.info("Credential cache cleared")
 
 
-async def test_credential(credential: Optional[TokenCredential] = None) -> bool:
+async def test_credential(credential: TokenCredential | None = None) -> bool:
     """
     Test if the credential can acquire a token.
 

@@ -1,11 +1,14 @@
 from __future__ import annotations
+
 import asyncio
-from typing import Any, Callable, Awaitable
-from enum import Enum
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
+from typing import Any
+
 from app.ai.agents.base import Agent, AgentContext
-from app.ai.agents.types import ExecutionPlan, ExecutionResult, PlanStep, StepType, StepResult
+from app.ai.agents.types import ExecutionPlan, ExecutionResult, PlanStep, StepResult, StepType
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -80,7 +83,7 @@ class ReactiveAgent(Agent[dict[str, Any], dict[str, Any]]):
 
             try:
                 await asyncio.wait_for(self._worker_task, timeout=5.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 self._worker_task.cancel()
                 try:
                     await self._worker_task
@@ -95,17 +98,14 @@ class ReactiveAgent(Agent[dict[str, Any], dict[str, Any]]):
         """Main event processing loop."""
         while self._running:
             try:
-                event = await asyncio.wait_for(
-                    self.event_queue.get(),
-                    timeout=1.0
-                )
+                event = await asyncio.wait_for(self.event_queue.get(), timeout=1.0)
 
                 if event.payload.get("stop") and event.type == EventType.HEALTH_CHECK:
                     break
 
                 await self._handle_event(event)
 
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
             except asyncio.CancelledError:
                 break
@@ -117,19 +117,17 @@ class ReactiveAgent(Agent[dict[str, Any], dict[str, Any]]):
         handlers = self.event_handlers.get(event.type, [])
 
         if not handlers:
-            logger.debug(
-                f"No handlers registered for event type: {event.type}")
+            logger.debug(f"No handlers registered for event type: {event.type}")
             return
 
-        tasks = [self._safe_handler_call(handler, event)
-                 for handler in handlers]
+        tasks = [self._safe_handler_call(handler, event) for handler in handlers]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         for i, result in enumerate(results):
             if isinstance(result, Exception):
                 logger.error(
                     f"Handler {handlers[i].__name__} failed for event {event.type}: {result}",
-                    exc_info=result
+                    exc_info=result,
                 )
 
     async def _safe_handler_call(self, handler: EventHandler, event: Event) -> None:
@@ -137,8 +135,7 @@ class ReactiveAgent(Agent[dict[str, Any], dict[str, Any]]):
         try:
             await handler(event)
         except Exception as e:
-            logger.error(
-                f"Event handler {handler.__name__} raised exception: {e}")
+            logger.error(f"Event handler {handler.__name__} raised exception: {e}")
             raise
 
     async def plan(self, goal: str) -> ExecutionPlan:
@@ -152,7 +149,7 @@ class ReactiveAgent(Agent[dict[str, Any], dict[str, Any]]):
                     name="setup_monitoring",
                     description="Set up event monitoring",
                     tool="monitoring_setup",
-                    args={"goal": goal}
+                    args={"goal": goal},
                 )
             )
 
@@ -163,18 +160,16 @@ class ReactiveAgent(Agent[dict[str, Any], dict[str, Any]]):
                     name="configure_alerts",
                     description="Configure alert rules",
                     tool="alert_configuration",
-                    args={"goal": goal}
+                    args={"goal": goal},
                 )
             )
 
-        return ExecutionPlan(
-            steps=steps,
-            metadata={"reactive": True, "goal": goal}
-        )
+        return ExecutionPlan(steps=steps, metadata={"reactive": True, "goal": goal})
 
     async def execute(self, plan: ExecutionPlan) -> ExecutionResult[dict[str, Any]]:
         """Execute the reactive monitoring plan."""
         import time
+
         start_time = time.perf_counter()
 
         await self.start()
@@ -190,16 +185,12 @@ class ReactiveAgent(Agent[dict[str, Any], dict[str, Any]]):
                         StepResult(
                             step_name=step.name or "unknown",
                             success=True,
-                            output={"status": "configured", "step": step.name}
+                            output={"status": "configured", "step": step.name},
                         )
                     )
             except Exception as e:
                 step_results.append(
-                    StepResult(
-                        step_name=step.name or "unknown",
-                        success=False,
-                        error=str(e)
-                    )
+                    StepResult(step_name=step.name or "unknown", success=False, error=str(e))
                 )
 
         success = all(r.success for r in step_results)
@@ -211,8 +202,8 @@ class ReactiveAgent(Agent[dict[str, Any], dict[str, Any]]):
                 "registered_handlers": {
                     event_type.value: len(handlers)
                     for event_type, handlers in self.event_handlers.items()
-                }
+                },
             },
             duration_ms=(time.perf_counter() - start_time) * 1000,
-            step_results=step_results
+            step_results=step_results,
         )

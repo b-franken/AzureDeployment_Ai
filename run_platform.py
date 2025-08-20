@@ -1,11 +1,11 @@
 import asyncio
-import os
-import sys
-import signal
 import logging
-from pathlib import Path
-import time
+import os
+import signal
 import socket
+import sys
+import time
+from pathlib import Path
 
 
 def _detect_repo_root() -> Path:
@@ -21,8 +21,9 @@ SRC_PATH = REPO_ROOT / "src"
 if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
 
-logging.basicConfig(level=logging.INFO,
-                    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 
@@ -40,6 +41,7 @@ class PlatformLauncher:
         os.environ.setdefault("OLLAMA_MODEL", "llama3.1")
         if not os.getenv("JWT_SECRET_KEY"):
             from cryptography.fernet import Fernet
+
             os.environ["JWT_SECRET_KEY"] = Fernet.generate_key().decode()
         os.environ.setdefault("MAX_MEMORY", "25")
         os.environ.setdefault("MAX_TOTAL_MEMORY", "100")
@@ -55,11 +57,11 @@ class PlatformLauncher:
     async def check_ollama(self) -> bool:
         try:
             import httpx
+
             async with httpx.AsyncClient() as client:
                 r = await client.get("http://localhost:11434/api/tags")
             if r.status_code == 200 and r.json().get("models"):
-                logger.info("✓ Ollama is running with %d models",
-                            len(r.json().get("models", [])))
+                logger.info("✓ Ollama is running with %d models", len(r.json().get("models", [])))
                 return True
             logger.warning("⚠️  Ollama is running but has no models")
             logger.info("  Run: ollama pull llama3.1")
@@ -82,8 +84,7 @@ class PlatformLauncher:
             s.close()
 
         env = os.environ.copy()
-        env["PYTHONPATH"] = os.pathsep.join(
-            [str(SRC_PATH), env.get("PYTHONPATH", "")])
+        env["PYTHONPATH"] = os.pathsep.join([str(SRC_PATH), env.get("PYTHONPATH", "")])
 
         try:
             process = await asyncio.create_subprocess_exec(
@@ -103,6 +104,7 @@ class PlatformLauncher:
             self.processes["api"] = process
 
             import httpx
+
             deadline = time.time() + 40
             async with httpx.AsyncClient() as client:
                 url = f"http://{host}:{port}/api/health"
@@ -114,8 +116,7 @@ class PlatformLauncher:
                         r = await client.get(url, timeout=1.5)
                         if r.status_code == 200:
                             logger.info("✓ API server started successfully")
-                            logger.info(
-                                "  API docs: http://%s:%s/docs", host, port)
+                            logger.info("  API docs: http://%s:%s/docs", host, port)
                             return True
                     except Exception:
                         await asyncio.sleep(1)
@@ -129,8 +130,7 @@ class PlatformLauncher:
         logger.info("Starting MCP server...")
         env = os.environ.copy()
         env["MCP_TRANSPORT"] = env.get("MCP_TRANSPORT", "stdio")
-        env["PYTHONPATH"] = os.pathsep.join(
-            [str(SRC_PATH), env.get("PYTHONPATH", "")])
+        env["PYTHONPATH"] = os.pathsep.join([str(SRC_PATH), env.get("PYTHONPATH", "")])
         try:
             process = await asyncio.create_subprocess_exec(
                 sys.executable,
@@ -152,12 +152,11 @@ class PlatformLauncher:
         logger.info("Testing basic functionality...")
         try:
             from app.ai.agents import AgentFactory
-            from app.ai.agents.types import AgentContext
             from app.ai.agents.chain import ChainLink
+            from app.ai.agents.types import AgentContext
 
             factory = AgentFactory()
-            context = AgentContext(user_id="test_user",
-                                   environment="dev", dry_run=True)
+            context = AgentContext(user_id="test_user", environment="dev", dry_run=True)
             agent = factory.create("chain", context=context)
 
             async def test_processor(data):
@@ -184,8 +183,7 @@ class PlatformLauncher:
         self.setup_minimal_environment()
 
         if not await self.check_ollama():
-            logger.warning(
-                "Running without Ollama - some features may be limited")
+            logger.warning("Running without Ollama - some features may be limited")
 
         await self.test_basic_functionality()
 
@@ -234,7 +232,7 @@ class PlatformLauncher:
                     process.terminate()
                     try:
                         await asyncio.wait_for(process.wait(), timeout=5.0)
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         logger.warning("Force killing %s", name)
                         process.kill()
                 else:
@@ -265,6 +263,7 @@ async def main() -> bool:
         logger.exception("Fatal error: %s", e)
         await launcher.shutdown()
         return False
+
 
 if __name__ == "__main__":
     try:

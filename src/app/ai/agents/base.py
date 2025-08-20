@@ -1,13 +1,15 @@
 from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import Any, Generic, TypeVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from app.ai.agents.types import ExecutionPlan, ExecutionResult, AgentContext
+from typing import Generic, TypeVar
 
-TState = TypeVar('TState')
-TResult = TypeVar('TResult')
+from app.ai.agents.types import AgentContext, ExecutionPlan, ExecutionResult
+
+TState = TypeVar("TState")
+TResult = TypeVar("TResult")
 
 
 class AgentStatus(Enum):
@@ -61,9 +63,7 @@ class Agent(ABC, Generic[TState, TResult]):
             execution_time = (time.perf_counter() - execution_start) * 1000
 
             self._update_metrics(
-                success=result.success,
-                planning_time=planning_time,
-                execution_time=execution_time
+                success=result.success, planning_time=planning_time, execution_time=execution_time
             )
 
             self.status = AgentStatus.COMPLETED if result.success else AgentStatus.FAILED
@@ -72,17 +72,10 @@ class Agent(ABC, Generic[TState, TResult]):
         except Exception as e:
             self.status = AgentStatus.FAILED
             self._update_metrics(success=False)
-            return ExecutionResult(
-                success=False,
-                error=str(e),
-                execution_time=datetime.utcnow()
-            )
+            return ExecutionResult(success=False, error=str(e), execution_time=datetime.utcnow())
 
     def _update_metrics(
-        self,
-        success: bool,
-        planning_time: float | None = None,
-        execution_time: float | None = None
+        self, success: bool, planning_time: float | None = None, execution_time: float | None = None
     ) -> None:
         self.metrics.total_executions += 1
         if success:
@@ -93,15 +86,13 @@ class Agent(ABC, Generic[TState, TResult]):
         if planning_time is not None:
             alpha = 0.1
             self.metrics.average_planning_time_ms = (
-                alpha * planning_time +
-                (1 - alpha) * self.metrics.average_planning_time_ms
+                alpha * planning_time + (1 - alpha) * self.metrics.average_planning_time_ms
             )
 
         if execution_time is not None:
             alpha = 0.1
             self.metrics.average_execution_time_ms = (
-                alpha * execution_time +
-                (1 - alpha) * self.metrics.average_execution_time_ms
+                alpha * execution_time + (1 - alpha) * self.metrics.average_execution_time_ms
             )
 
         self.metrics.last_execution_time = datetime.utcnow()

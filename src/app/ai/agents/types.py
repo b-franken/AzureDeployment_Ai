@@ -1,10 +1,11 @@
 from __future__ import annotations
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any, Generic, Literal, TypeVar
 
-TResult = TypeVar('TResult')
+TResult = TypeVar("TResult")
 
 
 class StepType(Enum):

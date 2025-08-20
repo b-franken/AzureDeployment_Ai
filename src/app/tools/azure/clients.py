@@ -33,15 +33,14 @@ from azure.mgmt.sql import SqlManagementClient
 from azure.mgmt.storage import StorageManagementClient
 from azure.mgmt.web import WebSiteManagementClient
 
-from app.core.config import settings
 from app.core.azure_auth import build_credential
+from app.core.config import settings
 
 
 def _sub_id(explicit: str | None) -> str:
     sid = explicit or settings.azure.subscription_id
     if not sid:
-        raise RuntimeError(
-            "subscription_id missing and no subscription_id provided")
+        raise RuntimeError("subscription_id missing and no subscription_id provided")
     return sid
 
 

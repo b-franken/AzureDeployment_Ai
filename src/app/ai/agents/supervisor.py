@@ -1,10 +1,12 @@
 from __future__ import annotations
+
 import asyncio
-from typing import Any
-from enum import Enum
 from dataclasses import dataclass, field
-from app.ai.agents.base import Agent, AgentContext, AgentStatus
-from app.ai.agents.types import ExecutionPlan, ExecutionResult, PlanStep, StepType, StepResult
+from enum import Enum
+from typing import Any
+
+from app.ai.agents.base import Agent, AgentContext
+from app.ai.agents.types import ExecutionPlan, ExecutionResult, PlanStep, StepResult, StepType
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -30,26 +32,16 @@ class SupervisorAgent(Agent[dict[str, Any], dict[str, Any]]):
     def __init__(
         self,
         context: AgentContext | None = None,
-        strategy: SupervisionStrategy = SupervisionStrategy.LEAST_LOADED
+        strategy: SupervisionStrategy = SupervisionStrategy.LEAST_LOADED,
     ):
         super().__init__(context)
         self.strategy = strategy
         self.workers: list[WorkerAgent] = []
-        self._task_queue: asyncio.Queue[tuple[str,
-                                              dict[str, Any]]] = asyncio.Queue()
+        self._task_queue: asyncio.Queue[tuple[str, dict[str, Any]]] = asyncio.Queue()
         self._results: dict[str, Any] = {}
 
-    def add_worker(
-        self,
-        agent: Agent,
-        skills: set[str] | None = None,
-        priority: int = 0
-    ) -> None:
-        worker = WorkerAgent(
-            agent=agent,
-            skills=skills or set(),
-            priority=priority
-        )
+    def add_worker(self, agent: Agent, skills: set[str] | None = None, priority: int = 0) -> None:
+        worker = WorkerAgent(agent=agent, skills=skills or set(), priority=priority)
         self.workers.append(worker)
 
     async def plan(self, goal: str) -> ExecutionPlan:
@@ -58,7 +50,7 @@ class SupervisorAgent(Agent[dict[str, Any], dict[str, Any]]):
         analysis = await generate_response(
             f"Break down this goal into subtasks and identify required skills: {goal}",
             memory=[],
-            provider="openai"
+            provider="openai",
         )
 
         tasks = self._extract_tasks(analysis, goal)
@@ -69,55 +61,46 @@ class SupervisorAgent(Agent[dict[str, Any], dict[str, Any]]):
                 type=StepType.PARALLEL,
                 name=f"task_{task_id}",
                 description=task["description"],
-                args={"task": task}
+                args={"task": task},
             )
             steps.append(step)
 
-        return ExecutionPlan(
-            steps=steps,
-            metadata={"total_tasks": len(tasks)}
-        )
+        return ExecutionPlan(steps=steps, metadata={"total_tasks": len(tasks)})
 
     def _extract_tasks(self, analysis: str, goal: str) -> list[dict[str, Any]]:
         tasks = []
 
         if "provision" in goal.lower():
-            tasks.append({
-                "description": "Validate provisioning request",
-                "skills": {"validation"},
-                "priority": 1
-            })
-            tasks.append({
-                "description": "Execute provisioning",
-                "skills": {"provisioning"},
-                "priority": 2
-            })
+            tasks.append(
+                {
+                    "description": "Validate provisioning request",
+                    "skills": {"validation"},
+                    "priority": 1,
+                }
+            )
+            tasks.append(
+                {"description": "Execute provisioning", "skills": {"provisioning"}, "priority": 2}
+            )
 
         if "monitor" in goal.lower():
-            tasks.append({
-                "description": "Set up monitoring",
-                "skills": {"monitoring"},
-                "priority": 3
-            })
+            tasks.append(
+                {"description": "Set up monitoring", "skills": {"monitoring"}, "priority": 3}
+            )
 
         if not tasks:
-            tasks.append({
-                "description": goal,
-                "skills": set(),
-                "priority": 0
-            })
+            tasks.append({"description": goal, "skills": set(), "priority": 0})
 
         return tasks
 
     async def execute(self, plan: ExecutionPlan) -> ExecutionResult[dict[str, Any]]:
         import time
+
         start_time = time.perf_counter()
 
         tasks = []
         for step in plan.steps:
             task_data = step.args.get("task", {})
-            tasks.append(self._assign_and_execute(
-                step.name or "task", task_data))
+            tasks.append(self._assign_and_execute(step.name or "task", task_data))
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -125,20 +108,10 @@ class SupervisorAgent(Agent[dict[str, Any], dict[str, Any]]):
         for i, result in enumerate(results):
             if isinstance(result, Exception):
                 step_results.append(
-                    StepResult(
-                        step_name=f"task_{i}",
-                        success=False,
-                        error=str(result)
-                    )
+                    StepResult(step_name=f"task_{i}", success=False, error=str(result))
                 )
             else:
-                step_results.append(
-                    StepResult(
-                        step_name=f"task_{i}",
-                        success=True,
-                        output=result
-                    )
-                )
+                step_results.append(StepResult(step_name=f"task_{i}", success=True, output=result))
 
         success = all(not isinstance(r, Exception) for r in results)
 
@@ -146,14 +119,10 @@ class SupervisorAgent(Agent[dict[str, Any], dict[str, Any]]):
             success=success,
             result={"tasks": results},
             duration_ms=(time.perf_counter() - start_time) * 1000,
-            step_results=step_results
+            step_results=step_results,
         )
 
-    async def _assign_and_execute(
-        self,
-        task_id: str,
-        task_data: dict[str, Any]
-    ) -> Any:
+    async def _assign_and_execute(self, task_id: str, task_data: dict[str, Any]) -> Any:
         worker = self._select_worker(task_data)
 
         if not worker:
@@ -172,7 +141,8 @@ class SupervisorAgent(Agent[dict[str, Any], dict[str, Any]]):
         required_skills = task_data.get("skills", set())
 
         eligible_workers = [
-            w for w in self.workers
+            w
+            for w in self.workers
             if w.current_load < w.max_concurrent
             and (not required_skills or required_skills.intersection(w.skills))
         ]
@@ -192,18 +162,13 @@ class SupervisorAgent(Agent[dict[str, Any], dict[str, Any]]):
         elif self.strategy == SupervisionStrategy.SKILL_BASED:
             if required_skills:
                 return max(
-                    eligible_workers,
-                    key=lambda w: len(required_skills.intersection(w.skills))
+                    eligible_workers, key=lambda w: len(required_skills.intersection(w.skills))
                 )
             return eligible_workers[0]
 
         return eligible_workers[0]
 
-    async def _execute_with_worker(
-        self,
-        worker: Agent,
-        task_data: dict[str, Any]
-    ) -> Any:
+    async def _execute_with_worker(self, worker: Agent, task_data: dict[str, Any]) -> Any:
         goal = task_data.get("description", "Execute task")
         result = await worker.run(goal)
         return result.result if result.success else None

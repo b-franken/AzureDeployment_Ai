@@ -5,9 +5,10 @@ from datetime import datetime
 from typing import Any, cast
 
 import jwt
-from app.core.config import API_APP_ID_URI, ISSUER, JWKS_URL
 from fastapi import HTTPException, Request
 from jwt import PyJWK, PyJWKClient, PyJWTError
+
+from app.core.config import API_APP_ID_URI, ISSUER, JWKS_URL
 
 _jwks_client: PyJWKClient | None = None
 

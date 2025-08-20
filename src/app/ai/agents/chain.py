@@ -1,8 +1,11 @@
 from __future__ import annotations
-from typing import Any, Callable, Awaitable
+
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from typing import Any
+
 from app.ai.agents.base import Agent, AgentContext
-from app.ai.agents.types import ExecutionPlan, ExecutionResult, PlanStep, StepType, StepResult
+from app.ai.agents.types import ExecutionPlan, ExecutionResult, PlanStep, StepResult, StepType
 
 
 @dataclass
@@ -33,19 +36,15 @@ class ChainAgent(Agent[list[ChainLink], Any]):
 
         for link in self.links:
             step = PlanStep(
-                type=StepType.SEQUENTIAL,
-                name=link.name,
-                description=f"Process: {link.name}"
+                type=StepType.SEQUENTIAL, name=link.name, description=f"Process: {link.name}"
             )
             steps.append(step)
 
-        return ExecutionPlan(
-            steps=steps,
-            metadata={"chain_length": len(self.links)}
-        )
+        return ExecutionPlan(steps=steps, metadata={"chain_length": len(self.links)})
 
     async def execute(self, plan: ExecutionPlan) -> ExecutionResult[Any]:
         import time
+
         start_time = time.perf_counter()
 
         current_value = plan.metadata.get("initial_value", {})
@@ -68,11 +67,7 @@ class ChainAgent(Agent[list[ChainLink], Any]):
                     current_value = result
 
                     step_results.append(
-                        StepResult(
-                            step_name=link.name,
-                            success=True,
-                            output=result
-                        )
+                        StepResult(step_name=link.name, success=True, output=result)
                     )
 
                 except Exception as e:
@@ -83,7 +78,7 @@ class ChainAgent(Agent[list[ChainLink], Any]):
                                 step_name=link.name,
                                 success=True,
                                 output=current_value,
-                                error=f"Handled: {str(e)}"
+                                error=f"Handled: {str(e)}",
                             )
                         )
                     else:
@@ -93,7 +88,7 @@ class ChainAgent(Agent[list[ChainLink], Any]):
                 success=True,
                 result=current_value,
                 duration_ms=(time.perf_counter() - start_time) * 1000,
-                step_results=step_results
+                step_results=step_results,
             )
 
         except Exception as e:
@@ -101,5 +96,5 @@ class ChainAgent(Agent[list[ChainLink], Any]):
                 success=False,
                 error=str(e),
                 duration_ms=(time.perf_counter() - start_time) * 1000,
-                step_results=step_results
+                step_results=step_results,
             )

@@ -109,6 +109,7 @@ def _extract_json_object(text: str) -> dict[str, object] | None:
         logger.debug("Failed to parse JSON object: %s", exc)
         return None
 
+
 async def _log_request(user_input: str, context: ToolExecutionContext | None) -> None:
     if not context or not context.audit_enabled or not context.audit_logger:
         return

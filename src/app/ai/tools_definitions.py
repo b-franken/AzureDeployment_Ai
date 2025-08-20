@@ -45,6 +45,8 @@ def build_openai_tools() -> list[dict[str, object]]:
         try:
             tools.append(_to_openai_tool_schema(t.name, t.description, t.schema))
         except Exception as exc:
-            logger.debug("Failed to build schema for tool %s: %s", getattr(t, "name", "unknown"), exc)
+            logger.debug(
+                "Failed to build schema for tool %s: %s", getattr(t, "name", "unknown"), exc
+            )
             continue
     return tools

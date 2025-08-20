@@ -1,5 +1,5 @@
 from __future__ import annotations
-import asyncio
+
 from app.ai.agents.provisioning import ProvisioningAgent, ProvisioningAgentConfig
 from app.ai.tools_router import ToolExecutionContext
 
@@ -13,10 +13,6 @@ async def run_provisioning(deployment_id: str) -> None:
         environment="dev",
         correlation_id=deployment_id,
     )
-    agent = ProvisioningAgent(
-        user_id="system",
-        context=ctx,
-        config=ProvisioningAgentConfig()
-    )
+    agent = ProvisioningAgent(user_id="system", context=ctx, config=ProvisioningAgentConfig())
 
     await agent.run_provisioning(deployment_id)

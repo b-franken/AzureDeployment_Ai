@@ -96,16 +96,18 @@ class LoggerFactory:
         install_log_record_sanitizer()
 
         log_level = getattr(logging, level.upper(), logging.INFO)
-        renderer = structlog.processors.JSONRenderer(
-        ) if fmt == "json" else structlog.dev.ConsoleRenderer()
+        renderer = (
+            structlog.processors.JSONRenderer()
+            if fmt == "json"
+            else structlog.dev.ConsoleRenderer()
+        )
         pre_chain_raw = [
             merge_contextvars,
             structlog.stdlib.add_logger_name,
             structlog.stdlib.add_log_level,
             structlog.processors.TimeStamper(fmt="iso", key="@timestamp"),
         ]
-        pre_chain: Sequence[PreProcessor] = cast(
-            Sequence[PreProcessor], pre_chain_raw)
+        pre_chain: Sequence[PreProcessor] = cast(Sequence[PreProcessor], pre_chain_raw)
 
         structlog.configure(
             processors=[
@@ -129,8 +131,7 @@ class LoggerFactory:
         root_logger.handlers.clear()
 
         sanitizer_filter = OTelSanitizingFilter()
-        formatter = ProcessorFormatter(
-            processor=renderer, foreign_pre_chain=pre_chain)
+        formatter = ProcessorFormatter(processor=renderer, foreign_pre_chain=pre_chain)
 
         if enable_console:
             console_handler = logging.StreamHandler(sys.stdout)
@@ -143,11 +144,13 @@ class LoggerFactory:
             log_path = Path(log_file)
             log_path.parent.mkdir(parents=True, exist_ok=True)
             if max_bytes and max_bytes > 0:
-                file_handler: logging.handlers.BaseRotatingHandler = logging.handlers.RotatingFileHandler(
-                    str(log_path),
-                    maxBytes=max_bytes,
-                    backupCount=retention,
-                    encoding="utf-8",
+                file_handler: logging.handlers.BaseRotatingHandler = (
+                    logging.handlers.RotatingFileHandler(
+                        str(log_path),
+                        maxBytes=max_bytes,
+                        backupCount=retention,
+                        encoding="utf-8",
+                    )
                 )
             else:
                 file_handler = logging.handlers.TimedRotatingFileHandler(
@@ -168,9 +171,9 @@ class LoggerFactory:
             bind_contextvars(**context)
 
         logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(
-            logging.WARNING)
-        logging.getLogger("azure.monitor.opentelemetry").setLevel(
-            logging.WARNING)
+            logging.WARNING
+        )
+        logging.getLogger("azure.monitor.opentelemetry").setLevel(logging.WARNING)
 
         self._configured = True
 
@@ -350,11 +353,11 @@ def clear_context() -> None:
 
 
 __all__ = [
-    'configure_logging',
-    'get_logger',
-    'add_context',
-    'clear_context',
-    'LoggerFactory',
-    'LoggingMiddleware',
-    'AuditLogger',
+    "configure_logging",
+    "get_logger",
+    "add_context",
+    "clear_context",
+    "LoggerFactory",
+    "LoggingMiddleware",
+    "AuditLogger",
 ]

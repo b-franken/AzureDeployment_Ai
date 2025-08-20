@@ -13,9 +13,7 @@ def test_run_success(tmp_path: Path) -> None:
 
 
 def test_run_failure(tmp_path: Path) -> None:
-    code, out = asyncio.run(
-        _run(["bash", "-c", "echo -n fail; exit 1"], tmp_path, timeout=5)
-    )
+    code, out = asyncio.run(_run(["bash", "-c", "echo -n fail; exit 1"], tmp_path, timeout=5))
     assert code != 0
     assert "fail" in out
 

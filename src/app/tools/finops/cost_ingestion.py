@@ -77,8 +77,7 @@ class CostIngestionService:
                 "subscription_id is required to use the ConsumptionManagementClient"
             )
         if self._consumption_client is None or self._consumption_client_sub_id != sub_id:
-            self._consumption_client = ConsumptionManagementClient(
-                self._credential, sub_id)
+            self._consumption_client = ConsumptionManagementClient(self._credential, sub_id)
             self._consumption_client_sub_id = sub_id
         return self._consumption_client
 
@@ -93,6 +92,7 @@ class CostIngestionService:
         filter_expression: str | None = None,
     ) -> list[dict[str, Any]]:
         import time
+
         cache_key = (
             f"usage:{scope}:{start_date}:{end_date}:{granularity}:{group_by}:{filter_expression}"
         )
@@ -109,8 +109,7 @@ class CostIngestionService:
             },
         )
         if group_by:
-            dataset.grouping = [QueryGrouping(
-                type="Dimension", name=dim) for dim in group_by]
+            dataset.grouping = [QueryGrouping(type="Dimension", name=dim) for dim in group_by]
         if filter_expression:
             dataset.filter = QueryFilter(
                 dimensions=QueryComparisonExpression(
@@ -133,15 +132,13 @@ class CostIngestionService:
                 if result.columns:
                     for i, col in enumerate(result.columns):
                         name = getattr(col, "name", None)
-                        columns.append(name if isinstance(
-                            name, str) and name else f"col_{i}")
+                        columns.append(name if isinstance(name, str) and name else f"col_{i}")
                 for row in result.rows:
                     usage_data.append(dict(zip(columns, row, strict=False)))
             self._cache[cache_key] = (usage_data, time.time())
             return usage_data
         except AzureError as e:
-            raise ExternalServiceException(
-                f"Failed to get usage details: {e}") from e
+            raise ExternalServiceException(f"Failed to get usage details: {e}") from e
 
     async def get_resource_costs(
         self,
@@ -170,8 +167,7 @@ class CostIngestionService:
             query_def = QueryDefinition(
                 type="ActualCost",
                 timeframe=TimeframeType.CUSTOM,
-                time_period=QueryTimePeriod(
-                    from_property=start_date, to=end_date),
+                time_period=QueryTimePeriod(from_property=start_date, to=end_date),
                 dataset=dataset,
             )
             try:
@@ -231,14 +227,12 @@ class CostIngestionService:
                 if result.columns:
                     for i, col in enumerate(result.columns):
                         name = getattr(col, "name", None)
-                        columns.append(name if isinstance(
-                            name, str) and name else f"col_{i}")
+                        columns.append(name if isinstance(name, str) and name else f"col_{i}")
                 for row in result.rows:
                     forecast_data.append(dict(zip(columns, row, strict=False)))
             return forecast_data
         except AzureError as e:
-            raise ExternalServiceException(
-                f"Failed to get forecast: {e}") from e
+            raise ExternalServiceException(f"Failed to get forecast: {e}") from e
 
     async def get_budgets(self, scope: str) -> list[dict[str, Any]]:
         client = self._get_consumption_client(scope)
@@ -266,8 +260,7 @@ class CostIngestionService:
                 )
             return budget_list
         except AzureError as e:
-            raise ExternalServiceException(
-                f"Failed to get budgets: {e}") from e
+            raise ExternalServiceException(f"Failed to get budgets: {e}") from e
 
     async def create_budget(
         self,
@@ -304,8 +297,7 @@ class CostIngestionService:
                 "status": "created",
             }
         except AzureError as e:
-            raise ExternalServiceException(
-                f"Failed to create budget: {e}") from e
+            raise ExternalServiceException(f"Failed to create budget: {e}") from e
 
     async def get_price_sheet(
         self,
@@ -340,8 +332,7 @@ class CostIngestionService:
                 }
             ]
         except AzureError as e:
-            raise ExternalServiceException(
-                f"Failed to get price sheet: {e}") from e
+            raise ExternalServiceException(f"Failed to get price sheet: {e}") from e
 
     async def create_cost_export(
         self,
@@ -392,8 +383,7 @@ class CostIngestionService:
                 "next_run_time": _to_iso(getattr(result, "next_run_time_estimate", None)),
             }
         except AzureError as e:
-            raise ExternalServiceException(
-                f"Failed to create cost export: {e}") from e
+            raise ExternalServiceException(f"Failed to create cost export: {e}") from e
 
     def _extract_notifications(self, notifications: dict[str, Any] | None) -> dict[str, Any]:
         if not notifications:

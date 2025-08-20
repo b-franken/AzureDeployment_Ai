@@ -1,10 +1,12 @@
 from __future__ import annotations
+
 from typing import Any
+
 from app.ai.agents.base import Agent, AgentContext
 from app.ai.agents.orchestrator import OrchestrationAgent
 from app.ai.agents.provisioning import ProvisioningAgent
-from app.ai.agents.reactive import ReactiveAgent, Event, EventType
-from app.ai.agents.types import ExecutionPlan, ExecutionResult, PlanStep, StepType, StepResult
+from app.ai.agents.reactive import Event, EventType, ReactiveAgent
+from app.ai.agents.types import ExecutionPlan, ExecutionResult, PlanStep, StepType
 
 
 class CoordinatorAgent(Agent[dict[str, Any], dict[str, Any]]):
@@ -15,15 +17,9 @@ class CoordinatorAgent(Agent[dict[str, Any], dict[str, Any]]):
         self._setup_event_handlers()
 
     def _setup_event_handlers(self) -> None:
-        self.reactive.on(
-            EventType.DEPLOYMENT_COMPLETE,
-            self._handle_deployment_complete
-        )
+        self.reactive.on(EventType.DEPLOYMENT_COMPLETE, self._handle_deployment_complete)
 
-        self.reactive.on(
-            EventType.RESOURCE_FAILURE,
-            self._handle_resource_failure
-        )
+        self.reactive.on(EventType.RESOURCE_FAILURE, self._handle_resource_failure)
 
     async def _handle_deployment_complete(self, event: Event) -> None:
         verification_goal = f"Verify deployment {event.payload.get('deployment_id')}"
@@ -39,10 +35,7 @@ class CoordinatorAgent(Agent[dict[str, Any], dict[str, Any]]):
         if "coordinate" in goal.lower():
             return await self._plan_coordination(goal)
         elif "provision" in goal.lower():
-            agent = ProvisioningAgent(
-                user_id=self.context.user_id,
-                context=self.context
-            )
+            agent = ProvisioningAgent(user_id=self.context.user_id, context=self.context)
             return await agent.plan(goal)
         else:
             return await self.orchestrator.plan(goal)
@@ -53,7 +46,7 @@ class CoordinatorAgent(Agent[dict[str, Any], dict[str, Any]]):
         analysis = await generate_response(
             f"Analyze this coordination request and identify sub-tasks: {goal}",
             memory=[],
-            provider="openai"
+            provider="openai",
         )
 
         steps = []
@@ -64,7 +57,7 @@ class CoordinatorAgent(Agent[dict[str, Any], dict[str, Any]]):
                     type=StepType.TOOL,
                     name="provision_task",
                     tool="provision_orchestrator",
-                    args={"request": goal}
+                    args={"request": goal},
                 )
             )
 
@@ -74,8 +67,9 @@ class CoordinatorAgent(Agent[dict[str, Any], dict[str, Any]]):
                     type=StepType.MESSAGE,
                     name="setup_monitoring",
                     content="Setting up monitoring",
-                    dependencies=["provision_task"] if "provision_task" in [
-                        s.name for s in steps] else []
+                    dependencies=(
+                        ["provision_task"] if "provision_task" in [s.name for s in steps] else []
+                    ),
                 )
             )
 
@@ -93,8 +87,8 @@ class CoordinatorAgent(Agent[dict[str, Any], dict[str, Any]]):
                         type=EventType.DEPLOYMENT_COMPLETE,
                         payload={
                             "deployment_id": main_result.metadata.get("deployment_id"),
-                            "result": main_result.result
-                        }
+                            "result": main_result.result,
+                        },
                     )
                 )
 

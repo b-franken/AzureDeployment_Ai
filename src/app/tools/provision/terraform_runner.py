@@ -21,7 +21,7 @@ async def _run(cmd: list[str], cwd: Path, timeout: float = 60.0) -> tuple[int, s
     )
     try:
         stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         await proc.communicate()
         raise

@@ -1,12 +1,15 @@
 from __future__ import annotations
-from typing import Any
-from pydantic import BaseModel
+
 import datetime
+from typing import Any
+
+from pydantic import BaseModel
+
 from app.ai.agents.base import Agent, AgentContext
-from app.ai.agents.types import ExecutionPlan, ExecutionResult, PlanStep, StepType, StepResult
+from app.ai.agents.types import ExecutionPlan, ExecutionResult, PlanStep, StepResult, StepType
 from app.ai.nlu import parse_provision_request
-from app.tools.registry import ensure_tools_loaded, get_tool
 from app.core.logging import get_logger
+from app.tools.registry import ensure_tools_loaded, get_tool
 
 logger = get_logger(__name__)
 
@@ -22,7 +25,7 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
         self,
         user_id: str,
         context: AgentContext | None = None,
-        config: ProvisioningAgentConfig | dict[str, Any] | None = None
+        config: ProvisioningAgentConfig | dict[str, Any] | None = None,
     ):
         super().__init__(context)
         self.user_id = user_id
@@ -47,10 +50,7 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
                 name="validate_request",
                 description="Validate provisioning request",
                 tool="validation_tool",
-                args={
-                    "resource_type": parsed.resource_type,
-                    "parameters": parsed.parameters
-                }
+                args={"resource_type": parsed.resource_type, "parameters": parsed.parameters},
             )
         )
 
@@ -62,9 +62,9 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
                 tool="prerequisite_checker",
                 args={
                     "resource_type": parsed.resource_type,
-                    "environment": self.context.environment if self.context else "dev"
+                    "environment": self.context.environment if self.context else "dev",
                 },
-                dependencies=["validate_request"]
+                dependencies=["validate_request"],
             )
         )
 
@@ -75,7 +75,7 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
                 description="Generate infrastructure as code",
                 tool="provision_orchestrator",
                 args=parsed.to_provision_args(),
-                dependencies=["check_prerequisites"]
+                dependencies=["check_prerequisites"],
             )
         )
 
@@ -88,9 +88,9 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
                     tool="apply_infrastructure",
                     args={
                         "dry_run": False,
-                        "environment": self.context.environment if self.context else "dev"
+                        "environment": self.context.environment if self.context else "dev",
                     },
-                    dependencies=["generate_infrastructure"]
+                    dependencies=["generate_infrastructure"],
                 )
             )
 
@@ -100,12 +100,12 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
                 name="verify_deployment",
                 description="Verify deployment success",
                 tool="verification_tool",
-                args={
-                    "resource_type": parsed.resource_type,
-                    "resource_name": parsed.resource_name
-                },
-                dependencies=["apply_infrastructure"] if not self.context.dry_run else [
-                    "generate_infrastructure"]
+                args={"resource_type": parsed.resource_type, "resource_name": parsed.resource_name},
+                dependencies=(
+                    ["apply_infrastructure"]
+                    if not self.context.dry_run
+                    else ["generate_infrastructure"]
+                ),
             )
         )
 
@@ -117,15 +117,16 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
                     "intent": parsed.intent.value,
                     "resource_type": parsed.resource_type,
                     "resource_name": parsed.resource_name,
-                    "confidence": parsed.confidence
+                    "confidence": parsed.confidence,
                 },
-                "dry_run": self.context.dry_run if self.context else True
-            }
+                "dry_run": self.context.dry_run if self.context else True,
+            },
         )
 
     async def execute(self, plan: ExecutionPlan) -> ExecutionResult[dict[str, Any]]:
         """Execute the provisioning plan."""
         import time
+
         start_time = time.perf_counter()
 
         step_results = []
@@ -146,11 +147,7 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
             except Exception as e:
                 logger.error(f"Step {step.name} failed: {e}", exc_info=True)
                 step_results.append(
-                    StepResult(
-                        step_name=step.name or step.type.value,
-                        success=False,
-                        error=str(e)
-                    )
+                    StepResult(step_name=step.name or step.type.value, success=False, error=str(e))
                 )
                 break
 
@@ -161,34 +158,23 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
             result=accumulated_output,
             duration_ms=(time.perf_counter() - start_time) * 1000,
             step_results=step_results,
-            metadata={
-                **plan.metadata,
-                "execution_time": datetime.utcnow().isoformat()
-            }
+            metadata={**plan.metadata, "execution_time": datetime.utcnow().isoformat()},
         )
 
-    async def _execute_step(
-        self,
-        step: PlanStep,
-        context: dict[str, Any]
-    ) -> StepResult:
+    async def _execute_step(self, step: PlanStep, context: dict[str, Any]) -> StepResult:
         """Execute a single plan step."""
         import time
-        from datetime import datetime
 
         start_time = time.perf_counter()
 
         try:
             if step.type == StepType.TOOL and step.tool:
-
                 tool = get_tool(step.tool)
 
                 if tool:
-
                     args = self._resolve_args(step.args or {}, context)
                     output = await tool.run(**args)
                 else:
-
                     output = await self._mock_tool_execution(step.tool, step.args or {})
 
             elif step.type == StepType.MESSAGE:
@@ -203,7 +189,7 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
                 step_name=step.name or step.type.value,
                 success=True,
                 output=output,
-                duration_ms=duration
+                duration_ms=duration,
             )
 
         except Exception as e:
@@ -212,14 +198,10 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
                 step_name=step.name or step.type.value,
                 success=False,
                 error=str(e),
-                duration_ms=(time.perf_counter() - start_time) * 1000
+                duration_ms=(time.perf_counter() - start_time) * 1000,
             )
 
-    def _resolve_args(
-        self,
-        args: dict[str, Any],
-        context: dict[str, Any]
-    ) -> dict[str, Any]:
+    def _resolve_args(self, args: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         """Resolve arguments by substituting context values."""
         resolved = {}
         for key, value in args.items():
@@ -232,11 +214,7 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
                 resolved[key] = value
         return resolved
 
-    async def _mock_tool_execution(
-        self,
-        tool_name: str,
-        args: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def _mock_tool_execution(self, tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
         """Mock tool execution for tools that aren't available."""
         logger.warning(f"Tool {tool_name} not found, using mock execution")
 
@@ -244,26 +222,18 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
             return {
                 "valid": True,
                 "warnings": [],
-                "resource_type": args.get("resource_type", "unknown")
+                "resource_type": args.get("resource_type", "unknown"),
             }
         elif tool_name == "prerequisite_checker":
-            return {
-                "prerequisites_met": True,
-                "missing": [],
-                "recommendations": []
-            }
+            return {"prerequisites_met": True, "missing": [], "recommendations": []}
         elif tool_name == "verification_tool":
             return {
                 "verified": True,
                 "status": "healthy",
-                "resource_name": args.get("resource_name", "unknown")
+                "resource_name": args.get("resource_name", "unknown"),
             }
         else:
-            return {
-                "status": "completed",
-                "tool": tool_name,
-                "args": args
-            }
+            return {"status": "completed", "tool": tool_name, "args": args}
 
     async def run_provisioning(self, deployment_id: str) -> dict[str, Any]:
         """Run a complete provisioning workflow."""
@@ -278,5 +248,5 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
             "success": result.success,
             "result": result.result,
             "duration_ms": result.duration_ms,
-            "error": result.error
+            "error": result.error,
         }

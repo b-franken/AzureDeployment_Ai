@@ -21,11 +21,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class SecurityConfig(BaseModel):
     jwt_secret_key: SecretStr = Field(
-        default_factory=lambda: SecretStr(Fernet.generate_key().decode()))
+        default_factory=lambda: SecretStr(Fernet.generate_key().decode())
+    )
     jwt_algorithm: str = "HS256"
     jwt_expiration_hours: int = Field(default=24, ge=1, le=168)
     encryption_key: SecretStr = Field(
-        default_factory=lambda: SecretStr(Fernet.generate_key().decode()))
+        default_factory=lambda: SecretStr(Fernet.generate_key().decode())
+    )
     allowed_cors_origins: list[AnyHttpUrl] = Field(default_factory=list)
     enable_audit_logging: bool = True
     api_rate_limit_per_minute: int = Field(default=60, ge=1)
@@ -40,8 +42,13 @@ class SecurityConfig(BaseModel):
         if not raw:
             return Fernet.generate_key().decode()
         try:
-            Fernet(raw if isinstance(raw, bytes) else raw.encode()
-                   if isinstance(raw, str) else str(raw).encode())
+            Fernet(
+                raw
+                if isinstance(raw, bytes)
+                else raw.encode()
+                if isinstance(raw, str)
+                else str(raw).encode()
+            )
         except Exception as err:
             raise ValueError("Invalid encryption key") from err
         return raw if isinstance(raw, str) else raw.decode()
@@ -61,27 +68,32 @@ class DatabaseConfig(BaseModel):
 
 
 class AzureConfig(BaseModel):
-    subscription_id: str | None = Field(
-        default=None, pattern="^[a-f0-9-]{36}$")
+    subscription_id: str | None = Field(default=None, pattern="^[a-f0-9-]{36}$")
     tenant_id: str | None = Field(default=None, pattern="^[a-f0-9-]{36}$")
     client_id: str | None = None
     client_secret: SecretStr | None = None
-    auth_mode: Literal["managed_identity", "service_principal", "azure_cli",
-                       "workload_identity", "environment", "device_code"] = "managed_identity"
+    auth_mode: Literal[
+        "managed_identity",
+        "service_principal",
+        "azure_cli",
+        "workload_identity",
+        "environment",
+        "device_code",
+    ] = "managed_identity"
     user_assigned_identity_client_id: str | None = None
     workload_identity_token_file: str | None = None
     cloud: Literal["public", "usgov", "china", "germany"] = "public"
     authority_host: str | None = None
     resource_manager_endpoint: str | None = None
     default_location: str = "westeurope"
-    allowed_locations: list[str] = Field(default_factory=lambda: [
-                                         "westeurope", "northeurope", "uksouth", "eastus", "westus"])
+    allowed_locations: list[str] = Field(
+        default_factory=lambda: ["westeurope", "northeurope", "uksouth", "eastus", "westus"]
+    )
     default_resource_group: str | None = None
     environment: Literal["dev", "test", "acc", "prod"] = "dev"
     name_prefix: str = "ff"
     enable_cli_fallback: bool = True
-    tags: dict[str, str] = Field(default_factory=lambda: {
-                                 "managed_by": "devops-ai"})
+    tags: dict[str, str] = Field(default_factory=lambda: {"managed_by": "devops-ai"})
 
     @field_validator("allowed_locations", mode="before")
     @classmethod
@@ -96,10 +108,9 @@ class AzureConfig(BaseModel):
         return str(v).lower().strip() if v else "westeurope"
 
     @model_validator(mode="after")
-    def _validate_cloud_and_location(self) -> "AzureConfig":
+    def _validate_cloud_and_location(self) -> AzureConfig:
         if self.default_location not in set(self.allowed_locations):
-            raise ValueError(
-                "default_location must be one of allowed_locations")
+            raise ValueError("default_location must be one of allowed_locations")
         if self.cloud == "public" and not self.authority_host:
             self.authority_host = "https://login.microsoftonline.com"
         if self.cloud == "public" and not self.resource_manager_endpoint:
@@ -130,8 +141,7 @@ class ObservabilityConfig(BaseModel):
     metrics_port: int = Field(default=9090, ge=1024, le=65535)
     enable_tracing: bool = True
     trace_sample_rate: float = Field(default=0.1, ge=0, le=1)
-    log_level: Literal["DEBUG", "INFO",
-                       "WARNING", "ERROR", "CRITICAL"] = "INFO"
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     log_format: Literal["json", "text"] = "json"
     log_file: Path | None = None
     log_rotation_size_mb: int = Field(default=100, ge=1)
@@ -174,8 +184,7 @@ class Settings(BaseSettings):
 
     app_name: str = "DevOps AI Platform"
     app_version: str = "2.0.0"
-    environment: Literal["development",
-                         "staging", "production"] = "development"
+    environment: Literal["development", "staging", "production"] = "development"
     debug: bool = False
 
     api_host: str = "0.0.0.0"
@@ -187,8 +196,7 @@ class Settings(BaseSettings):
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     azure: AzureConfig = Field(default_factory=AzureConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
-    observability: ObservabilityConfig = Field(
-        default_factory=ObservabilityConfig)
+    observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
     cache: CacheConfig = Field(default_factory=CacheConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     retry: RetryConfig = Field(default_factory=RetryConfig)
@@ -215,7 +223,9 @@ class Settings(BaseSettings):
             # type: ignore[assignment]
             self.llm.default_provider = self.llm_provider
         if self.applicationinsights_connection_string:
-            self.observability.applicationinsights_connection_string = self.applicationinsights_connection_string
+            self.observability.applicationinsights_connection_string = (
+                self.applicationinsights_connection_string
+            )
         if self.otel_service_name:
             self.observability.otel_service_name = self.otel_service_name
         return self
@@ -227,11 +237,11 @@ class Settings(BaseSettings):
                 raise ValueError("Debug must be disabled in production")
             if not self.security.enable_audit_logging:
                 raise ValueError("Audit logging must be enabled in production")
-            jwt_env_present = any(os.getenv(k) for k in [
-                                  "API_JWT_SECRET", "SECURITY__JWT_SECRET_KEY"])
+            jwt_env_present = any(
+                os.getenv(k) for k in ["API_JWT_SECRET", "SECURITY__JWT_SECRET_KEY"]
+            )
             if not jwt_env_present:
-                raise ValueError(
-                    "JWT secret must be set via environment in production")
+                raise ValueError("JWT secret must be set via environment in production")
         return self
 
 
@@ -297,22 +307,23 @@ JWT_SECRET = settings.security.jwt_secret_key.get_secret_value()
 JWT_ALGORITHM = settings.security.jwt_algorithm
 JWT_EXPIRATION_HOURS = settings.security.jwt_expiration_hours
 
-POSTGRES_DSN = str(
-    settings.database.postgres_dsn) if settings.database.postgres_dsn else None
-REDIS_DSN = str(
-    settings.database.redis_dsn) if settings.database.redis_dsn else None
+POSTGRES_DSN = str(settings.database.postgres_dsn) if settings.database.postgres_dsn else None
+REDIS_DSN = str(settings.database.redis_dsn) if settings.database.redis_dsn else None
 
 AZURE_SUBSCRIPTION_ID = settings.azure.subscription_id
 AZURE_TENANT_ID = settings.azure.tenant_id
 AZURE_CLIENT_ID = settings.azure.client_id
-AZURE_CLIENT_SECRET = settings.azure.client_secret.get_secret_value(
-) if settings.azure.client_secret else None
+AZURE_CLIENT_SECRET = (
+    settings.azure.client_secret.get_secret_value() if settings.azure.client_secret else None
+)
 
 LLM_PROVIDER = settings.llm.default_provider
-OPENAI_API_KEY = settings.llm.openai_api_key.get_secret_value(
-) if settings.llm.openai_api_key else None
-GEMINI_API_KEY = settings.llm.gemini_api_key.get_secret_value(
-) if settings.llm.gemini_api_key else None
+OPENAI_API_KEY = (
+    settings.llm.openai_api_key.get_secret_value() if settings.llm.openai_api_key else None
+)
+GEMINI_API_KEY = (
+    settings.llm.gemini_api_key.get_secret_value() if settings.llm.gemini_api_key else None
+)
 OLLAMA_BASE_URL = settings.llm.ollama_base_url
 
 OPENAI_MODEL = settings.llm.openai_model

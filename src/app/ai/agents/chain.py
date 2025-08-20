@@ -1,9 +1,8 @@
 from __future__ import annotations
-from planning import PlanStep, StepType, StepResult
 from typing import Any, Callable, Awaitable
 from dataclasses import dataclass
 from app.ai.agents.base import Agent, AgentContext
-from app.ai.agents.types import ExecutionPlan, ExecutionResult, PlanStep, StepType
+from app.ai.agents.types import ExecutionPlan, ExecutionResult, PlanStep, StepType, StepResult
 
 
 @dataclass

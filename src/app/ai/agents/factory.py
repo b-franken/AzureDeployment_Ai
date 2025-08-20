@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any, Type
-from chain import ChainLink
+from app.ai.agents.chain import ChainLink
 from app.ai.agents.base import Agent, AgentContext
 from app.ai.agents.orchestrator import OrchestrationAgent
 from app.ai.agents.provisioning import ProvisioningAgent

@@ -31,8 +31,34 @@ class Logger {
         }
     }
 
-    private sendToLoggingService(logEntry: any) {
+    private async sendToLoggingService(logEntry: any) {
+        const endpoint = process.env.LOGGING_ENDPOINT
+        if (!endpoint) {
+            return
+        }
 
+        const maxRetries = 3
+        const baseDelay = 100
+
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+            try {
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(logEntry)
+                })
+                if (response.ok) {
+                    return
+                }
+                throw new Error(`HTTP ${response.status}`)
+            } catch (err) {
+                if (attempt === maxRetries - 1) {
+                    return
+                }
+                const delay = baseDelay * Math.pow(2, attempt)
+                await new Promise(resolve => setTimeout(resolve, delay))
+            }
+        }
     }
 
     debug(message: string, context?: LogContext) {

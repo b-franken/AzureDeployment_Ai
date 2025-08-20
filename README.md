@@ -171,6 +171,8 @@ npm install
 NEXT_PUBLIC_API_BASE_URL=http://localhost:8000 npm run dev
 ```
 
+Set `REVIEWER_ENDPOINT` to the reviewer service URL. Tests can instead enable mock reviews with `REVIEWER_USE_MOCK=true`.
+
 ### Docker for Web
 
 ```bash

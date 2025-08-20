@@ -11,6 +11,7 @@ from .actions.registry import action_names_with_aliases, resolve_action
 from .clients import get_clients
 from .tags import standard_tags
 from .validators import validate_location, validate_name
+from app.core.config import settings
 
 
 def _ok(summary: str, obj: dict | str = "") -> ToolResult:
@@ -158,12 +159,14 @@ def _validate_and_suggest(action: str, params: dict[str, Any]) -> tuple[bool, st
     if action not in required_by_action:
         return True, ""
 
-    missing = [p for p in required_by_action[action] if p not in params or not params[p]]
+    missing = [p for p in required_by_action[action]
+               if p not in params or not params[p]]
     if missing:
         suggestions = []
         for param in missing:
             if param == "location":
-                suggestions.append("location: westeurope, eastus, northeurope, uksouth")
+                suggestions.append(
+                    "location: westeurope, eastus, northeurope, uksouth")
             elif param == "resource_group":
                 suggestions.append("resource_group: your-project-dev-rg")
             elif param == "name":
@@ -207,14 +210,17 @@ def _provide_helpful_suggestions(original_input: str) -> list[str]:
         suggestions.append(
             "create storage account myapp123 in westeurope resource group myapp-dev-rg"
         )
-        suggestions.append("create storage mydata in eastus with sku Standard_GRS")
+        suggestions.append(
+            "create storage mydata in eastus with sku Standard_GRS")
 
     if "web" in original_input.lower() or "app" in original_input.lower():
-        suggestions.append("create web app mywebapp in westeurope resource group myapp-dev-rg")
+        suggestions.append(
+            "create web app mywebapp in westeurope resource group myapp-dev-rg")
         suggestions.append("create webapp mysite with runtime python|3.9")
 
     if "kubernetes" in original_input.lower() or "aks" in original_input.lower():
-        suggestions.append("create aks cluster mycluster in westeurope resource group myapp-dev-rg")
+        suggestions.append(
+            "create aks cluster mycluster in westeurope resource group myapp-dev-rg")
         suggestions.append("create kubernetes myk8s with 3 nodes")
 
     if not suggestions:
@@ -245,10 +251,7 @@ class AzureProvision(Tool):
             },
             "subscription_id": {"type": "string"},
             "resource_group": {"type": "string"},
-            "location": {
-                "type": "string",
-                "enum": ["westeurope", "eastus", "northeurope", "uksouth"],
-            },
+            "location": {"type": "string", "enum": list(settings.azure.allowed_locations)},
             "name": {"type": "string"},
             "sku": {"type": "string"},
             "access_tier": {"type": "string", "enum": ["Hot", "Cool", "Archive"]},
@@ -291,7 +294,8 @@ class AzureProvision(Tool):
     async def run(self, action: str, **kwargs: Any) -> ToolResult:
         try:
             params = dict(kwargs)
-            env_in = str(params.get("env") or params.get("environment") or "dev")
+            env_in = str(params.get("env") or params.get(
+                "environment") or "dev")
             try:
                 canon_env = normalize_env(env_in)
             except Exception:
@@ -312,7 +316,8 @@ class AzureProvision(Tool):
 
             _apply_intelligent_defaults(canonical_action, params)
 
-            is_valid, validation_msg = _validate_and_suggest(canonical_action, params)
+            is_valid, validation_msg = _validate_and_suggest(
+                canonical_action, params)
             if not is_valid:
                 return _err("Invalid parameters", validation_msg)
 
@@ -345,7 +350,8 @@ class AzureProvision(Tool):
                 return _ok(f"{canonical_action} {status}", payload)
             else:
                 error_msg = (
-                    payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False)
+                    payload if isinstance(payload, str) else json.dumps(
+                        payload, ensure_ascii=False)
                 )
                 if "AccountKey" in error_msg:
                     error_msg = "[Account credentials redacted]"

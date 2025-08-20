@@ -64,7 +64,57 @@ class AzureConfig(BaseModel):
     tenant_id: str | None = Field(default=None, pattern="^[a-f0-9-]{36}$")
     client_id: str | None = None
     client_secret: SecretStr | None = None
+
+    auth_mode: Literal[
+        "managed_identity",
+        "service_principal",
+        "azure_cli",
+        "workload_identity",
+        "environment",
+        "device_code",
+    ] = "managed_identity"
+    user_assigned_identity_client_id: str | None = None
+    workload_identity_token_file: str | None = None
+
+    cloud: Literal["public", "usgov", "china", "germany"] = "public"
+    authority_host: str | None = None
+    resource_manager_endpoint: str | None = None
+
     default_location: str = "westeurope"
+    allowed_locations: list[str] = Field(
+        default_factory=lambda: ["westeurope",
+                                 "northeurope", "uksouth", "eastus", "westus"]
+    )
+
+    default_resource_group: str | None = None
+    environment: Literal["dev", "test", "acc", "prod"] = "dev"
+    name_prefix: str = "ff"
+    enable_cli_fallback: bool = True
+    tags: dict[str, str] = Field(default_factory=lambda: {
+                                 "managed_by": "devops-ai"})
+
+    @field_validator("allowed_locations", mode="before")
+    @classmethod
+    def _normalize_locations(cls, v: Any) -> list[str]:
+        if not v:
+            return ["westeurope", "northeurope", "uksouth", "eastus", "westus"]
+        return [str(x).lower().strip() for x in v]
+
+    @field_validator("default_location", mode="before")
+    @classmethod
+    def _normalize_default_location(cls, v: Any) -> str:
+        return str(v).lower().strip() if v else "westeurope"
+
+    @model_validator(mode="after")
+    def _validate_cloud_and_location(self) -> "AzureConfig":
+        if self.default_location not in set(self.allowed_locations):
+            raise ValueError(
+                "default_location must be one of allowed_locations")
+        if self.cloud == "public" and not self.authority_host:
+            self.authority_host = "https://login.microsoftonline.com"
+        if self.cloud == "public" and not self.resource_manager_endpoint:
+            self.resource_manager_endpoint = "https://management.azure.com/"
+        return self
 
 
 class LLMConfig(BaseModel):

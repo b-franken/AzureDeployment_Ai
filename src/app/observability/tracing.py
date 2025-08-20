@@ -8,7 +8,6 @@ from dotenv import load_dotenv
 from opentelemetry import trace
 from opentelemetry.instrumentation.asyncpg import AsyncPGInstrumentor
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
-from opentelemetry.instrumentation.pymongo import PymongoInstrumentor
 from opentelemetry.sdk.trace import TracerProvider as SDKTracerProvider
 
 from app.core.config import get_settings
@@ -54,10 +53,6 @@ def init_tracing(service_name: str = "devops-ai-api") -> None:
     except Exception as exc:
         logger.warning("AsyncPG instrumentation failed", error=str(exc), exc_info=True)
 
-    try:
-        PymongoInstrumentor().instrument()
-    except Exception as exc:
-        logger.warning("Pymongo instrumentation failed", error=str(exc), exc_info=True)
 
     try:
         from opentelemetry.instrumentation.redis import RedisInstrumentor

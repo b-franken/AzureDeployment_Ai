@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import time
 from collections.abc import AsyncGenerator
 from typing import Any, TypeAlias
@@ -13,6 +12,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from app.ai.llm.factory import get_provider_and_model
 from app.api.schemas import ChatRequest, ChatRequestV2, ChatResponse
 from app.api.services import run_chat
+from app.core.config import settings
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -31,7 +31,9 @@ except ImportError:
 
 
 # Development mode check
-IS_DEVELOPMENT = os.getenv("ENVIRONMENT", "development") == "development"
+IS_DEVELOPMENT = settings.environment == "development"
+if IS_DEVELOPMENT:
+    logger.warning("Running in development mode; authentication is disabled.")
 
 
 async def get_optional_user(request: Request) -> Any:

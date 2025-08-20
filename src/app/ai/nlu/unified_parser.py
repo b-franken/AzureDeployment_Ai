@@ -199,6 +199,18 @@ class unified_nlu_parser:
         num_labels: int = 2,
         ckpt: str | None = None,
     ) -> None:
+        self.location_patterns = [
+            (re.compile(p, re.IGNORECASE), loc)
+            for p, loc in type(self).location_patterns
+        ]
+        self.resource_patterns = {
+            k: [re.compile(p, re.IGNORECASE) for p in v]
+            for k, v in type(self).resource_patterns.items()
+        }
+        self.intent_patterns = {
+            k: [re.compile(p, re.IGNORECASE) for p in v]
+            for k, v in type(self).intent_patterns.items()
+        }
         self._emb: EmbeddingsClassifierService | None = None
         if use_embeddings:
             self._emb = self._load_embeddings_service(embeddings_model, num_labels, ckpt)
@@ -248,7 +260,7 @@ class unified_nlu_parser:
         for k, pats in self.intent_patterns.items():
             s = 0
             for p in pats:
-                if re.search(p, text):
+                if p.search(text):
                     s += 2
             if s > 0:
                 scores[k] = s
@@ -261,7 +273,7 @@ class unified_nlu_parser:
         for rtype, pats in self.resource_patterns.items():
             s = 0
             for p in pats:
-                if re.search(p, text):
+                if p.search(text):
                     s += 2
             keyword_hints: dict[str, list[str]] = {
                 "resource_group": ["resource group", "rg"],
@@ -286,14 +298,14 @@ class unified_nlu_parser:
     def _extract_resource_name(self, text: str, rtype: str) -> str | None:
         if rtype in self.resource_patterns:
             for p in self.resource_patterns[rtype]:
-                m = re.search(p, text, re.IGNORECASE)
+                m = p.search(text)
                 if m and m.groups():
                     return m.group(m.lastindex or 1)
         for p in [
-            r"(?:named|called|name)\s+([a-z0-9][\w-]{2,79})",
-            r"([a-z0-9][\w-]{2,79})\s+(?:in|for|at)",
+            re.compile(r"(?:named|called|name)\s+([a-z0-9][\w-]{2,79})", re.IGNORECASE),
+            re.compile(r"([a-z0-9][\w-]{2,79})\s+(?:in|for|at)", re.IGNORECASE),
         ]:
-            m = re.search(p, text, re.IGNORECASE)
+            m = p.search(text)
             if m:
                 c = m.group(1)
                 if c not in {"in", "at", "to", "from", "with", "for", "the", "and", "or"}:
@@ -303,26 +315,25 @@ class unified_nlu_parser:
     def _extract_parameters(self, text: str, rtype: str) -> dict[str, Any]:
         params: dict[str, Any] = {}
         for p, loc in self.location_patterns:
-            if re.search(p, text, re.IGNORECASE):
+            if p.search(text):
                 params["location"] = loc
                 break
         for p in [
-            r"resource\s+group\s+([a-z0-9][\w-]{0,89})",
-            r"rg\s+([a-z0-9][\w-]{0,89})",
-            r"in\s+(?:resource\s+group|rg)\s+([a-z0-9][\w-]{0,89})",
+            re.compile(r"resource\s+group\s+([a-z0-9][\w-]{0,89})", re.IGNORECASE),
+            re.compile(r"rg\s+([a-z0-9][\w-]{0,89})", re.IGNORECASE),
+            re.compile(r"in\s+(?:resource\s+group|rg)\s+([a-z0-9][\w-]{0,89})", re.IGNORECASE),
         ]:
-            m = re.search(p, text, re.IGNORECASE)
+            m = p.search(text)
             if m:
                 params["resource_group"] = m.group(1)
                 break
-        m = re.search(
+        m = re.compile(
             r"\b(dev|development|test|testing|staging|stage|prod|production|uat)\b",
-            text,
             re.IGNORECASE,
-        )
+        ).search(text)
         if m:
             params["environment"] = m.group(1).lower()
-        m = re.search(r"(?:sku|tier|size)\s+([a-z0-9_]+)", text, re.IGNORECASE)
+        m = re.compile(r"(?:sku|tier|size)\s+([a-z0-9_]+)", re.IGNORECASE).search(text)
         if m:
             params["sku"] = m.group(1).upper()
         if rtype == "storage":
@@ -356,11 +367,11 @@ class unified_nlu_parser:
         adv: dict[str, Any] = {}
         comp = []
         for name, pat in {
-            "gdpr": r"\b(gdpr|general\s+data\s+protection)\b",
-            "hipaa": r"\b(hipaa|health\s+insurance\s+portability)\b",
-            "pci_dss": r"\b(pci|payment\s+card\s+industry)\b",
+            "gdpr": re.compile(r"\b(gdpr|general\s+data\s+protection)\b", re.IGNORECASE),
+            "hipaa": re.compile(r"\b(hipaa|health\s+insurance\s+portability)\b", re.IGNORECASE),
+            "pci_dss": re.compile(r"\b(pci|payment\s+card\s+industry)\b", re.IGNORECASE),
         }.items():
-            if re.search(pat, text, re.IGNORECASE):
+            if pat.search(text):
                 comp.append(name)
         if comp:
             adv["compliance_requirements"] = comp

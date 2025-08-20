@@ -30,6 +30,8 @@ class SecurityConfig(BaseModel):
     enable_audit_logging: bool = True
     api_rate_limit_per_minute: int = Field(default=60, ge=1)
     api_rate_limit_per_hour: int = Field(default=1000, ge=1)
+    api_rate_limit_tracker_max_age_seconds: int = Field(default=7200, ge=1)
+    api_rate_limit_cleanup_interval_seconds: int = Field(default=60, ge=1)
 
     @field_validator("encryption_key", mode="before")
     @classmethod

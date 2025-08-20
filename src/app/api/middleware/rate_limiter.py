@@ -34,6 +34,8 @@ class RateLimitConfig:
     redis_url: str | None = None
     redis_max_connections: int = 100
     redis_socket_timeout: float | None = None
+    tracker_max_age: float = 7200.0
+    cleanup_interval: float = 60.0
 
 
 @dataclass

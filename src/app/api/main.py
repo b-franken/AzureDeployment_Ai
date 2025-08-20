@@ -27,6 +27,9 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.observability.app_insights import app_insights
 from app.observability.prometheus import instrument_app
+from app.api.routes.ws import router as ws_router
+from app.api.routes.agents import router as agents_router
+
 
 logger = get_logger(__name__)
 
@@ -111,3 +114,5 @@ app.include_router(audit_router, prefix="/api/audit", tags=["audit"])
 app.include_router(metrics_router, prefix="/api/metrics", tags=["metrics"])
 app.include_router(health_router, prefix="/api", tags=["health"])
 app.include_router(status_router, prefix="/api", tags=["status"])
+app.include_router(agents_router, prefix="/api/agents", tags=["agents"])
+app.include_router(ws_router, tags=["ws"])

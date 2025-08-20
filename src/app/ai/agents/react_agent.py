@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Any
-from app.agents.types import LLM, Tool, ExecutionPlan, PlanStep
-from app.agents.memory import ConversationMemory
+from agents.types import LLM, Tool, ExecutionPlan, PlanStep
+from agents.memory import ConversationMemory
 
 
 class ProvisioningAgent:

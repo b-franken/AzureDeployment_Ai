@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from contextlib import asynccontextmanager
 from collections.abc import Awaitable, Callable
 
 from fastapi import FastAPI, Request, Response
@@ -31,40 +32,6 @@ logger = get_logger(__name__)
 
 env_is_dev = settings.environment == "development"
 
-APP_VERSION = os.getenv("APP_VERSION", "2.0.0")
-app = FastAPI(
-    title="DevOps AI API",
-    version=APP_VERSION,
-    docs_url="/docs" if settings.api_docs_enabled else None,
-    redoc_url="/redoc" if settings.api_docs_enabled else None,
-)
-
-app_insights.initialize()
-instrument_app(app)
-
-install_error_handlers(app)
-
-origins_raw = os.getenv("CORS_ORIGINS", "*").strip()
-if origins_raw in {"", "*"}:
-    allow_origins = ["*"]
-    allow_credentials = False
-else:
-    allow_origins = [o.strip() for o in origins_raw.split(",") if o.strip()]
-    allow_credentials = True
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=allow_origins,
-    allow_credentials=allow_credentials,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["x-correlation-id"],
-)
-
-install_correlation_middleware(app)
-install_telemetry_middleware(app)
-install_auth_middleware(app)
-
 limiter = RateLimiter(
     RateLimitConfig(
         requests_per_minute=settings.security.api_rate_limit_per_minute,
@@ -77,8 +44,50 @@ limiter = RateLimiter(
             if (settings.database.redis_dsn or not env_is_dev)
             else None
         ),
+        redis_max_connections=settings.database.redis_max_connections,
+        redis_socket_timeout=float(settings.database.redis_socket_timeout),
     )
 )
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("API starting up", version=settings.app_version,
+                environment=settings.environment)
+    app_insights.initialize()
+    yield
+    rb = limiter.redis_backend
+    if rb and rb._client:
+        await rb._client.aclose()
+    logger.info("API shutting down")
+
+
+app = FastAPI(
+    title="DevOps AI API",
+    version=settings.app_version,
+    docs_url="/docs" if settings.api_docs_enabled else None,
+    redoc_url="/redoc" if settings.api_docs_enabled else None,
+    lifespan=lifespan,
+)
+
+instrument_app(app)
+
+origins = [str(o) for o in settings.security.allowed_cors_origins] or ["*"]
+allow_credentials = False if origins == ["*"] else True
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=allow_credentials,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["x-correlation-id"],
+)
+
+install_error_handlers(app)
+install_correlation_middleware(app)
+install_telemetry_middleware(app)
+install_auth_middleware(app)
 
 
 @app.middleware("http")
@@ -88,24 +97,9 @@ async def _rl_mw(request: Request, call_next: Callable[[Request], Awaitable[Resp
     return await call_next(request)
 
 
-@app.on_event("startup")
-async def startup_event() -> None:
-    logger.info(
-        "API starting up",
-        version=APP_VERSION,
-        environment=settings.environment,
-        entra_id_enabled=os.getenv("USE_ENTRA_ID", "false").lower() in {"true", "1", "yes"},
-    )
-
-
-@app.on_event("shutdown")
-async def shutdown_event() -> None:
-    logger.info("API shutting down")
-
-
 @app.get("/_routes")
 def _routes() -> list[str]:
-    return [r.path for r in app.routes if isinstance(r, APIRoute | Route | Mount | WebSocketRoute)]
+    return [r.path for r in app.routes if isinstance(r, (APIRoute, Route, Mount, WebSocketRoute))]
 
 
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])

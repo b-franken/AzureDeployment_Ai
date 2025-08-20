@@ -7,7 +7,7 @@ import {
   login as apiLogin,
   logout as apiLogout,
   refresh as apiRefresh,
-  chatV2 as apiChatV2,
+  chat as apiChat,
   splitModel,
   listDeployRequests,
   createDeployRequest,

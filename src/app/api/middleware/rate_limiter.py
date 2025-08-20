@@ -22,29 +22,33 @@ class RateLimitConfig:
     enable_ip_tracking: bool = True
     enable_user_tracking: bool = True
     redis_url: str | None = None
+    redis_max_connections: int = 100
+    redis_socket_timeout: float | None = None
 
 
 @dataclass
 class RequestTracker:
     tokens: float | None = None
     capacity: int | None = None
+    rate: float | None = None
     last_refill: float = field(default_factory=time.time)
     last_seen: float = field(default_factory=time.time)
 
     def is_allowed(self, now: float, limit: int, window: float, burst: int) -> bool:
         cap = int(limit) + int(max(burst, 0))
-        rate = float(limit) / float(window)
         if self.capacity != cap:
             self.capacity = cap
-            if self.tokens is None:
-                self.tokens = float(cap)
-            else:
-                self.tokens = min(float(cap), float(self.tokens))
+            self.rate = float(limit) / float(window)
+            self.tokens = float(cap) if self.tokens is None else min(
+                float(cap), float(self.tokens))
+        if self.rate is None:
+            self.rate = float(limit) / float(window)
         elapsed = max(0.0, now - self.last_refill)
         if self.tokens is None:
             self.tokens = float(cap)
         if elapsed > 0.0:
-            self.tokens = min(float(self.capacity), float(self.tokens) + rate * elapsed)
+            self.tokens = min(float(self.capacity), float(
+                self.tokens) + self.rate * elapsed)  # type: ignore[operator]
             self.last_refill = now
         self.last_seen = now
         if self.tokens >= 1.0:
@@ -54,9 +58,12 @@ class RequestTracker:
 
 
 class RedisTokenBucket:
-    def __init__(self, redis_url: str, namespace: str = "rl"):
+    def __init__(self, redis_url: str, *, max_connections: int = 100, socket_timeout: float | None = None, namespace: str = "rl"):
         self.pool = redis.ConnectionPool.from_url(
-            redis_url, decode_responses=False, max_connections=100
+            redis_url,
+            decode_responses=False,
+            max_connections=max_connections,
+            socket_timeout=socket_timeout,
         )
         self._client: AsyncRedis | None = None
         self.namespace = namespace
@@ -123,18 +130,17 @@ return allowed
         if sha is None:
             raise RuntimeError("Failed to load rate limiter script in Redis")
         try:
-            call = client.evalsha(
-                sha, 1, key, now_s, str(float(limit)), str(float(window)), str(int(burst))
-            )
+            call = client.evalsha(sha, 1, key, now_s, str(
+                float(limit)), str(float(window)), str(int(burst)))
             res: Any = await cast(Awaitable[Any], call)
         except (NoScriptError, ResponseError):
             self._sha = await client.script_load(self._script)
             sha2 = self._sha
             if sha2 is None:
-                raise RuntimeError("Failed to reload rate limiter script in Redis") from None
-            call2 = client.evalsha(
-                sha2, 1, key, now_s, str(float(limit)), str(float(window)), str(int(burst))
-            )
+                raise RuntimeError(
+                    "Failed to reload rate limiter script in Redis") from None
+            call2 = client.evalsha(sha2, 1, key, now_s, str(
+                float(limit)), str(float(window)), str(int(burst)))
             res = await cast(Awaitable[Any], call2)
         return bool(int(res))
 
@@ -142,16 +148,23 @@ return allowed
 class RateLimiter:
     def __init__(self, config: RateLimitConfig):
         self.config = config
-        self.ip_trackers: dict[str, RequestTracker] = defaultdict(RequestTracker)
-        self.user_trackers: dict[str, RequestTracker] = defaultdict(RequestTracker)
+        self.ip_trackers: dict[str, RequestTracker] = defaultdict(
+            RequestTracker)
+        self.user_trackers: dict[str,
+                                 RequestTracker] = defaultdict(RequestTracker)
         self.redis_backend: RedisTokenBucket | None = (
-            RedisTokenBucket(config.redis_url) if config.redis_url else None
+            RedisTokenBucket(
+                config.redis_url,
+                max_connections=config.redis_max_connections,
+                socket_timeout=config.redis_socket_timeout,
+            )
+            if config.redis_url
+            else None
         )
 
     async def check_rate_limit(self, request: Request, user_id: str | None = None) -> None:
         now = time.time()
         client_ip = request.client.host if request.client else "unknown"
-
         if self.redis_backend is not None:
             if self.config.enable_ip_tracking:
                 ok = await self.redis_backend.is_allowed(
@@ -161,10 +174,8 @@ class RateLimiter:
                     self.config.burst_size,
                 )
                 if not ok:
-                    raise RateLimitException(
-                        "Too many requests from this IP",
-                        details={"retry_after": 60, "limit_type": "ip"},
-                    )
+                    raise RateLimitException("Too many requests from this IP", details={
+                                             "retry_after": 60, "limit_type": "ip"})
             if self.config.enable_user_tracking and user_id:
                 ok = await self.redis_backend.is_allowed(
                     f"user:1h:{user_id}",
@@ -173,36 +184,23 @@ class RateLimiter:
                     self.config.burst_size * 2,
                 )
                 if not ok:
-                    raise RateLimitException(
-                        "Too many requests for this user",
-                        details={"retry_after": 3600, "limit_type": "user"},
-                    )
+                    raise RateLimitException("Too many requests for this user", details={
+                                             "retry_after": 3600, "limit_type": "user"})
             return
-
         if self.config.enable_ip_tracking:
             ip_tracker = self.ip_trackers[client_ip]
-            if not ip_tracker.is_allowed(
-                now, self.config.requests_per_minute, 60.0, self.config.burst_size
-            ):
-                raise RateLimitException(
-                    "Too many requests from this IP",
-                    details={"retry_after": 60, "limit_type": "ip"},
-                )
+            if not ip_tracker.is_allowed(now, self.config.requests_per_minute, 60.0, self.config.burst_size):
+                raise RateLimitException("Too many requests from this IP", details={
+                                         "retry_after": 60, "limit_type": "ip"})
         if self.config.enable_user_tracking and user_id:
             user_tracker = self.user_trackers[user_id]
-            if not user_tracker.is_allowed(
-                now, self.config.requests_per_hour, 3600.0, self.config.burst_size * 2
-            ):
-                raise RateLimitException(
-                    "Too many requests for this user",
-                    details={"retry_after": 3600, "limit_type": "user"},
-                )
+            if not user_tracker.is_allowed(now, self.config.requests_per_hour, 3600.0, self.config.burst_size * 2):
+                raise RateLimitException("Too many requests for this user", details={
+                                         "retry_after": 3600, "limit_type": "user"})
 
     def cleanup_old_trackers(self, max_age: float = 7200.0) -> None:
         now = time.time()
         self.ip_trackers = {
-            ip: tr for ip, tr in self.ip_trackers.items() if now - tr.last_seen < max_age
-        }
+            ip: tr for ip, tr in self.ip_trackers.items() if now - tr.last_seen < max_age}
         self.user_trackers = {
-            uid: tr for uid, tr in self.user_trackers.items() if now - tr.last_seen < max_age
-        }
+            uid: tr for uid, tr in self.user_trackers.items() if now - tr.last_seen < max_age}

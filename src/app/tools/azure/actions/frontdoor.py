@@ -2,8 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
+import logging
+from azure.core.exceptions import HttpResponseError
+
 from ..clients import Clients
 from ..validators import validate_name
+
+logger = logging.getLogger(__name__)
 
 
 async def create_front_door(
@@ -53,8 +58,10 @@ async def create_front_door(
         existing = await clients.run(fd_client.front_doors.get, resource_group, name)
         if existing and not force:
             return "exists", existing.as_dict()
-    except Exception:
-        pass
+    except HttpResponseError as exc:
+        if exc.status_code != 404:
+            logger.error("Front Door retrieval failed: %s", exc.message)
+            return "error", {"code": exc.status_code, "message": exc.message}
 
     frontend_endpoint_name = f"{name}-frontend"
     backend_pool_name = f"{name}-backend-pool"
@@ -199,8 +206,10 @@ async def create_waf_policy(
         existing = await clients.run(fd_client.policies.get, resource_group, name)
         if existing and not force:
             return "exists", existing.as_dict()
-    except Exception:
-        pass
+    except HttpResponseError as exc:
+        if exc.status_code != 404:
+            logger.error("WAF policy retrieval failed: %s", exc.message)
+            return "error", {"code": exc.status_code, "message": exc.message}
 
     policy_settings = PolicySettings(
         enabled_state="Enabled",

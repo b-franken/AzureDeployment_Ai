@@ -3,8 +3,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+import logging
+from azure.core.exceptions import HttpResponseError
+
 from ..clients import Clients
 from ..validators import validate_name
+
+logger = logging.getLogger(__name__)
 
 
 async def create_vm(
@@ -38,14 +43,18 @@ async def create_vm(
     ok, existing = await _safe_get(
         clients.cmp.virtual_machines.get, resource_group, name, clients=clients
     )
-    if ok and existing and not force:
+    if not ok:
+        return "error", existing
+    if existing and not force:
         return "exists", {"vmId": existing.vm_id, "id": existing.id}
     subnet = await clients.run(clients.net.subnets.get, resource_group, vnet_name, subnet_name)
     nic_name = f"{name}-nic"
     nic_ok, nic_existing = await _safe_get(
         clients.net.network_interfaces.get, resource_group, nic_name, clients=clients
     )
-    if not nic_ok or not nic_existing:
+    if not nic_ok:
+        return "error", nic_existing
+    if not nic_existing:
         npoller = await clients.run(
             clients.net.network_interfaces.begin_create_or_update,
             resource_group,
@@ -114,5 +123,8 @@ async def _safe_get(
     try:
         res = await clients.run(pcall, *args, **kwargs)
         return True, res
-    except Exception:
-        return False, None
+    except HttpResponseError as exc:
+        if exc.status_code == 404:
+            return True, None
+        logger.error("Azure request failed: %s", exc.message)
+        return False, {"code": exc.status_code, "message": exc.message}

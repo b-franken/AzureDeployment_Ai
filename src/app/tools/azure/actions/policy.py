@@ -2,8 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
+import logging
+from azure.core.exceptions import HttpResponseError
+
 from ..clients import Clients
 from ..validators import validate_name
+
+logger = logging.getLogger(__name__)
 
 
 async def create_policy_definition(
@@ -47,8 +52,10 @@ async def create_policy_definition(
         )
         if existing and not force:
             return "exists", existing.as_dict()
-    except Exception:
-        pass
+    except HttpResponseError as exc:
+        if exc.status_code != 404:
+            logger.error("Policy definition retrieval failed: %s", exc.message)
+            return "error", {"code": exc.status_code, "message": exc.message}
 
     policy_definition = PolicyDefinition(
         policy_type=policy_type,
@@ -117,8 +124,10 @@ async def create_policy_assignment(
         )
         if existing and not force:
             return "exists", existing.as_dict()
-    except Exception:
-        pass
+    except HttpResponseError as exc:
+        if exc.status_code != 404:
+            logger.error("Policy assignment retrieval failed: %s", exc.message)
+            return "error", {"code": exc.status_code, "message": exc.message}
 
     ncm_typed = cast(
         list[NonComplianceMessage] | None,
@@ -193,8 +202,10 @@ async def create_initiative_definition(
         )
         if existing and not force:
             return "exists", existing.as_dict()
-    except Exception:
-        pass
+    except HttpResponseError as exc:
+        if exc.status_code != 404:
+            logger.error("Initiative retrieval failed: %s", exc.message)
+            return "error", {"code": exc.status_code, "message": exc.message}
 
     policy_definitions_typed = cast(
         list[PolicyDefinitionReference] | None,

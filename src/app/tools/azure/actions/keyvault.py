@@ -3,11 +3,15 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+import logging
+from azure.core.exceptions import HttpResponseError
 from azure.keyvault.secrets import SecretClient
 from azure.mgmt.keyvault.models import Sku as KvSku
 from azure.mgmt.keyvault.models import VaultCreateOrUpdateParameters, VaultProperties
 
 from ..clients import Clients
+
+logger = logging.getLogger(__name__)
 
 
 async def create_keyvault(
@@ -33,7 +37,9 @@ async def create_keyvault(
     ok, existing = await _safe_get(
         clients.kv.vaults.get, resource_group, vault_name, clients=clients
     )
-    if ok and existing and not force:
+    if not ok:
+        return "error", existing
+    if existing and not force:
         summary = (
             "key vault exists with RBAC enabled"
             if existing.properties.enable_rbac_authorization
@@ -81,5 +87,8 @@ async def _safe_get(
     try:
         res = await clients.run(pcall, *args, **kwargs)
         return True, res
-    except Exception:
-        return False, None
+    except HttpResponseError as exc:
+        if exc.status_code == 404:
+            return True, None
+        logger.error("Azure request failed: %s", exc.message)
+        return False, {"code": exc.status_code, "message": exc.message}

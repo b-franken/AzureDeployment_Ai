@@ -1,5 +1,15 @@
+"""Rate limiting utilities with optional Redis or in-memory trackers.
+
+This module implements a token bucket rate limiter that supports both Redis
+and in-memory backends. When using the in-memory backend, stale tracker
+entries are periodically cleaned up to prevent unbounded growth. Cleanup can
+be triggered automatically at the end of :func:`RateLimiter.check_rate_limit`
+or via a background task started with :func:`RateLimiter.start_cleanup_task`.
+"""
+
 from __future__ import annotations
 
+import asyncio
 import time
 from collections import defaultdict
 from collections.abc import Awaitable
@@ -161,6 +171,8 @@ class RateLimiter:
             if config.redis_url
             else None
         )
+        self._last_cleanup = time.time()
+        self._cleanup_task: asyncio.Task[None] | None = None
 
     async def check_rate_limit(self, request: Request, user_id: str | None = None) -> None:
         now = time.time()
@@ -197,6 +209,9 @@ class RateLimiter:
             if not user_tracker.is_allowed(now, self.config.requests_per_hour, 3600.0, self.config.burst_size * 2):
                 raise RateLimitException("Too many requests for this user", details={
                                          "retry_after": 3600, "limit_type": "user"})
+        if now - self._last_cleanup > 60.0:
+            self.cleanup_old_trackers()
+            self._last_cleanup = now
 
     def cleanup_old_trackers(self, max_age: float = 7200.0) -> None:
         now = time.time()
@@ -204,3 +219,20 @@ class RateLimiter:
             ip: tr for ip, tr in self.ip_trackers.items() if now - tr.last_seen < max_age}
         self.user_trackers = {
             uid: tr for uid, tr in self.user_trackers.items() if now - tr.last_seen < max_age}
+
+    def start_cleanup_task(self, interval: float = 300.0) -> None:
+        if self.redis_backend is not None or self._cleanup_task is not None:
+            return
+
+        async def _run() -> None:
+            while True:
+                await asyncio.sleep(interval)
+                self.cleanup_old_trackers()
+
+        self._cleanup_task = asyncio.create_task(_run())
+
+    def stop_cleanup_task(self) -> None:
+        task = self._cleanup_task
+        if task is not None:
+            task.cancel()
+            self._cleanup_task = None

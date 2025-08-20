@@ -4,6 +4,7 @@ from app.ai.agents.base import Agent, AgentContext
 from app.ai.agents.types import ExecutionPlan, ExecutionResult, PlanStep, StepType, StepResult
 from app.ai.nlu import parse_provision_request
 from app.tools.registry import ensure_tools_loaded, get_tool
+from app.ai.agents.provisioning import ProvisioningAgent, ProvisioningAgentConfig
 
 
 class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):

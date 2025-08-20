@@ -347,3 +347,14 @@ def add_context(**kwargs: Any) -> None:
 
 def clear_context() -> None:
     _factory.clear_context()
+
+
+__all__ = [
+    'configure_logging',
+    'get_logger',
+    'add_context',
+    'clear_context',
+    'LoggerFactory',
+    'LoggingMiddleware',
+    'AuditLogger',
+]

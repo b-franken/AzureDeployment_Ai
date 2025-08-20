@@ -30,9 +30,9 @@ async function fetchWithTimeout(
       throw new ApiError(detail, undefined, res.status);
     }
     return res;
-  } catch (err: any) {
+  } catch (err: unknown) {
     if (err instanceof ApiError) throw err;
-    if (err?.name === "AbortError") {
+    if (err instanceof Error && err.name === "AbortError") {
       throw new ApiError(`${context} timed out`, err);
     }
     throw new ApiError(`${context} error`, err);

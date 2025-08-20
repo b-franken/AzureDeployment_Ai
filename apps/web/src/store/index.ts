@@ -92,10 +92,18 @@ export const useAuthStore = create<AuthState>()(
               state.token = data.access_token;
               state.isAuthenticated = true;
             });
-          } catch (err: any) {
-            const message =
-              err?.message ||
-              (typeof err?.detail === "string" ? err.detail : "Login failed");
+          } catch (err: unknown) {
+            let message = "Login failed";
+            if (err instanceof Error) {
+              message = err.message;
+            } else if (
+              err &&
+              typeof err === "object" &&
+              "detail" in err &&
+              typeof (err as { detail?: unknown }).detail === "string"
+            ) {
+              message = (err as { detail: string }).detail;
+            }
             throw new Error(message);
           }
         },

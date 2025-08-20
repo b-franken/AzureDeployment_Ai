@@ -17,7 +17,7 @@ from app.core.config import settings
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# Import auth dependencies conditionally
+
 try:
     from app.api.routes.auth import User, get_current_active_user
 
@@ -30,7 +30,6 @@ except ImportError:
         return None
 
 
-# Development mode check
 IS_DEVELOPMENT = settings.environment == "development"
 if IS_DEVELOPMENT:
     logger.warning("Running in development mode; authentication is disabled.")
@@ -114,7 +113,7 @@ async def chat(
     async def gen() -> AsyncGenerator[bytes, None]:
         chunk = 2048
         for i in range(0, len(text), chunk):
-            part = text[i : i + chunk]
+            part = text[i: i + chunk]
             yield f"data: {part}\n\n".encode()
             await asyncio.sleep(0)
         yield b"data: [DONE]\n\n"
@@ -159,7 +158,7 @@ async def _stream_plain_chat(req: ChatRequest, user: Any) -> AsyncGenerator[byte
         )
         chunk = 2048
         for i in range(0, len(text), chunk):
-            yield f"data: {text[i : i + chunk]}\n\n".encode()
+            yield f"data: {text[i: i + chunk]}\n\n".encode()
             await asyncio.sleep(0)
         yield b"data: [DONE]\n\n"
         return

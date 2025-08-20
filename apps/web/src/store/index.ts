@@ -206,7 +206,7 @@ export const useChatStore = create<ChatState>()(
             model,
             enable_tools: get().enableTools,
           };
-          const data = await apiChatV2(token, payload);
+          const data = await apiChat(token, payload);
           get().addMessage({ role: "assistant", content: data.response });
         } catch (error) {
           set((state) => {

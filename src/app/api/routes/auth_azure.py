@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any, cast
 
 import jwt
-from core.config import API_APP_ID_URI, ISSUER, JWKS_URL
+from app.core.config import API_APP_ID_URI, ISSUER, JWKS_URL
 from fastapi import HTTPException, Request
 from jwt import PyJWK, PyJWKClient, PyJWTError
 

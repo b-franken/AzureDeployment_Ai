@@ -81,14 +81,7 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
         try {
             const history = [...messages, userMessage].map((m) => ({ role: m.role, content: m.content }))
             const { provider, model } = splitModel(modelId)
-
-            // Pass enable_tools parameter based on deployToolsEnabled state
-            const reply = await call_chat(userMessage.content, history, {
-                provider,
-                model,
-                enable_tools: deployToolsEnabled
-            })
-
+            const reply = await call_chat(userMessage.content, history, provider, model, deployToolsEnabled)
             const assistantMessage: Message = {
                 id: crypto.randomUUID(),
                 role: "assistant",
@@ -142,10 +135,7 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
                     <div className="flex items-center gap-3">
                         <LLMSelector value={modelId} onChange={setModelId} />
                         <div className="hidden sm:flex items-center gap-3">
-                            <DeployButton
-                                enabled={deployToolsEnabled}
-                                onToggle={setDeployToolsEnabled}
-                            />
+                            <DeployButton enabled={deployToolsEnabled} onToggle={setDeployToolsEnabled} />
                             <ReviewButton
                                 getPayload={() => ({ chatId: "main", message: lastUserMsg || input, model: modelId })}
                                 onComplete={handleReviewComplete}

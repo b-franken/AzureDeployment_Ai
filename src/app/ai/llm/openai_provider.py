@@ -4,7 +4,8 @@ from collections.abc import AsyncGenerator
 from typing import Any, cast
 
 import httpx
-from openai import AsyncOpenAI
+import logging
+from openai import AsyncOpenAI, OpenAIError
 from openai.types.chat import ChatCompletionMessageParam
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
@@ -13,6 +14,8 @@ from app.ai.llm.base import LLMProvider
 from app.ai.types import Message
 from app.core.config import get_settings
 from app.core.exceptions import ExternalServiceException, retry_on_error
+
+logger = logging.getLogger(__name__)
 
 
 class OpenAIProvider(LLMProvider):
@@ -35,11 +38,16 @@ class OpenAIProvider(LLMProvider):
         try:
             resp = await self._client.models.list()
             models = [m.id for m in resp.data if getattr(m, "id", None)]
-            if models:
-                return models
-        except Exception:
-            pass
-        return ["gpt-4o-mini", "gpt-4o", "gpt-5"]
+            if not models:
+                raise ExternalServiceException(
+                    "No models returned from OpenAI.", retryable=True
+                )
+            return models
+        except (OpenAIError, httpx.HTTPError) as err:
+            logger.warning("Failed to list OpenAI models: %s", err)
+            raise ExternalServiceException(
+                "Unable to retrieve model list from OpenAI.", retryable=True
+            ) from err
 
     @retry_on_error(max_retries=3, delay=1.0)
     async def chat(self, model: str, messages: list[Message]) -> str:
@@ -51,8 +59,10 @@ class OpenAIProvider(LLMProvider):
             try:
                 formatted = cast(
                     list[ChatCompletionMessageParam],
-                    [{"role": str(m["role"]), "content": str(m["content"])}
-                     for m in messages],
+                    [
+                        {"role": str(m["role"]), "content": str(m["content"])}
+                        for m in messages
+                    ],
                 )
                 resp = await self._client.chat.completions.create(
                     model=model or self._default_model,
@@ -60,15 +70,19 @@ class OpenAIProvider(LLMProvider):
                 )
                 usage = getattr(resp, "usage", None)
                 if usage is not None:
-                    span.set_attribute("llm.tokens.prompt",
-                                       getattr(usage, "prompt_tokens", 0))
-                    span.set_attribute("llm.tokens.completion", getattr(
-                        usage, "completion_tokens", 0))
-                    span.set_attribute("llm.tokens.total",
-                                       getattr(usage, "total_tokens", 0))
+                    span.set_attribute(
+                        "llm.tokens.prompt", getattr(usage, "prompt_tokens", 0)
+                    )
+                    span.set_attribute(
+                        "llm.tokens.completion",
+                        getattr(usage, "completion_tokens", 0),
+                    )
+                    span.set_attribute(
+                        "llm.tokens.total", getattr(usage, "total_tokens", 0)
+                    )
                 content = resp.choices[0].message.content or ""
                 return content.strip()
-            except Exception as err:
+            except (OpenAIError, httpx.HTTPError) as err:
                 current = trace.get_current_span()
                 if current:
                     current.record_exception(err)
@@ -114,14 +128,18 @@ class OpenAIProvider(LLMProvider):
                 resp = await self._client.chat.completions.create(**kwargs)
                 usage = getattr(resp, "usage", None)
                 if usage is not None:
-                    span.set_attribute("llm.tokens.prompt",
-                                       getattr(usage, "prompt_tokens", 0))
-                    span.set_attribute("llm.tokens.completion", getattr(
-                        usage, "completion_tokens", 0))
-                    span.set_attribute("llm.tokens.total",
-                                       getattr(usage, "total_tokens", 0))
+                    span.set_attribute(
+                        "llm.tokens.prompt", getattr(usage, "prompt_tokens", 0)
+                    )
+                    span.set_attribute(
+                        "llm.tokens.completion",
+                        getattr(usage, "completion_tokens", 0),
+                    )
+                    span.set_attribute(
+                        "llm.tokens.total", getattr(usage, "total_tokens", 0)
+                    )
                 return resp.model_dump()
-            except Exception as err:
+            except (OpenAIError, httpx.HTTPError) as err:
                 current = trace.get_current_span()
                 if current:
                     current.record_exception(err)
@@ -161,12 +179,17 @@ class OpenAIProvider(LLMProvider):
                         piece = getattr(ch.delta, "content", None)
                         if piece:
                             yield str(piece)
-                    except Exception:
+                    except (IndexError, AttributeError, KeyError) as e:
+                        logger.debug("Malformed stream event: %s", e)
                         continue
                 yield ""
-            except Exception as err:
+            except (OpenAIError, httpx.HTTPError) as err:
                 current = trace.get_current_span()
                 if current:
                     current.record_exception(err)
                     current.set_status(Status(StatusCode.ERROR, str(err)))
-                raise
+                raise ExternalServiceException(
+                    "The AI service is busy or unreachable. Please retry. If this keeps happening, "
+                    "try a smaller prompt or wait a minute.",
+                    retryable=True,
+                ) from err

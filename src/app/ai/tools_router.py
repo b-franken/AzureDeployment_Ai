@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -13,6 +14,7 @@ from app.ai.nlu import maybe_map_provision
 from app.ai.nlu.embeddings_classifier import EmbeddingsClassifierService
 from app.ai.tools_definitions import build_openai_tools
 from app.common.envs import Env
+from app.core.exceptions import ExternalServiceException
 from app.platform.audit.logger import (
     AuditEvent,
     AuditEventType,
@@ -20,6 +22,8 @@ from app.platform.audit.logger import (
     AuditSeverity,
 )
 from app.tools.registry import ensure_tools_loaded, get_tool, list_tools
+
+logger = logging.getLogger(__name__)
 
 _TOOLS_PLAN = (
     'You can call a tool by returning only JSON like {"tool":"name","args":{...}}. '
@@ -79,7 +83,7 @@ def _extract_json_object(text: str) -> dict[str, object] | None:
         try:
             obj = json.loads(s)
             return obj if isinstance(obj, dict) else None
-        except Exception:
+        except json.JSONDecodeError:
             pass
     start = s.find("{")
     if start == -1:
@@ -99,7 +103,7 @@ def _extract_json_object(text: str) -> dict[str, object] | None:
     try:
         obj = json.loads(s[start:end_idx].strip())
         return obj if isinstance(obj, dict) else None
-    except Exception:
+    except json.JSONDecodeError:
         return None
 
 
@@ -170,7 +174,7 @@ def _pick_args(raw_args: object) -> dict[str, object]:
         try:
             j = json.loads(raw_args)
             return j if isinstance(j, dict) else {}
-        except Exception:
+        except json.JSONDecodeError:
             return {}
     if isinstance(raw_args, dict):
         return dict(raw_args)
@@ -206,7 +210,8 @@ def _maybe_wrap_approval(
             wrapped: dict[str, object] = dict(result)
             wrapped["status"] = "approval_required"
             return wrapped
-    except Exception:
+    except (TypeError, ValueError) as e:
+        logger.debug("Failed to wrap approval metadata: %s", e)
         return result
     return result
 
@@ -387,14 +392,14 @@ async def maybe_call_tool(
     if context and context.classifier:
         try:
             _ = context.classifier.predict_proba([user_input])
-        except Exception:
-            pass
+        except (RuntimeError, ValueError) as e:
+            logger.debug("Classifier prediction failed: %s", e)
     if not enable_tools:
         try:
             return await generate_response(
                 user_input, list(memory or []), model=model, provider=provider
             )
-        except Exception as e:
+        except ExternalServiceException as e:
             await _log_error(e, context)
             return "Failed to generate response."
     ensure_tools_loaded()
@@ -457,7 +462,7 @@ async def maybe_call_tool(
                     res = await _run_tool(name, dict(args_obj), context)
                     return json.dumps(res, ensure_ascii=False, indent=2)
                 return await _run_tool_and_explain(name, dict(args_obj), provider, model, context)
-            except Exception:
+            except json.JSONDecodeError:
                 return "Invalid direct tool syntax. Use: tool:tool_name {json-args}"
         if preferred_tool:
             t = get_tool(preferred_tool)
@@ -503,6 +508,6 @@ async def maybe_call_tool(
             res = await _run_tool(name, args, context)
             return json.dumps(res, ensure_ascii=False, indent=2)
         return await _run_tool_and_explain(name, args, provider, model, context)
-    except Exception as e:
+    except (ExternalServiceException, ValueError) as e:
         await _log_error(e, context)
-        return "An unexpected error occurred."
+        return str(e)

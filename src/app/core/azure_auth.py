@@ -10,8 +10,10 @@ from azure.identity import (
     EnvironmentCredential,
     DefaultAzureCredential,
     ChainedTokenCredential,
+    CredentialUnavailableError,
 )
 from azure.core.credentials import TokenCredential
+from azure.core.exceptions import AzureError
 from app.core.config import settings, AzureConfig
 import logging
 
@@ -131,24 +133,24 @@ def build_credential(cfg: Optional[AzureConfig] = None, use_cache: bool = True) 
 
             try:
                 credentials.append(EnvironmentCredential(authority=authority))
-            except Exception:
-                pass
+            except CredentialUnavailableError as e:
+                logger.debug("EnvironmentCredential unavailable: %s", e)
 
             try:
                 credentials.append(ManagedIdentityCredential())
-            except Exception:
-                pass
+            except CredentialUnavailableError as e:
+                logger.debug("ManagedIdentityCredential unavailable: %s", e)
 
             if cfg.enable_cli_fallback:
                 try:
                     credentials.append(AzureCliCredential())
-                except Exception:
-                    pass
+                except (CredentialUnavailableError, OSError, ValueError) as e:
+                    logger.debug("AzureCliCredential unavailable: %s", e)
 
             try:
                 credentials.append(AzureDeveloperCliCredential())
-            except Exception:
-                pass
+            except (CredentialUnavailableError, OSError, ValueError) as e:
+                logger.debug("AzureDeveloperCliCredential unavailable: %s", e)
 
             if credentials:
                 credential = ChainedTokenCredential(*credentials)
@@ -158,10 +160,9 @@ def build_credential(cfg: Optional[AzureConfig] = None, use_cache: bool = True) 
                 credential = DefaultAzureCredential(authority=authority)
                 logger.info("Using default Azure credential")
 
-    except Exception as e:
+    except CredentialUnavailableError as e:
         logger.error(f"Failed to build credential: {e}")
-        credential = DefaultAzureCredential(authority=authority)
-        logger.warning("Falling back to DefaultAzureCredential")
+        raise
 
     if credential and use_cache:
         _CREDENTIAL_CACHE = credential
@@ -197,6 +198,6 @@ async def test_credential(credential: Optional[TokenCredential] = None) -> bool:
     try:
         token = credential.get_token(_ARM_SCOPE)
         return token is not None and token.token is not None
-    except Exception as e:
+    except AzureError as e:
         logger.error(f"Credential test failed: {e}")
         return False

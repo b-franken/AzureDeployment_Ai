@@ -4,6 +4,7 @@ from collections.abc import AsyncGenerator
 from typing import Any, cast
 
 import httpx
+import logging
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 from opentelemetry import trace
@@ -13,6 +14,8 @@ from app.ai.llm.base import LLMProvider
 from app.ai.types import Message
 from app.core.config import get_settings
 from app.core.exceptions import ExternalServiceException, retry_on_error
+
+logger = logging.getLogger(__name__)
 
 
 class OpenAIProvider(LLMProvider):
@@ -37,8 +40,8 @@ class OpenAIProvider(LLMProvider):
             models = [m.id for m in resp.data if getattr(m, "id", None)]
             if models:
                 return models
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to list OpenAI models: %s", exc)
         return ["gpt-4o-mini", "gpt-4o", "gpt-5"]
 
     @retry_on_error(max_retries=3, delay=1.0)

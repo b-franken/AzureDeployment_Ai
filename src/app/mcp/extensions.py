@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, TypedDict, cast
 
 from mcp.server.fastmcp import Context
@@ -8,6 +9,8 @@ from mcp.server.fastmcp import Context
 from app.mcp.server import MCPServer
 from app.tools.azure.clients import get_clients
 from app.tools.provision.orchestrator import ProvisionOrchestrator
+
+logger = logging.getLogger(__name__)
 
 
 class PlanPreviewArgs(TypedDict, total=False):
@@ -46,8 +49,8 @@ def register_extensions(server: MCPServer) -> None:
         if isinstance(res.get("output"), str):
             try:
                 res["output"] = json.loads(res["output"])
-            except Exception:
-                pass
+            except json.JSONDecodeError as exc:
+                logger.debug("Failed to parse output JSON: %s", exc)
         return cast(dict[str, Any], res)
 
     @mcp.resource("azure://quotas/{subscription_id}/{location}")
@@ -77,7 +80,8 @@ def register_extensions(server: MCPServer) -> None:
     ) -> str:
         try:
             obj = json.loads(plan_json)
-        except Exception:
+        except json.JSONDecodeError as exc:
+            logger.debug("Failed to parse plan JSON: %s", exc)
             obj = {"raw": plan_json}
         title = f"Plan preview for {audience}"
         bullets = [

@@ -114,8 +114,8 @@ class DatabasePool:
             logger.warning("Connection validation failed: %s", exc)
             try:
                 conn.terminate()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Failed to terminate connection: %s", exc)
             return False
 
     async def _health_check_loop(self) -> None:

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import time
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
 import httpx
 
 from app.core.config import OLLAMA_BASE_URL
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -45,8 +48,8 @@ class ModelRegistry:
             discovered = adapter.list_models()
             if discovered:
                 models = discovered
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to list models for %s: %s", provider, exc)
         self._cache[key] = (models, now)
         return models
 
@@ -64,7 +67,8 @@ class ModelRegistry:
                     if isinstance(m, dict) and "name" in m:
                         names.append(m["name"])
                 return names or defaults
-        except Exception:
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.debug("Failed to fetch Ollama models: %s", exc)
             return defaults
 
 

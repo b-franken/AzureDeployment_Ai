@@ -131,24 +131,24 @@ def build_credential(cfg: Optional[AzureConfig] = None, use_cache: bool = True) 
 
             try:
                 credentials.append(EnvironmentCredential(authority=authority))
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("EnvironmentCredential unavailable: %s", exc)
 
             try:
                 credentials.append(ManagedIdentityCredential())
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("ManagedIdentityCredential unavailable: %s", exc)
 
             if cfg.enable_cli_fallback:
                 try:
                     credentials.append(AzureCliCredential())
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("AzureCliCredential unavailable: %s", exc)
 
             try:
                 credentials.append(AzureDeveloperCliCredential())
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("AzureDeveloperCliCredential unavailable: %s", exc)
 
             if credentials:
                 credential = ChainedTokenCredential(*credentials)

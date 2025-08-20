@@ -118,12 +118,14 @@ class AsyncMemoryStore:
             if conn:
                 try:
                     await asyncio.shield(conn.execute("SELECT 1"))
-                    self._connection_queue.put_nowait(conn)
-                except Exception:
+                    async with self._pool_lock:
+                        self._pool.append(conn)
+                except Exception as exc:
+                    logger.debug("Failed to validate connection: %s", exc)
                     try:
                         await asyncio.shield(conn.close())
-                    except Exception:
-                        pass
+                    except Exception as close_exc:
+                        logger.debug("Failed to close connection: %s", close_exc)
                     new_conn = await aiosqlite.connect(str(self.db_path))
                     await new_conn.execute("PRAGMA journal_mode=WAL")
                     await new_conn.execute("PRAGMA synchronous=NORMAL")

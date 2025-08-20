@@ -325,14 +325,10 @@ def inject(container: Container) -> Callable[[Callable[..., Any]], Callable[...,
                     try:
                         dependency = await container.aget(param.annotation)
                         kwargs[name] = dependency
-                    except Exception as exc:  # pragma: no cover - defensive
-                        message = (
-                            f"Failed to resolve dependency '{param.annotation}' for parameter "
-                            f"'{name}' in {func.__name__}: {exc}"
-                        )
-                        if strict:
-                            raise ConfigurationError(str(param.annotation), message) from exc
-                        logger.warning(message)
+
+                    except Exception as exc:
+                        logger.debug("Failed to inject dependency %s: %s", name, exc)
+
             if asyncio.iscoroutinefunction(func):
                 return await func(*args, **kwargs)
             return func(*args, **kwargs)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import logging
 from typing import Any, Literal, cast
 
 from app.ai.nlu import parse_provision_request
@@ -47,7 +48,8 @@ def _load_avm_backend_cls() -> Any | None:
     try:
         mod = importlib.import_module(".backends.avm_bicep", package=__package__)
         return mod.BicepAvmBackend
-    except Exception:
+    except Exception as exc:
+        logger.debug("Failed to load AVM Bicep backend: %s", exc)
         return None
 
 
@@ -237,8 +239,8 @@ class ProvisionOrchestrator(Tool):
                             plan_result["cost_estimate"] = estimator.estimate_monthly_cost(
                                 {"resources": [spec["parameters"]]}
                             )
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("Failed to estimate costs: %s", exc)
 
                 return (
                     _ok(f"{chosen_label} plan", plan_result)
@@ -254,3 +256,4 @@ class ProvisionOrchestrator(Tool):
             )
         except Exception as e:
             return _err("orchestrator error", str(e))
+logger = logging.getLogger(__name__)

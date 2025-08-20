@@ -54,7 +54,8 @@ class AsyncMemoryStore:
         max_total_memory: int = MAX_TOTAL_MEMORY,
         pool_size: int = 5,
     ):
-        self.db_path = Path(db_path) if db_path else Path.home() / ".devops_ai" / "memory.db"
+        self.db_path = Path(db_path) if db_path else Path.home(
+        ) / ".devops_ai" / "memory.db"
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.max_memory = int(max_memory)
         self.max_total_memory = int(max_total_memory)
@@ -106,17 +107,34 @@ class AsyncMemoryStore:
     @asynccontextmanager
     async def get_connection(self) -> AsyncIterator[aiosqlite.Connection]:
         await self.initialize()
-        while True:
-            async with self._pool_lock:
-                if self._pool:
-                    conn: aiosqlite.Connection = self._pool.pop()
-                    break
-            await asyncio.sleep(0.01)
+        conn: aiosqlite.Connection | None = None
         try:
+            while True:
+                async with self._pool_lock:
+                    if self._pool:
+                        conn = self._pool.pop()
+                        break
+                await asyncio.sleep(0.01)
             yield conn
+        except Exception as e:
+            logger.error(f"Connection error: {e}")
+            raise
         finally:
-            async with self._pool_lock:
-                self._pool.append(conn)
+            if conn:
+                try:
+                    await asyncio.shield(conn.execute("SELECT 1"))
+                    async with self._pool_lock:
+                        self._pool.append(conn)
+                except Exception:
+                    try:
+                        await asyncio.shield(conn.close())
+                    except Exception:
+                        pass
+                    new_conn = await aiosqlite.connect(str(self.db_path))
+                    await new_conn.execute("PRAGMA journal_mode=WAL")
+                    await new_conn.execute("PRAGMA synchronous=NORMAL")
+                    async with self._pool_lock:
+                        self._pool.append(new_conn)
 
     async def store_message(
         self,
@@ -294,7 +312,8 @@ class SyncMemoryStore:
         max_memory: int = MAX_MEMORY,
         max_total_memory: int = MAX_TOTAL_MEMORY,
     ):
-        self.db_path = Path(db_path) if db_path else Path.home() / ".devops_ai" / "memory_sync.db"
+        self.db_path = Path(db_path) if db_path else Path.home(
+        ) / ".devops_ai" / "memory_sync.db"
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.max_memory = int(max_memory)
         self.max_total_memory = int(max_total_memory)

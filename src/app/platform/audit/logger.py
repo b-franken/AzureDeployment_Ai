@@ -122,7 +122,7 @@ class AuditLogger:
             try:
                 p.parent.mkdir(parents=True, exist_ok=True)
                 test = p.parent / ".audit_write_test"
-                with open(test, "w") as f:
+                with open(test, "w", encoding="utf-8") as f:
                     f.write("ok")
                 test.unlink(missing_ok=True)
                 return str(p)
@@ -131,7 +131,9 @@ class AuditLogger:
         return str(Path(tempfile.gettempdir()) / "devops_ai_audit.db")
 
     def _connect(self) -> sqlite3.Connection:
-        return sqlite3.connect(self.db_path, check_same_thread=False, timeout=30)
+        conn = sqlite3.connect(
+            self.db_path, check_same_thread=False, timeout=30)
+        return conn
 
     def _init_database(self) -> None:
         with self._lock:
@@ -167,14 +169,18 @@ class AuditLogger:
                 )
                 """
             )
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON audit_events(timestamp)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_event_type ON audit_events(event_type)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_user_id ON audit_events(user_id)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_resource_id ON audit_events(resource_id)")
             conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_correlation_id ON audit_events(correlation_id)"
-            )
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_hash ON audit_events(hash)")
+                "CREATE INDEX IF NOT EXISTS idx_timestamp ON audit_events(timestamp)")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_event_type ON audit_events(event_type)")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_user_id ON audit_events(user_id)")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_resource_id ON audit_events(resource_id)")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_correlation_id ON audit_events(correlation_id)")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_hash ON audit_events(hash)")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS audit_metadata (
@@ -246,54 +252,61 @@ class AuditLogger:
                     event.correlation_id,
                     json.dumps(event.details, ensure_ascii=False),
                     json.dumps(event.tags, ensure_ascii=False),
-                    json.dumps(event.compliance_frameworks, ensure_ascii=False),
+                    json.dumps(event.compliance_frameworks,
+                               ensure_ascii=False),
                     event.hash,
                 ),
             )
             conn.commit()
 
+    def _build_query(self, query: AuditQuery) -> tuple[str, list[Any]]:
+        conditions: list[str] = []
+        params: list[Any] = []
+        if query.start_time:
+            conditions.append("timestamp >= ?")
+            params.append(query.start_time.isoformat())
+        if query.end_time:
+            conditions.append("timestamp <= ?")
+            params.append(query.end_time.isoformat())
+        if query.event_types and len(query.event_types) > 0:
+            placeholders = ",".join(["?"] * len(query.event_types))
+            conditions.append(f"event_type IN ({placeholders})")
+            params.extend([et.value for et in query.event_types])
+        if query.severities and len(query.severities) > 0:
+            placeholders = ",".join(["?"] * len(query.severities))
+            conditions.append(f"severity IN ({placeholders})")
+            params.extend([s.value for s in query.severities])
+        if query.user_ids and len(query.user_ids) > 0:
+            placeholders = ",".join(["?"] * len(query.user_ids))
+            conditions.append(f"user_id IN ({placeholders})")
+            params.extend(query.user_ids)
+        if query.resource_groups and len(query.resource_groups) > 0:
+            placeholders = ",".join(["?"] * len(query.resource_groups))
+            conditions.append(f"resource_group IN ({placeholders})")
+            params.extend(query.resource_groups)
+        if query.resource_types and len(query.resource_types) > 0:
+            placeholders = ",".join(["?"] * len(query.resource_types))
+            conditions.append(f"resource_type IN ({placeholders})")
+            params.extend(query.resource_types)
+        if query.subscription_ids and len(query.subscription_ids) > 0:
+            placeholders = ",".join(["?"] * len(query.subscription_ids))
+            conditions.append(f"subscription_id IN ({placeholders})")
+            params.extend(query.subscription_ids)
+        if query.correlation_ids and len(query.correlation_ids) > 0:
+            placeholders = ",".join(["?"] * len(query.correlation_ids))
+            conditions.append(f"correlation_id IN ({placeholders})")
+            params.extend(query.correlation_ids)
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
+        sql = f"SELECT * FROM audit_events WHERE {where_clause} ORDER BY timestamp DESC LIMIT ? OFFSET ?"
+        params.extend([int(query.limit), int(query.offset)])
+        return sql, params
+
     async def query_events(self, query: AuditQuery) -> list[AuditEvent]:
         with self._lock:
-            conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=30)
+            conn = sqlite3.connect(
+                self.db_path, check_same_thread=False, timeout=30)
             cursor = conn.cursor()
-            sql = "SELECT * FROM audit_events WHERE 1=1"
-            params: list[Any] = []
-            if query.start_time:
-                sql += " AND timestamp >= ?"
-                params.append(query.start_time.isoformat())
-            if query.end_time:
-                sql += " AND timestamp <= ?"
-                params.append(query.end_time.isoformat())
-            if query.event_types:
-                placeholders = ",".join("?" * len(query.event_types))
-                sql += f" AND event_type IN ({placeholders})"
-                params.extend([et.value for et in query.event_types])
-            if query.severities:
-                placeholders = ",".join("?" * len(query.severities))
-                sql += f" AND severity IN ({placeholders})"
-                params.extend([s.value for s in query.severities])
-            if query.user_ids:
-                placeholders = ",".join("?" * len(query.user_ids))
-                sql += f" AND user_id IN ({placeholders})"
-                params.extend(query.user_ids)
-            if query.resource_groups:
-                placeholders = ",".join("?" * len(query.resource_groups))
-                sql += f" AND resource_group IN ({placeholders})"
-                params.extend(query.resource_groups)
-            if query.resource_types:
-                placeholders = ",".join("?" * len(query.resource_types))
-                sql += f" AND resource_type IN ({placeholders})"
-                params.extend(query.resource_types)
-            if query.subscription_ids:
-                placeholders = ",".join("?" * len(query.subscription_ids))
-                sql += f" AND subscription_id IN ({placeholders})"
-                params.extend(query.subscription_ids)
-            if query.correlation_ids:
-                placeholders = ",".join("?" * len(query.correlation_ids))
-                sql += f" AND correlation_id IN ({placeholders})"
-                params.extend(query.correlation_ids)
-            sql += " ORDER BY timestamp DESC"
-            sql += f" LIMIT {query.limit} OFFSET {query.offset}"
+            sql, params = self._build_query(query)
             cursor.execute(sql, params)
             rows = cursor.fetchall()
             conn.close()
@@ -320,7 +333,8 @@ class AuditLogger:
                         correlation_id=row[16],
                         details=json.loads(row[17]) if row[17] else {},
                         tags=json.loads(row[18]) if row[18] else {},
-                        compliance_frameworks=json.loads(row[19]) if row[19] else [],
+                        compliance_frameworks=json.loads(
+                            row[19]) if row[19] else [],
                         hash=row[20],
                     )
                 )
@@ -328,7 +342,8 @@ class AuditLogger:
 
     async def get_statistics(self, start_time: datetime, end_time: datetime) -> dict[str, Any]:
         with self._lock:
-            conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=30)
+            conn = sqlite3.connect(
+                self.db_path, check_same_thread=False, timeout=30)
             cursor = conn.cursor()
             cursor.execute(
                 """
@@ -375,9 +390,11 @@ class AuditLogger:
 
     async def verify_integrity(self, event_id: str) -> bool:
         with self._lock:
-            conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=30)
+            conn = sqlite3.connect(
+                self.db_path, check_same_thread=False, timeout=30)
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM audit_events WHERE id = ?", (event_id,))
+            cursor.execute(
+                "SELECT * FROM audit_events WHERE id = ?", (event_id,))
             row = cursor.fetchone()
             conn.close()
             if not row:
@@ -400,7 +417,8 @@ class AuditLogger:
     ) -> dict[str, Any]:
         query = AuditQuery(start_time=start_time, end_time=end_time)
         events = await self.query_events(query)
-        filtered_events = [e for e in events if framework in e.compliance_frameworks]
+        filtered_events = [
+            e for e in events if framework in e.compliance_frameworks]
         if framework == "gdpr":
             return self._format_gdpr_report(filtered_events)
         if framework == "hipaa":
@@ -439,7 +457,8 @@ class AuditLogger:
         }
 
     def _format_hipaa_report(self, events: list[AuditEvent]) -> dict[str, Any]:
-        phi_access_events = [asdict(e) for e in events if "phi" in e.tags or "healthcare" in e.tags]
+        phi_access_events = [
+            asdict(e) for e in events if "phi" in e.tags or "healthcare" in e.tags]
         security_events = [
             asdict(e) for e in events if e.event_type == AuditEventType.SECURITY_ALERT
         ]
@@ -510,7 +529,8 @@ class AuditLogger:
     async def cleanup_old_events(self) -> None:
         cutoff_date = datetime.utcnow() - timedelta(days=self._retention_days)
         with self._lock:
-            conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=30)
+            conn = sqlite3.connect(
+                self.db_path, check_same_thread=False, timeout=30)
             cursor = conn.cursor()
             if self._compliance_mode:
                 cursor.execute(
@@ -552,12 +572,10 @@ class AuditMiddleware:
             event_type = AuditEventType.DEPLOYMENT_STARTED
         else:
             event_type = AuditEventType.DEPLOYMENT_COMPLETED
-
         if result == "success":
             severity = AuditSeverity.INFO
         else:
             severity = AuditSeverity.ERROR
-
         event = AuditEvent(
             event_type=event_type,
             severity=severity,
@@ -624,7 +642,8 @@ class AuditMiddleware:
             resource_id=resource_id,
             action="compliance_check",
             result="violation",
-            details={"framework": framework, "violation": violation, **(details or {})},
+            details={"framework": framework,
+                     "violation": violation, **(details or {})},
             compliance_frameworks=[framework],
         )
         await self.audit_logger.log_event(event)

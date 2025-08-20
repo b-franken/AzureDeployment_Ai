@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { devtools, persist } from "zustand/middleware";
 import { immer } from "zustand/middleware/immer";
+import { withErrorHandling } from "./error-boundary";
 
 import {
   login as apiLogin,
@@ -16,8 +17,6 @@ import {
   type ChatMsg,
   type DeployRequestItem,
 } from "@/lib/api";
-
-type Json = Record<string, unknown>;
 
 interface User {
   id: string;
@@ -40,7 +39,7 @@ interface ChatMessage {
   role: "user" | "assistant" | "system";
   content: string;
   timestamp: Date;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 interface ChatState {
@@ -84,7 +83,7 @@ export const useAuthStore = create<AuthState>()(
         user: null,
         token: null,
         isAuthenticated: false,
-        login: async (email: string, password: string) => {
+        login: withErrorHandling("auth/login", async (email: string, password: string) => {
           try {
             const data = await apiLogin(email, password);
             set((state) => {
@@ -106,8 +105,8 @@ export const useAuthStore = create<AuthState>()(
             }
             throw new Error(message);
           }
-        },
-        logout: async () => {
+        }),
+        logout: withErrorHandling("auth/logout", async () => {
           const token = get().token;
           try {
             if (token) await apiLogout(token);
@@ -118,8 +117,8 @@ export const useAuthStore = create<AuthState>()(
               state.isAuthenticated = false;
             });
           }
-        },
-        refresh: async () => {
+        }),
+        refresh: withErrorHandling("auth/refresh", async () => {
           const token = get().token;
           if (!token) return;
           try {
@@ -131,7 +130,7 @@ export const useAuthStore = create<AuthState>()(
           } catch {
             await get().logout();
           }
-        },
+        }),
       })),
       {
         name: "auth-storage",
@@ -151,8 +150,7 @@ function toDeployment(d: DeployRequestItem): DeploymentRequest {
     status: d.status,
     request: d.request,
     environment: d.environment,
-    cost_estimate:
-      typeof d.cost_estimate === "number" ? d.cost_estimate : undefined,
+    cost_estimate: typeof d.cost_estimate === "number" ? d.cost_estimate : undefined,
     created_at: new Date(d.created_at),
     updated_at: new Date(d.updated_at),
   };
@@ -191,7 +189,7 @@ export const useChatStore = create<ChatState>()(
           state.enableTools = enable;
         });
       },
-      sendMessage: async (content) => {
+      sendMessage: withErrorHandling("chat/send", async (content: string) => {
         const { token } = useAuthStore.getState();
         if (!token) throw new Error("Not authenticated");
         set((state) => {
@@ -212,15 +210,15 @@ export const useChatStore = create<ChatState>()(
           get().addMessage({ role: "assistant", content: data.response });
         } catch (error) {
           set((state) => {
-            state.error =
-              error instanceof Error ? error.message : "Unknown error";
+            state.error = error instanceof Error ? error.message : "Unknown error";
           });
+          throw error;
         } finally {
           set((state) => {
             state.isLoading = false;
           });
         }
-      },
+      }),
     }))
   )
 );
@@ -231,7 +229,7 @@ export const useDeploymentStore = create<DeploymentState>()(
       requests: [],
       currentRequest: null,
       isDeploying: false,
-      fetchRequests: async () => {
+      fetchRequests: withErrorHandling("deploy/fetch", async () => {
         const { token } = useAuthStore.getState();
         if (!token) return;
         const data = await listDeployRequests(token);
@@ -239,16 +237,16 @@ export const useDeploymentStore = create<DeploymentState>()(
         set((state) => {
           state.requests = (list || []).map(toDeployment);
         });
-      },
-      createRequest: async (request) => {
+      }),
+      createRequest: withErrorHandling("deploy/create", async (request) => {
         const { token } = useAuthStore.getState();
         if (!token) throw new Error("Not authenticated");
         const created = await createDeployRequest(token, request as any);
         set((state) => {
           state.requests.push(toDeployment(created));
         });
-      },
-      approveRequest: async (id) => {
+      }),
+      approveRequest: withErrorHandling("deploy/approve", async (id) => {
         const { token } = useAuthStore.getState();
         if (!token) throw new Error("Not authenticated");
         await approveDeployRequest(token, id);
@@ -259,8 +257,8 @@ export const useDeploymentStore = create<DeploymentState>()(
             r.updated_at = new Date();
           }
         });
-      },
-      rejectRequest: async (id) => {
+      }),
+      rejectRequest: withErrorHandling("deploy/reject", async (id) => {
         const { token } = useAuthStore.getState();
         if (!token) throw new Error("Not authenticated");
         await rejectDeployRequest(token, id);
@@ -271,8 +269,8 @@ export const useDeploymentStore = create<DeploymentState>()(
             r.updated_at = new Date();
           }
         });
-      },
-      deployRequest: async (id) => {
+      }),
+      deployRequest: withErrorHandling("deploy/deploy", async (id) => {
         const { token } = useAuthStore.getState();
         if (!token) throw new Error("Not authenticated");
         set((state) => {
@@ -292,7 +290,7 @@ export const useDeploymentStore = create<DeploymentState>()(
             state.isDeploying = false;
           });
         }
-      },
+      }),
     }))
   )
 );

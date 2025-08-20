@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import secrets
 from datetime import datetime, timedelta
 from typing import Annotated
 
@@ -56,14 +57,22 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-secret-key-change-this-in-production")
+def get_jwt_secret() -> str:
+    secret = os.getenv("JWT_SECRET_KEY")
+    if not secret:
+        if os.getenv("ENVIRONMENT", "development") == "production":
+            raise RuntimeError("JWT_SECRET_KEY must be set in production")
+        secret = secrets.token_urlsafe(32)
+        logger.warning("Using generated JWT secret for development")
+    return secret
+
+
+SECRET_KEY = get_jwt_secret()
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 REFRESH_TOKEN_EXPIRE_DAYS = 7
 
-
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
-
 
 USERS_DB = {}
 
@@ -243,7 +252,8 @@ async def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
         "subscription_id": user.subscription_id,
     }
 
-    access_token = create_access_token(token_data, expires_delta=access_token_expires)
+    access_token = create_access_token(
+        token_data, expires_delta=access_token_expires)
     refresh_token = create_refresh_token(token_data)
 
     return {
@@ -267,7 +277,8 @@ async def refresh_token(refresh_token: str):
         email = payload.get("sub")
         user = get_user(email)
         if not user:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
 
         access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         token_data = {
@@ -277,7 +288,8 @@ async def refresh_token(refresh_token: str):
             "subscription_id": user.subscription_id,
         }
 
-        new_access_token = create_access_token(token_data, expires_delta=access_token_expires)
+        new_access_token = create_access_token(
+            token_data, expires_delta=access_token_expires)
 
         return {
             "access_token": new_access_token,

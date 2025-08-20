@@ -1,56 +1,36 @@
 from __future__ import annotations
 
-# ruff: noqa: I001
 import os
-from pathlib import Path
 from functools import lru_cache
+from pathlib import Path
 from typing import Any, Literal
 
 from cryptography.fernet import Fernet
-from pydantic import (
-    AliasChoices,
-    AnyHttpUrl,
-    BaseModel,
-    Field,
-    PostgresDsn,
-    RedisDsn,
-    SecretStr,
-    field_validator,
-    model_validator,
-)
+from pydantic import AnyHttpUrl, BaseModel, Field, PostgresDsn, RedisDsn, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class SecurityConfig(BaseModel):
     jwt_secret_key: SecretStr = Field(
-        default_factory=lambda: SecretStr(Fernet.generate_key().decode())
-    )
-    jwt_algorithm: str = Field(default="HS256")
+        default_factory=lambda: SecretStr(Fernet.generate_key().decode()))
+    jwt_algorithm: str = "HS256"
     jwt_expiration_hours: int = Field(default=24, ge=1, le=168)
     encryption_key: SecretStr = Field(
-        default_factory=lambda: SecretStr(Fernet.generate_key().decode())
-    )
-    api_rate_limit_per_minute: int = Field(default=60, ge=1)
-    api_rate_limit_per_hour: int = Field(default=1000, ge=1)
+        default_factory=lambda: SecretStr(Fernet.generate_key().decode()))
     allowed_cors_origins: list[AnyHttpUrl] = Field(default_factory=list)
-    enable_audit_logging: bool = Field(default=True)
-    min_password_length: int = Field(default=12, ge=8)
-    password_history_count: int = Field(default=5, ge=0)
-
-    @property
-    def jwt_secret(self) -> SecretStr:
-        return self.jwt_secret_key
+    enable_audit_logging: bool = True
 
     @field_validator("encryption_key", mode="before")
     @classmethod
     def validate_encryption_key(cls, v: Any) -> str:
-        if not v:
-            return Fernet.generate_key().decode()
         raw = v.get_secret_value() if isinstance(v, SecretStr) else v
+        if not raw:
+            return Fernet.generate_key().decode()
         try:
-            Fernet(raw.encode() if isinstance(raw, str) else raw)
+            Fernet(raw if isinstance(raw, bytes) else raw.encode()
+                   if isinstance(raw, str) else str(raw).encode())
         except Exception as err:
-            raise ValueError("Invalid encryption key format") from err
+            raise ValueError("Invalid encryption key") from err
         return raw if isinstance(raw, str) else raw.decode()
 
 
@@ -63,150 +43,73 @@ class DatabaseConfig(BaseModel):
     db_pool_recycle: int = Field(default=3600, ge=60)
     redis_max_connections: int = Field(default=50, ge=1)
     redis_socket_timeout: int = Field(default=5, ge=1)
-    enable_query_logging: bool = Field(default=False)
+    enable_query_logging: bool = False
     slow_query_threshold_ms: int = Field(default=100, ge=1)
 
 
 class AzureConfig(BaseModel):
-    subscription_id: str | None = Field(default=None, pattern="^[a-f0-9-]{36}$")
+    subscription_id: str | None = Field(
+        default=None, pattern="^[a-f0-9-]{36}$")
     tenant_id: str | None = Field(default=None, pattern="^[a-f0-9-]{36}$")
-    client_id: str | None = Field(default=None)
-    client_secret: SecretStr | None = Field(default=None)
-    default_location: str = Field(default="westeurope")
-    allowed_locations: list[str] = Field(
-        default_factory=lambda: [
-            "westeurope",
-            "northeurope",
-            "eastus",
-            "westus",
-            "uksouth",
-        ]
-    )
-    resource_naming_prefix: str = Field(default="devops", pattern="^[a-z][a-z0-9-]{1,20}$")
-    max_vms_per_deployment: int = Field(default=10, ge=1, le=100)
-    max_cost_per_month: float = Field(default=10000.0, ge=0)
-    deployment_timeout_seconds: int = Field(default=3600, ge=60)
-    max_retry_attempts: int = Field(
-        default=3,
-        ge=1,
-        le=10,
-        validation_alias=AliasChoices("AZURE__MAX_RETRY_ATTEMPTS", "RETRY_MAX_ATTEMPTS"),
-    )
-    retry_backoff_seconds: float = Field(
-        default=1.0,
-        ge=0.1,
-        le=60,
-        validation_alias=AliasChoices("AZURE__RETRY_BACKOFF_SECONDS", "RETRY_BACKOFF_SECONDS"),
-    )
+    client_id: str | None = None
+    client_secret: SecretStr | None = None
+    default_location: str = "westeurope"
 
 
 class LLMConfig(BaseModel):
-    default_provider: Literal["openai", "gemini", "ollama", "azure"] = Field(
-        default="openai", validation_alias=AliasChoices("LLM__DEFAULT_PROVIDER", "LLM_PROVIDER")
-    )
-    openai_api_key: SecretStr | None = Field(
-        default=None,
-        validation_alias=AliasChoices("LLM__OPENAI_API_KEY", "OPENAI_API_KEY", "OPENAI_KEY"),
-    )
-    openai_api_base: str = Field(
-        default="https://api.openai.com/v1",
-        validation_alias=AliasChoices("LLM__OPENAI_API_BASE", "OPENAI_BASE_URL", "OPENAI_API_BASE"),
-    )
-    openai_model: str = Field(
-        default="gpt-5",
-        validation_alias=AliasChoices("LLM__OPENAI_MODEL", "OPENAI_MODEL"),
-    )
+    default_provider: Literal["openai", "gemini", "ollama", "azure"] = "openai"
+    openai_api_key: SecretStr | None = None
+    openai_api_base: str = "https://api.openai.com/v1"
+    openai_model: str = "gpt-5"
     openai_max_tokens: int = Field(default=4096, ge=1, le=128000)
     openai_temperature: float = Field(default=0.7, ge=0, le=2)
-    gemini_api_key: SecretStr | None = Field(
-        default=None,
-        validation_alias=AliasChoices("LLM__GEMINI_API_KEY", "GEMINI_API_KEY"),
-    )
-    gemini_model: str = Field(
-        default="gemini-1.5-pro",
-        validation_alias=AliasChoices("LLM__GEMINI_MODEL", "GEMINI_MODEL"),
-    )
-    ollama_base_url: str = Field(
-        default="http://localhost:11434",
-        validation_alias=AliasChoices(
-            "LLM__OLLAMA_BASE_URL", "OLLAMA_BASE_URL", "LLM__OLLAMA__BASE_URL"
-        ),
-    )
-    ollama_model: str = Field(
-        default="llama3.1",
-        validation_alias=AliasChoices("LLM__OLLAMA_MODEL", "OLLAMA_MODEL"),
-    )
+    gemini_api_key: SecretStr | None = None
+    gemini_model: str = "gemini-1.5-pro"
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model: str = "llama3.1"
     requests_per_minute: int = Field(default=60, ge=1)
     tokens_per_minute: int = Field(default=90000, ge=1)
-    enable_response_caching: bool = Field(default=True)
+    enable_response_caching: bool = True
     cache_ttl_seconds: int = Field(default=3600, ge=0)
     max_context_length: int = Field(default=16000, ge=100)
 
 
 class ObservabilityConfig(BaseModel):
-    enable_metrics: bool = Field(default=True)
+    enable_metrics: bool = True
     metrics_port: int = Field(default=9090, ge=1024, le=65535)
-    enable_tracing: bool = Field(default=True)
+    enable_tracing: bool = True
     trace_sample_rate: float = Field(default=0.1, ge=0, le=1)
-    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+    log_level: Literal["DEBUG", "INFO",
+                       "WARNING", "ERROR", "CRITICAL"] = "INFO"
     log_format: Literal["json", "text"] = "json"
     log_file: Path | None = None
     log_rotation_size_mb: int = Field(default=100, ge=1)
     log_retention_days: int = Field(default=30, ge=1)
-    enable_health_checks: bool = Field(default=True)
+    enable_health_checks: bool = True
     health_check_interval_seconds: int = Field(default=30, ge=1)
-    applicationinsights_connection_string: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices(
-            "OBSERVABILITY__APPLICATIONINSIGHTS_CONNECTION_STRING",
-            "APPLICATIONINSIGHTS_CONNECTION_STRING",
-        ),
-    )
-    otel_service_name: str = Field(
-        default="devops-ai-api",
-        validation_alias=AliasChoices("OBSERVABILITY__OTEL_SERVICE_NAME", "OTEL_SERVICE_NAME"),
-    )
+    applicationinsights_connection_string: str | None = None
+    otel_service_name: str = "devops-ai-api"
 
 
 class CacheConfig(BaseModel):
-    enable_caching: bool = Field(default=True)
+    enable_caching: bool = True
     cache_backend: Literal["memory", "redis", "memcached"] = "redis"
     memory_cache_max_size: int = Field(default=1000, ge=1)
     memory_cache_ttl_seconds: int = Field(default=300, ge=1)
     default_ttl_seconds: int = Field(default=3600, ge=1)
     max_ttl_seconds: int = Field(default=86400, ge=1)
-    auto_invalidate_on_update: bool = Field(default=True)
+    auto_invalidate_on_update: bool = True
 
 
 class MemoryConfig(BaseModel):
-    max_memory: int = Field(
-        default=25,
-        ge=1,
-        validation_alias=AliasChoices("MEMORY__MAX_MEMORY", "MAX_MEMORY"),
-    )
-    max_total_memory: int = Field(
-        default=100,
-        ge=1,
-        validation_alias=AliasChoices("MEMORY__MAX_TOTAL_MEMORY", "MAX_TOTAL_MEMORY"),
-    )
+    max_memory: int = Field(default=25, ge=1)
+    max_total_memory: int = Field(default=100, ge=1)
 
 
 class RetryConfig(BaseModel):
-    request_timeout_seconds: float = Field(
-        default=60.0,
-        ge=1,
-        validation_alias=AliasChoices("HTTP__REQUEST_TIMEOUT_SECONDS", "REQUEST_TIMEOUT_SECONDS"),
-    )
-    retry_max_attempts: int = Field(
-        default=3,
-        ge=0,
-        validation_alias=AliasChoices("HTTP__RETRY_MAX_ATTEMPTS", "RETRY_MAX_ATTEMPTS"),
-    )
-    retry_backoff_seconds: float = Field(
-        default=0.8,
-        ge=0,
-        validation_alias=AliasChoices("HTTP__RETRY_BACKOFF_SECONDS", "RETRY_BACKOFF_SECONDS"),
-    )
+    request_timeout_seconds: float = Field(default=60.0, ge=1)
+    retry_max_attempts: int = Field(default=3, ge=0)
+    retry_backoff_seconds: float = Field(default=0.8, ge=0)
 
 
 class Settings(BaseSettings):
@@ -218,67 +121,34 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    app_name: str = Field(default="DevOps AI Platform")
-    app_version: str = Field(default="2.0.0")
-    environment: Literal["development", "staging", "production"] = "development"
-    debug: bool = Field(default=False)
+    app_name: str = "DevOps AI Platform"
+    app_version: str = "2.0.0"
+    environment: Literal["development",
+                         "staging", "production"] = "development"
+    debug: bool = False
 
-    api_host: str = Field(default="0.0.0.0")
+    api_host: str = "0.0.0.0"
     api_port: int = Field(default=8000, ge=1024, le=65535)
-    api_prefix: str = Field(default="/api")
-    api_docs_enabled: bool = Field(default=True)
+    api_prefix: str = "/api"
+    api_docs_enabled: bool = True
 
-    security: SecurityConfig = Field(default_factory=lambda: SecurityConfig())
-    database: DatabaseConfig = Field(default_factory=lambda: DatabaseConfig())
-    azure: AzureConfig = Field(default_factory=lambda: AzureConfig())
-    llm: LLMConfig = Field(default_factory=lambda: LLMConfig())
-    observability: ObservabilityConfig = Field(default_factory=lambda: ObservabilityConfig())
-    cache: CacheConfig = Field(default_factory=lambda: CacheConfig())
-    memory: MemoryConfig = Field(default_factory=lambda: MemoryConfig())
-    retry: RetryConfig = Field(default_factory=lambda: RetryConfig())
+    security: SecurityConfig = Field(default_factory=SecurityConfig)
+    database: DatabaseConfig = Field(default_factory=DatabaseConfig)
+    azure: AzureConfig = Field(default_factory=AzureConfig)
+    llm: LLMConfig = Field(default_factory=LLMConfig)
+    observability: ObservabilityConfig = Field(
+        default_factory=ObservabilityConfig)
+    cache: CacheConfig = Field(default_factory=CacheConfig)
+    memory: MemoryConfig = Field(default_factory=MemoryConfig)
+    retry: RetryConfig = Field(default_factory=RetryConfig)
 
-    use_api: bool = Field(
-        default=False,
-        validation_alias=AliasChoices("API__USE_API", "USE_API"),
-    )
-    api_base_url: str = Field(
-        default="http://localhost:8000",
-        validation_alias=AliasChoices(
-            "API__BASE_URL",
-            "API_BASE_URL",
-        ),
-    )
-
-    api_jwt_secret: SecretStr | None = Field(
-        default=None,
-        validation_alias=AliasChoices("API_JWT_SECRET"),
-    )
-    api_jwt_hours: int | None = Field(
-        default=None,
-        validation_alias=AliasChoices("API_JWT_HOURS"),
-    )
-    openai_api_key: SecretStr | None = Field(
-        default=None,
-        validation_alias=AliasChoices(
-            "OPENAI_API_KEY",
-            "OPENAI_KEY",
-        ),
-    )
-    openai_model: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("OPENAI_MODEL"),
-    )
-    llm_provider: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("LLM_PROVIDER"),
-    )
-    applicationinsights_connection_string: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("APPLICATIONINSIGHTS_CONNECTION_STRING"),
-    )
-    otel_service_name: str | None = Field(
-        default=None, validation_alias=AliasChoices("OTEL_SERVICE_NAME")
-    )
+    api_jwt_secret: SecretStr | None = None
+    api_jwt_hours: int | None = None
+    openai_api_key: SecretStr | None = None
+    openai_model: str | None = None
+    llm_provider: str | None = None
+    applicationinsights_connection_string: str | None = None
+    otel_service_name: str | None = None
 
     @model_validator(mode="after")
     def apply_legacy_env(self) -> Settings:
@@ -291,90 +161,71 @@ class Settings(BaseSettings):
         if self.openai_model:
             self.llm.openai_model = self.openai_model
         if self.llm_provider:
-            self.llm.default_provider = self.llm_provider  # type: ignore[assignment]
+            # type: ignore[assignment]
+            self.llm.default_provider = self.llm_provider
         if self.applicationinsights_connection_string:
-            self.observability.applicationinsights_connection_string = (
-                self.applicationinsights_connection_string
-            )
+            self.observability.applicationinsights_connection_string = self.applicationinsights_connection_string
         if self.otel_service_name:
             self.observability.otel_service_name = self.otel_service_name
         return self
 
-    def validate_environment_settings(self) -> None:
+    @model_validator(mode="after")
+    def validate_environment(self) -> Settings:
         if self.environment == "production":
-            if not self.security.jwt_secret_key:
-                raise RuntimeError("JWT secret key must be set in production environment")
             if self.debug:
-                raise RuntimeError("Debug mode must be disabled in production environment")
+                raise ValueError("Debug must be disabled in production")
             if not self.security.enable_audit_logging:
-                raise RuntimeError("Audit logging must be enabled in production environment")
-            if self.api_docs_enabled:
-                raise RuntimeError("API docs must be disabled in production environment")
+                raise ValueError("Audit logging must be enabled in production")
+            jwt_env_present = any(
+                os.getenv(k) for k in ["API_JWT_SECRET", "SECURITY__JWT_SECRET_KEY"]
+            )
+            if not jwt_env_present:
+                raise ValueError(
+                    "JWT secret must be set via environment in production")
+        return self
 
 
-class ConfigManager:
-    _instance: ConfigManager | None = None
-    _settings: Settings | None = None
-    _cipher: Fernet | None = None
-
-    def __new__(cls) -> ConfigManager:
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
+class Config:
     def __init__(self) -> None:
-        if self._settings is None:
-            self._load_settings()
-
-    def _load_settings(self) -> None:
         self._settings = Settings()
         key = self._settings.security.encryption_key.get_secret_value()
-        self._cipher = Fernet(key.encode() if isinstance(key, str) else key)
-        self._settings.validate_environment_settings()
+        key_bytes = key if isinstance(key, bytes) else key.encode()
+        self._cipher = Fernet(key_bytes)
 
     @property
     def settings(self) -> Settings:
-        if self._settings is None:
-            self._load_settings()
-        return self._settings  # type: ignore
+        return self._settings
 
     def encrypt_value(self, value: str) -> str:
-        if not self._cipher:
-            raise RuntimeError("Encryption not configured")
         return self._cipher.encrypt(value.encode()).decode()
 
     def decrypt_value(self, encrypted: str) -> str:
-        if not self._cipher:
-            raise RuntimeError("Encryption not configured")
         return self._cipher.decrypt(encrypted.encode()).decode()
 
     def reload(self) -> None:
-        self._settings = None
-        self._cipher = None
-        self._load_settings()
+        self.__init__()
 
     def export_safe_config(self) -> dict[str, Any]:
-        config_dict = self.settings.model_dump()
-        sensitive_paths = [
+        cfg = self._settings.model_dump()
+        redactions = [
             ["security", "jwt_secret_key"],
             ["security", "encryption_key"],
             ["azure", "client_secret"],
             ["llm", "openai_api_key"],
             ["llm", "gemini_api_key"],
         ]
-        for path in sensitive_paths:
-            current = config_dict
+        for path in redactions:
+            current = cfg
             for key in path[:-1]:
-                if key in current and isinstance(current[key], dict):
-                    current = current[key]
+                current = current.get(key, {})
             if path[-1] in current:
                 current[path[-1]] = "***REDACTED***"
-        return config_dict
+        return cfg
 
 
 @lru_cache
-def get_config() -> ConfigManager:
-    return ConfigManager()
+def get_config() -> Config:
+    return Config()
 
 
 @lru_cache
@@ -396,23 +247,22 @@ JWT_SECRET = settings.security.jwt_secret_key.get_secret_value()
 JWT_ALGORITHM = settings.security.jwt_algorithm
 JWT_EXPIRATION_HOURS = settings.security.jwt_expiration_hours
 
-POSTGRES_DSN = str(settings.database.postgres_dsn) if settings.database.postgres_dsn else None
-REDIS_DSN = str(settings.database.redis_dsn) if settings.database.redis_dsn else None
+POSTGRES_DSN = str(
+    settings.database.postgres_dsn) if settings.database.postgres_dsn else None
+REDIS_DSN = str(
+    settings.database.redis_dsn) if settings.database.redis_dsn else None
 
 AZURE_SUBSCRIPTION_ID = settings.azure.subscription_id
 AZURE_TENANT_ID = settings.azure.tenant_id
 AZURE_CLIENT_ID = settings.azure.client_id
-AZURE_CLIENT_SECRET = (
-    settings.azure.client_secret.get_secret_value() if settings.azure.client_secret else None
-)
+AZURE_CLIENT_SECRET = settings.azure.client_secret.get_secret_value(
+) if settings.azure.client_secret else None
 
 LLM_PROVIDER = settings.llm.default_provider
-OPENAI_API_KEY = (
-    settings.llm.openai_api_key.get_secret_value() if settings.llm.openai_api_key else None
-)
-GEMINI_API_KEY = (
-    settings.llm.gemini_api_key.get_secret_value() if settings.llm.gemini_api_key else None
-)
+OPENAI_API_KEY = settings.llm.openai_api_key.get_secret_value(
+) if settings.llm.openai_api_key else None
+GEMINI_API_KEY = settings.llm.gemini_api_key.get_secret_value(
+) if settings.llm.gemini_api_key else None
 OLLAMA_BASE_URL = settings.llm.ollama_base_url
 
 OPENAI_MODEL = settings.llm.openai_model

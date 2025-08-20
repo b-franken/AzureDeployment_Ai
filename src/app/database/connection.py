@@ -1,8 +1,8 @@
 # src/app/database/connection.py
 from __future__ import annotations
-import contextlib
 
 import asyncio
+import contextlib
 import logging
 import os
 import random
@@ -63,7 +63,8 @@ class DatabasePool:
                 )
                 self._stop_event.clear()
                 self._health_task = asyncio.create_task(
-                    self._health_check_loop(), name="db-health-check")
+                    self._health_check_loop(), name="db-health-check"
+                )
 
     async def close(self) -> None:
         async with self._lock:
@@ -105,7 +106,9 @@ class DatabasePool:
         if conn.is_closed():
             return False
         try:
-            await asyncio.wait_for(conn.fetchval(self.validation_query), timeout=self.validation_timeout)
+            await asyncio.wait_for(
+                conn.fetchval(self.validation_query), timeout=self.validation_timeout
+            )
             return True
         except Exception as exc:
             logger.warning("Connection validation failed: %s", exc)
@@ -120,7 +123,9 @@ class DatabasePool:
         try:
             while not self._stop_event.is_set():
                 jitter = random.uniform(0, self.health_check_interval * 0.2)
-                await asyncio.wait_for(self._stop_event.wait(), timeout=self.health_check_interval + jitter)
+                await asyncio.wait_for(
+                    self._stop_event.wait(), timeout=self.health_check_interval + jitter
+                )
                 if self._stop_event.is_set():
                     break
                 try:
@@ -128,11 +133,16 @@ class DatabasePool:
                     failures = 0
                 except Exception as exc:
                     failures += 1
-                    logger.error("Database health check failed (%s/%s): %s",
-                                 failures, self.health_failure_threshold, exc)
+                    logger.error(
+                        "Database health check failed (%s/%s): %s",
+                        failures,
+                        self.health_failure_threshold,
+                        exc,
+                    )
                     if failures >= self.health_failure_threshold:
                         logger.warning(
-                            "Restarting database pool after consecutive health check failures")
+                            "Restarting database pool after consecutive health check failures"
+                        )
                         await self._restart_pool()
                         failures = 0
         except asyncio.CancelledError:
@@ -151,8 +161,7 @@ class DatabasePool:
         async with pool.acquire() as connection:
             is_valid = await self._validate(connection)
             if not is_valid:
-                raise ConnectionError(
-                    "Failed to validate database connection from pool")
+                raise ConnectionError("Failed to validate database connection from pool")
             yield connection
 
     async def execute(self, query: str, *args: Any) -> str:

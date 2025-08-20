@@ -200,8 +200,7 @@ class unified_nlu_parser:
         ckpt: str | None = None,
     ) -> None:
         self.location_patterns = [
-            (re.compile(p, re.IGNORECASE), loc)
-            for p, loc in type(self).location_patterns
+            (re.compile(p, re.IGNORECASE), loc) for p, loc in type(self).location_patterns
         ]
         self.resource_patterns = {
             k: [re.compile(p, re.IGNORECASE) for p in v]

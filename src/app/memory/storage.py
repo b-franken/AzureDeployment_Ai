@@ -54,8 +54,7 @@ class AsyncMemoryStore:
         max_total_memory: int = MAX_TOTAL_MEMORY,
         pool_size: int = 5,
     ):
-        self.db_path = Path(db_path) if db_path else Path.home(
-        ) / ".devops_ai" / "memory.db"
+        self.db_path = Path(db_path) if db_path else Path.home() / ".devops_ai" / "memory.db"
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.max_memory = int(max_memory)
         self.max_total_memory = int(max_total_memory)
@@ -312,8 +311,7 @@ class SyncMemoryStore:
         max_memory: int = MAX_MEMORY,
         max_total_memory: int = MAX_TOTAL_MEMORY,
     ):
-        self.db_path = Path(db_path) if db_path else Path.home(
-        ) / ".devops_ai" / "memory_sync.db"
+        self.db_path = Path(db_path) if db_path else Path.home() / ".devops_ai" / "memory_sync.db"
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.max_memory = int(max_memory)
         self.max_total_memory = int(max_total_memory)

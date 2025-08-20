@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from typing import Any
 
-import logging
 from azure.core.exceptions import HttpResponseError
 
 from ..clients import Clients

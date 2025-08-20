@@ -16,20 +16,15 @@ try:
 
     pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 except Exception:
+    import base64
     import hashlib
     import secrets
-    import base64
 
     class SimplePwdContext:
         def hash(self, password: str) -> str:
             salt = secrets.token_bytes(16)
             iterations = 100_000
-            hash_bytes = hashlib.pbkdf2_hmac(
-                "sha256",
-                password.encode(),
-                salt,
-                iterations
-            )
+            hash_bytes = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, iterations)
             salt_b64 = base64.b64encode(salt).decode("utf-8")
             hash_b64 = base64.b64encode(hash_bytes).decode("utf-8")
             return f"{iterations}${salt_b64}${hash_b64}"
@@ -41,10 +36,7 @@ except Exception:
                 salt = base64.b64decode(salt_b64)
                 expected_hash = base64.b64decode(hash_b64)
                 hash_bytes = hashlib.pbkdf2_hmac(
-                    "sha256",
-                    plain_password.encode(),
-                    salt,
-                    iterations
+                    "sha256", plain_password.encode(), salt, iterations
                 )
                 return secrets.compare_digest(hash_bytes, expected_hash)
             except Exception as exc:
@@ -252,8 +244,7 @@ async def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
         "subscription_id": user.subscription_id,
     }
 
-    access_token = create_access_token(
-        token_data, expires_delta=access_token_expires)
+    access_token = create_access_token(token_data, expires_delta=access_token_expires)
     refresh_token = create_refresh_token(token_data)
 
     return {
@@ -277,8 +268,7 @@ async def refresh_token(refresh_token: str):
         email = payload.get("sub")
         user = get_user(email)
         if not user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
 
         access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         token_data = {
@@ -288,8 +278,7 @@ async def refresh_token(refresh_token: str):
             "subscription_id": user.subscription_id,
         }
 
-        new_access_token = create_access_token(
-            token_data, expires_delta=access_token_expires)
+        new_access_token = create_access_token(token_data, expires_delta=access_token_expires)
 
         return {
             "access_token": new_access_token,

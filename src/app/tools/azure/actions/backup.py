@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import logging
 from datetime import UTC
 
-import logging
 from azure.core.exceptions import HttpResponseError
 
 from ..clients import Clients

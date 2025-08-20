@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import os
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, suppress
 from collections.abc import Awaitable, Callable
 
 from fastapi import FastAPI, Request, Response
@@ -49,8 +50,20 @@ limiter = RateLimiter(
         ),
         redis_max_connections=settings.database.redis_max_connections,
         redis_socket_timeout=float(settings.database.redis_socket_timeout),
+        tracker_max_age=float(
+            settings.security.api_rate_limit_tracker_max_age_seconds
+        ),
+        cleanup_interval=float(
+            settings.security.api_rate_limit_cleanup_interval_seconds
+        ),
     )
 )
+
+
+async def _limiter_cleanup_loop() -> None:
+    while True:
+        await asyncio.sleep(limiter.config.cleanup_interval)
+        limiter.cleanup_old_trackers(max_age=limiter.config.tracker_max_age)
 
 
 @asynccontextmanager
@@ -58,11 +71,17 @@ async def lifespan(app: FastAPI):
     logger.info("API starting up", version=settings.app_version,
                 environment=settings.environment)
     app_insights.initialize()
-    yield
-    rb = limiter.redis_backend
-    if rb and rb._client:
-        await rb._client.aclose()
-    logger.info("API shutting down")
+    cleanup_task = asyncio.create_task(_limiter_cleanup_loop())
+    try:
+        yield
+    finally:
+        cleanup_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await cleanup_task
+        rb = limiter.redis_backend
+        if rb and rb._client:
+            await rb._client.aclose()
+        logger.info("API shutting down")
 
 
 app = FastAPI(

@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import os
-from contextlib import asynccontextmanager
 from collections.abc import Awaitable, Callable
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,6 +13,7 @@ from app.api.middleware.authentication import install_auth_middleware
 from app.api.middleware.correlation import install_correlation_middleware
 from app.api.middleware.rate_limiter import RateLimitConfig, RateLimiter
 from app.api.middleware.telemetry import install_telemetry_middleware
+from app.api.routes.agents import router as agents_router
 from app.api.routes.audit import router as audit_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.chat import router as chat_router
@@ -23,13 +23,12 @@ from app.api.routes.health import router as health_router
 from app.api.routes.metrics import router as metrics_router
 from app.api.routes.review import router as review_router
 from app.api.routes.status import router as status_router
+from app.api.routes.structured import router as structured_router
+from app.api.routes.ws import router as ws_router
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.observability.app_insights import app_insights
 from app.observability.prometheus import instrument_app
-from app.api.routes.ws import router as ws_router
-from app.api.routes.agents import router as agents_router
-
 
 logger = get_logger(__name__)
 
@@ -102,7 +101,7 @@ async def _rl_mw(request: Request, call_next: Callable[[Request], Awaitable[Resp
 
 @app.get("/_routes")
 def _routes() -> list[str]:
-    return [r.path for r in app.routes if isinstance(r, (APIRoute, Route, Mount, WebSocketRoute))]
+    return [r.path for r in app.routes if isinstance(r, APIRoute | Route | Mount | WebSocketRoute)]
 
 
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
@@ -114,5 +113,6 @@ app.include_router(audit_router, prefix="/api/audit", tags=["audit"])
 app.include_router(metrics_router, prefix="/api/metrics", tags=["metrics"])
 app.include_router(health_router, prefix="/api", tags=["health"])
 app.include_router(status_router, prefix="/api", tags=["status"])
+app.include_router(structured_router, prefix="/api/structured", tags=["structured"])
 app.include_router(agents_router, prefix="/api/agents", tags=["agents"])
 app.include_router(ws_router, tags=["ws"])

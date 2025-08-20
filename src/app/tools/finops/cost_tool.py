@@ -2,10 +2,18 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from typing import Any
+import logging
 
 from app.tools.base import Tool, ToolResult
 
 from .analyzer import CostAnalyzer, CostManagementSystem, CostOptimizationStrategy
+
+
+logger = logging.getLogger(__name__)
+
+
+class ParsingError(ValueError):
+    """Raised when parsing fails in non-tolerant contexts."""
 
 
 class AzureCosts(Tool):
@@ -119,17 +127,25 @@ class AzureCosts(Tool):
             return CostOptimizationStrategy.CONSERVATIVE
         return CostOptimizationStrategy.BALANCED
 
-    def _parse_date(self, value: Any) -> datetime | None:
+    def _parse_date(self, value: Any, *, tolerant: bool = True) -> datetime | None:
         if isinstance(value, datetime):
             return value
         if isinstance(value, str):
             try:
                 return datetime.fromisoformat(value)
-            except ValueError:
+            except ValueError as exc:
+                snippet = value[:100]
+                logger.warning("Invalid date format: %s", snippet)
+                if not tolerant:
+                    raise ParsingError(f"Invalid date: {value}") from exc
                 return None
+        snippet = str(value)[:100]
+        logger.warning("Unsupported date type: %s", snippet)
+        if not tolerant:
+            raise ParsingError(f"Unsupported date type: {type(value)}")
         return None
 
-    def _parse_thresholds(self, value: Any) -> list[float] | None:
+    def _parse_thresholds(self, value: Any, *, tolerant: bool = True) -> list[float] | None:
         if value is None:
             return None
         if isinstance(value, int | float):
@@ -139,16 +155,27 @@ class AzureCosts(Tool):
                 # allow comma or space separated strings like "0.8,1.0" or "0.8 1.0"
                 parts = [p for p in value.replace(",", " ").split() if p]
                 return [float(p) for p in parts] if parts else None
-            except ValueError:
+            except ValueError as exc:
+                snippet = value[:100]
+                logger.warning("Invalid thresholds string: %s", snippet)
+                if not tolerant:
+                    raise ParsingError(f"Invalid thresholds: {value}") from exc
                 return None
         if isinstance(value, list):
             out: list[float] = []
             for v in value:
                 try:
                     out.append(float(v))
-                except (TypeError, ValueError):
-                    continue
+                except (TypeError, ValueError) as exc:
+                    snippet = str(v)[:100]
+                    logger.warning("Invalid threshold item: %s", snippet)
+                    if not tolerant:
+                        raise ParsingError(f"Invalid threshold value: {v}") from exc
             return out or None
+        snippet = str(value)[:100]
+        logger.warning("Unsupported thresholds type: %s", snippet)
+        if not tolerant:
+            raise ParsingError(f"Unsupported thresholds type: {type(value)}")
         return None
 
     def _insights_to_csv(self, insights: dict[str, Any]) -> str:

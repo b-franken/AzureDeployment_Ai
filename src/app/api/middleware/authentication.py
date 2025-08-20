@@ -3,7 +3,10 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 
 import jwt
+import logging
 from fastapi import FastAPI, Request, Response
+
+logger = logging.getLogger(__name__)
 
 
 def install_auth_middleware(app: FastAPI) -> None:
@@ -20,6 +23,6 @@ def install_auth_middleware(app: FastAPI) -> None:
                 user_id = payload.get("oid") or payload.get("sub") or payload.get("user_id")
                 if isinstance(user_id, str) and user_id:
                     request.state.user_id = user_id
-            except Exception:
-                pass
+            except jwt.PyJWTError as exc:
+                logger.debug("Failed to decode JWT token: %s", exc)
         return await call_next(request)

@@ -323,8 +323,8 @@ def inject(container: Container) -> Callable[[Callable[..., Any]], Callable[...,
                     try:
                         dependency = await container.aget(param.annotation)
                         kwargs[name] = dependency
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("Failed to inject dependency %s: %s", name, exc)
             if asyncio.iscoroutinefunction(func):
                 return await func(*args, **kwargs)
             return func(*args, **kwargs)

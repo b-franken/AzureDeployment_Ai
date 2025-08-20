@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import copy
+import logging
 
 from app.tools.registry import list_tools
+
+logger = logging.getLogger(__name__)
 
 
 def _to_openai_tool_schema(
@@ -24,8 +27,8 @@ def _to_openai_tool_schema(
             action.pop("enum", None)
             props["action"] = action
             params["properties"] = props
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to sanitize azure_provision schema: %s", exc)
     return {
         "type": "function",
         "function": {
@@ -41,6 +44,7 @@ def build_openai_tools() -> list[dict[str, object]]:
     for t in list_tools():
         try:
             tools.append(_to_openai_tool_schema(t.name, t.description, t.schema))
-        except Exception:
+        except Exception as exc:
+            logger.debug("Failed to build schema for tool %s: %s", getattr(t, "name", "unknown"), exc)
             continue
     return tools

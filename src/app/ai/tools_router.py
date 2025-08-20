@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -20,6 +21,8 @@ from app.platform.audit.logger import (
     AuditSeverity,
 )
 from app.tools.registry import ensure_tools_loaded, get_tool, list_tools
+
+logger = logging.getLogger(__name__)
 
 _TOOLS_PLAN = (
     'You can call a tool by returning only JSON like {"tool":"name","args":{...}}. '
@@ -79,8 +82,8 @@ def _extract_json_object(text: str) -> dict[str, object] | None:
         try:
             obj = json.loads(s)
             return obj if isinstance(obj, dict) else None
-        except Exception:
-            pass
+        except json.JSONDecodeError as exc:
+            logger.debug("Failed to parse JSON object: %s", exc)
     start = s.find("{")
     if start == -1:
         return None
@@ -99,7 +102,8 @@ def _extract_json_object(text: str) -> dict[str, object] | None:
     try:
         obj = json.loads(s[start:end_idx].strip())
         return obj if isinstance(obj, dict) else None
-    except Exception:
+    except json.JSONDecodeError as exc:
+        logger.debug("Failed to parse JSON object: %s", exc)
         return None
 
 
@@ -387,8 +391,8 @@ async def maybe_call_tool(
     if context and context.classifier:
         try:
             _ = context.classifier.predict_proba([user_input])
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Classifier prediction failed: %s", exc)
     if not enable_tools:
         try:
             return await generate_response(

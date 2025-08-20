@@ -3,8 +3,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+import logging
+from azure.core.exceptions import HttpResponseError
+
 from ..clients import Clients
 from ..validators import validate_name
+
+logger = logging.getLogger(__name__)
 
 _PCall = Callable[..., Any]
 
@@ -13,8 +18,11 @@ async def _safe_get(pcall: _PCall, *args: Any, clients: Clients, **kwargs: Any) 
     try:
         res = await clients.run(pcall, *args, **kwargs)
         return True, res
-    except Exception:
-        return False, None
+    except HttpResponseError as exc:
+        if exc.status_code == 404:
+            return True, None
+        logger.error("Azure request failed: %s", exc.message)
+        return False, {"code": exc.status_code, "message": exc.message}
 
 
 async def create_sql(
@@ -43,7 +51,9 @@ async def create_sql(
     ok, existing = await _safe_get(
         clients.sql.servers.get, resource_group, server_name, clients=clients
     )
-    if ok and existing and not force:
+    if not ok:
+        return "error", existing
+    if existing and not force:
         server = existing
     else:
         poller = await clients.run(
@@ -68,7 +78,9 @@ async def create_sql(
             db_name,
             clients=clients,
         )
-        if okd and existing_db and not force:
+        if not okd:
+            return "error", existing_db
+        if existing_db and not force:
             db_out = existing_db.as_dict()
         else:
             dpoller = await clients.run(

@@ -2,8 +2,13 @@ from __future__ import annotations
 
 from datetime import UTC
 
+import logging
+from azure.core.exceptions import HttpResponseError
+
 from ..clients import Clients
 from ..validators import validate_name
+
+logger = logging.getLogger(__name__)
 
 
 async def create_recovery_services_vault(
@@ -50,8 +55,10 @@ async def create_recovery_services_vault(
         existing = await clients.run(rs_client.vaults.get, resource_group, name)
         if existing and not force:
             return "exists", existing.as_dict()
-    except Exception:
-        pass
+    except HttpResponseError as exc:
+        if exc.status_code != 404:
+            logger.error("Vault retrieval failed: %s", exc.message)
+            return "error", {"code": exc.status_code, "message": exc.message}
 
     vault = Vault(
         location=location,
@@ -139,8 +146,10 @@ async def create_backup_policy(
         )
         if existing and not force:
             return "exists", existing.as_dict()
-    except Exception:
-        pass
+    except HttpResponseError as exc:
+        if exc.status_code != 404:
+            logger.error("Backup policy retrieval failed: %s", exc.message)
+            return "error", {"code": exc.status_code, "message": exc.message}
 
     if not schedule_run_times:
         schedule_run_times = [

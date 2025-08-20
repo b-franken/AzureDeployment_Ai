@@ -3,8 +3,13 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+import logging
+from azure.core.exceptions import HttpResponseError
+
 from ..clients import Clients
 from ..validators import validate_name
+
+logger = logging.getLogger(__name__)
 
 
 async def _safe_get(
@@ -13,8 +18,11 @@ async def _safe_get(
     try:
         res = await clients.run(pcall, *args, **kwargs)
         return True, res
-    except Exception:
-        return False, None
+    except HttpResponseError as exc:
+        if exc.status_code == 404:
+            return True, None
+        logger.error("Azure request failed: %s", exc.message)
+        return False, {"code": exc.status_code, "message": exc.message}
 
 
 async def create_log_analytics_workspace(
@@ -41,7 +49,9 @@ async def create_log_analytics_workspace(
     ok, existing = await _safe_get(
         clients.law.workspaces.get, resource_group, name, clients=clients
     )
-    if ok and existing and not force:
+    if not ok:
+        return "error", existing
+    if existing and not force:
         return "exists", existing.as_dict()
     params: dict[str, Any] = {
         "location": location,
@@ -83,7 +93,9 @@ async def create_app_insights(
     ok, existing = await _safe_get(
         clients.appi.components.get, resource_group, name, clients=clients
     )
-    if ok and existing and not force:
+    if not ok:
+        return "error", existing
+    if existing and not force:
         return "exists", existing.as_dict()
     params: dict[str, Any] = {
         "location": location,

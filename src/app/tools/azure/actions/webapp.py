@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+import logging
+from azure.core.exceptions import HttpResponseError
 from azure.mgmt.web.models import (
     AppServicePlan,
     Site,
@@ -14,6 +16,8 @@ from azure.mgmt.web.models import (
 
 from ..clients import Clients
 from ..validators import validate_name
+
+logger = logging.getLogger(__name__)
 
 _PCall = Callable[..., Any]
 
@@ -42,7 +46,9 @@ async def create_plan(
     ok, existing = await _safe_get(
         clients.web.app_service_plans.get, resource_group, name, clients=clients
     )
-    if ok and existing and not force:
+    if not ok:
+        return "error", existing
+    if existing and not force:
         return "exists", existing.as_dict()
     plan_obj = AppServicePlan(
         location=location, reserved=bool(linux), sku=SkuDescription(name=sku), tags=tags
@@ -130,7 +136,9 @@ async def create_webapp(
         }
 
     ok, existing = await _safe_get(clients.web.web_apps.get, resource_group, name, clients=clients)
-    if ok and existing and not force:
+    if not ok:
+        return "error", existing
+    if existing and not force:
         return "exists", existing.as_dict()
 
     site = Site(**site_kwargs)
@@ -164,5 +172,8 @@ async def _safe_get(pcall: _PCall, *args: Any, clients: Clients, **kwargs: Any) 
     try:
         res = await clients.run(pcall, *args, **kwargs)
         return True, res
-    except Exception:
-        return False, None
+    except HttpResponseError as exc:
+        if exc.status_code == 404:
+            return True, None
+        logger.error("Azure request failed: %s", exc.message)
+        return False, {"code": exc.status_code, "message": exc.message}

@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import uuid
 
+import logging
+from azure.core.exceptions import HttpResponseError
+
 from ..clients import Clients
 from ..idempotency import safe_get
+
+logger = logging.getLogger(__name__)
 
 ACR_PULL_ROLE_ID = "7f951dda-4ed3-4680-a7ca-43fe172d538d"
 
@@ -134,6 +139,6 @@ async def create_aks(
                 acr_name=acr_name,
                 principal_id=principal,
             )
-        except Exception:
-            pass
+        except HttpResponseError as exc:
+            logger.error("Failed to assign ACR pull role: %s", exc.message)
     return "created", cluster.as_dict()

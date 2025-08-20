@@ -2,13 +2,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from azure.core.exceptions import ResourceExistsError
+import logging
+from azure.core.exceptions import HttpResponseError, ResourceExistsError
 from azure.storage.blob import BlobServiceClient
 from azure.storage.fileshare import ShareServiceClient
 
 from ..clients import Clients
 from ..idempotency import safe_get
 from ..validators import validate_name
+
+logger = logging.getLogger(__name__)
 
 
 async def create_storage_account(
@@ -102,8 +105,9 @@ async def create_blob_container(
         return "created", {"account": name, "container": container_name}
     except ResourceExistsError:
         return "exists", {"account": name, "container": container_name}
-    except Exception as e:
-        return "error", str(e)
+    except HttpResponseError as exc:
+        logger.error("Failed to create container: %s", exc.message)
+        return "error", {"code": exc.status_code, "message": exc.message}
 
 
 async def create_file_share(
@@ -130,5 +134,6 @@ async def create_file_share(
         return "created", {"account": name, "share": share_name}
     except ResourceExistsError:
         return "exists", {"account": name, "share": share_name}
-    except Exception as e:
-        return "error", str(e)
+    except HttpResponseError as exc:
+        logger.error("Failed to create file share: %s", exc.message)
+        return "error", {"code": exc.status_code, "message": exc.message}

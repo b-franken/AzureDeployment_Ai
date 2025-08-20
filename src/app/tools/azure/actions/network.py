@@ -3,8 +3,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+import logging
+from azure.core.exceptions import HttpResponseError
+
 from ..clients import Clients
 from ..validators import validate_name
+
+logger = logging.getLogger(__name__)
 
 
 async def create_vnet(
@@ -31,7 +36,9 @@ async def create_vnet(
     ok, existing = await _safe_get(
         clients.net.virtual_networks.get, resource_group, name, clients=clients
     )
-    if ok and existing and not force:
+    if not ok:
+        return "error", existing
+    if existing and not force:
         return "exists", existing.as_dict()
     poller = await clients.run(
         clients.net.virtual_networks.begin_create_or_update,
@@ -69,7 +76,9 @@ async def create_subnet(
     ok, existing = await _safe_get(
         clients.net.subnets.get, resource_group, vnet_name, subnet_name, clients=clients
     )
-    if ok and existing and not force:
+    if not ok:
+        return "error", existing
+    if existing and not force:
         return "exists", existing.as_dict()
     poller = await clients.run(
         clients.net.subnets.begin_create_or_update,
@@ -106,7 +115,9 @@ async def create_public_ip(
         public_ip_name,
         clients=clients,
     )
-    if ok and existing and not force:
+    if not ok:
+        return "error", existing
+    if existing and not force:
         return "exists", existing.as_dict()
     poller = await clients.run(
         clients.net.public_ip_addresses.begin_create_or_update,
@@ -147,7 +158,9 @@ async def create_nsg(
         nsg_name,
         clients=clients,
     )
-    if ok and existing and not force:
+    if not ok:
+        return "error", existing
+    if existing and not force:
         return "exists", existing.as_dict()
     poller = await clients.run(
         clients.net.network_security_groups.begin_create_or_update,
@@ -182,7 +195,9 @@ async def create_lb(
     ok, existing = await _safe_get(
         clients.net.load_balancers.get, resource_group, lb_name, clients=clients
     )
-    if ok and existing and not force:
+    if not ok:
+        return "error", existing
+    if existing and not force:
         return "exists", existing.as_dict()
     pip = await clients.run(clients.net.public_ip_addresses.get, resource_group, public_ip_name)
     feip_cfg: list[dict[str, object]] = [
@@ -231,7 +246,9 @@ async def create_app_gateway(
     ok, existing = await _safe_get(
         clients.net.application_gateways.get, resource_group, name, clients=clients
     )
-    if ok and existing and not force:
+    if not ok:
+        return "error", existing
+    if existing and not force:
         return "exists", existing.as_dict()
     subnet = await clients.run(clients.net.subnets.get, resource_group, vnet_name, subnet_name)
     pip = await clients.run(clients.net.public_ip_addresses.get, resource_group, public_ip_name)
@@ -287,5 +304,8 @@ async def _safe_get(
     try:
         res = await clients.run(pcall, *args, **kwargs)
         return True, res
-    except Exception:
-        return False, None
+    except HttpResponseError as exc:
+        if exc.status_code == 404:
+            return True, None
+        logger.error("Azure request failed: %s", exc.message)
+        return False, {"code": exc.status_code, "message": exc.message}

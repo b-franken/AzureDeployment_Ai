@@ -200,6 +200,14 @@ class ConfigurationException(BaseApplicationException):
     category = ErrorCategory.CONFIGURATION
 
 
+class ConfigurationError(ConfigurationException, LookupError):
+    """Backward compatible alias for configuration errors."""
+
+    def __init__(self, key: str, message: str):
+        super().__init__(message)
+        self.key = key
+
+
 class CircuitBreakerException(BaseApplicationException):
     severity = ErrorSeverity.ERROR
     category = ErrorCategory.SYSTEM

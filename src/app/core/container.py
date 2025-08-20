@@ -323,8 +323,13 @@ def inject(container: Container) -> Callable[[Callable[..., Any]], Callable[...,
                     try:
                         dependency = await container.aget(param.annotation)
                         kwargs[name] = dependency
-                    except Exception:
-                        pass
+                    except LookupError as exc:
+                        logger.warning(
+                            "Dependency %s not found: %s", param.annotation, exc
+                        )
+                        if param.default is inspect.Parameter.empty:
+                            raise
+                        continue
             if asyncio.iscoroutinefunction(func):
                 return await func(*args, **kwargs)
             return func(*args, **kwargs)

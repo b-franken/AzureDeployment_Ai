@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+import os
 from typing import Sequence
 from azure.identity import (
     ClientSecretCredential,
@@ -12,10 +12,20 @@ from azure.identity import (
     DefaultAzureCredential,
 )
 from azure.core.credentials import TokenCredential
-
 from app.core.config import settings, AzureConfig
 
 _ARM_SCOPE = "https://management.azure.com/.default"
+
+if settings.azure.tenant_id:
+    os.environ.setdefault("AZURE_TENANT_ID", settings.azure.tenant_id)
+if settings.azure.client_id:
+    os.environ.setdefault("AZURE_CLIENT_ID", settings.azure.client_id)
+if settings.azure.client_secret:
+    os.environ.setdefault("AZURE_CLIENT_SECRET",
+                          settings.azure.client_secret.get_secret_value())
+if settings.azure.subscription_id:
+    os.environ.setdefault("AZURE_SUBSCRIPTION_ID",
+                          settings.azure.subscription_id)
 
 
 def _authority_host(cfg: AzureConfig) -> str:

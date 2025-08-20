@@ -64,28 +64,16 @@ class AzureConfig(BaseModel):
     tenant_id: str | None = Field(default=None, pattern="^[a-f0-9-]{36}$")
     client_id: str | None = None
     client_secret: SecretStr | None = None
-
-    auth_mode: Literal[
-        "managed_identity",
-        "service_principal",
-        "azure_cli",
-        "workload_identity",
-        "environment",
-        "device_code",
-    ] = "managed_identity"
+    auth_mode: Literal["managed_identity", "service_principal", "azure_cli",
+                       "workload_identity", "environment", "device_code"] = "managed_identity"
     user_assigned_identity_client_id: str | None = None
     workload_identity_token_file: str | None = None
-
     cloud: Literal["public", "usgov", "china", "germany"] = "public"
     authority_host: str | None = None
     resource_manager_endpoint: str | None = None
-
     default_location: str = "westeurope"
-    allowed_locations: list[str] = Field(
-        default_factory=lambda: ["westeurope",
-                                 "northeurope", "uksouth", "eastus", "westus"]
-    )
-
+    allowed_locations: list[str] = Field(default_factory=lambda: [
+                                         "westeurope", "northeurope", "uksouth", "eastus", "westus"])
     default_resource_group: str | None = None
     environment: Literal["dev", "test", "acc", "prod"] = "dev"
     name_prefix: str = "ff"

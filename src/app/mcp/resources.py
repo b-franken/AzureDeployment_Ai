@@ -4,19 +4,21 @@ import asyncio
 from datetime import datetime
 from typing import Any
 
-from azure.identity import DefaultAzureCredential
 from azure.mgmt.resource import ResourceManagementClient
 from azure.mgmt.subscription import SubscriptionClient
+
+from app.core.azure_auth import build_credential
 
 
 class ResourceManager:
     def __init__(self) -> None:
-        self._credential = DefaultAzureCredential()
+        self._credential = build_credential()
         self._clients: dict[str, Any] = {}
 
     def _get_subscription_client(self) -> SubscriptionClient:
         if "subscription" not in self._clients:
-            self._clients["subscription"] = SubscriptionClient(self._credential)
+            self._clients["subscription"] = SubscriptionClient(
+                self._credential)
         return self._clients["subscription"]
 
     def _get_resource_client(
@@ -34,7 +36,6 @@ class ResourceManager:
     async def list_subscriptions(self) -> list[dict[str, Any]]:
         client = self._get_subscription_client()
         subscriptions = await asyncio.to_thread(lambda: list(client.subscriptions.list()))
-
         return [
             {
                 "id": sub.subscription_id,
@@ -50,15 +51,12 @@ class ResourceManager:
         subscription_id: str,
     ) -> dict[str, Any]:
         client = self._get_resource_client(subscription_id)
-
         resources = await asyncio.to_thread(lambda: list(client.resources.list()))
-
         grouped: dict[str, list[dict[str, Any]]] = {}
         for resource in resources:
             resource_type = resource.type
             if resource_type not in grouped:
                 grouped[resource_type] = []
-
             grouped[resource_type].append(
                 {
                     "id": resource.id,
@@ -68,7 +66,6 @@ class ResourceManager:
                     "kind": resource.kind,
                 }
             )
-
         return {
             "subscription_id": subscription_id,
             "total_resources": len(resources),
@@ -89,7 +86,6 @@ class ResourceManager:
             start_date,
             end_date,
         )
-
         return {
             "subscription_id": subscription_id,
             "period": {
@@ -139,7 +135,6 @@ class ResourceManager:
                 },
             },
         }
-
         return templates.get(product, {})
 
     async def get_active_deployments(self) -> list[dict[str, Any]]:

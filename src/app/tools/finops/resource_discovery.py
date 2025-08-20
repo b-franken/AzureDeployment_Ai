@@ -4,11 +4,11 @@ import asyncio
 from typing import Any, TypedDict, cast
 
 from azure.core.exceptions import AzureError
-from azure.identity import DefaultAzureCredential
 from azure.mgmt.resource import ResourceManagementClient
 from azure.mgmt.resourcegraph import ResourceGraphClient
 from azure.mgmt.resourcegraph.models import QueryRequest, QueryRequestOptions
 
+from app.core.azure_auth import build_credential
 from app.core.exceptions import ExternalServiceException, retry_on_error
 
 
@@ -20,7 +20,7 @@ class ResourceGroupInfo(TypedDict):
 
 class ResourceDiscoveryService:
     def __init__(self) -> None:
-        self._credential = DefaultAzureCredential()
+        self._credential = build_credential()
         self._clients: dict[str, Any] = {}
         self._cache: dict[str, tuple[list[dict[str, Any]], float]] = {}
         self._cache_ttl = 300.0
@@ -28,7 +28,8 @@ class ResourceDiscoveryService:
     def _get_resource_client(self, subscription_id: str) -> ResourceManagementClient:
         key = f"resource_{subscription_id}"
         if key not in self._clients:
-            self._clients[key] = ResourceManagementClient(self._credential, subscription_id)
+            self._clients[key] = ResourceManagementClient(
+                self._credential, subscription_id)
         return self._clients[key]
 
     def _get_graph_client(self) -> ResourceGraphClient:
@@ -45,16 +46,14 @@ class ResourceDiscoveryService:
         tags: dict[str, str] | None = None,
     ) -> list[dict[str, Any]]:
         import time
-
         cache_key = f"{subscription_id}:{resource_group}:{resource_type}:{str(tags)}"
         if cache_key in self._cache:
             cached_data, cached_time = self._cache[cache_key]
             if time.time() - cached_time < self._cache_ttl:
                 return cached_data
-
-        query = self._build_kql_query(subscription_id, resource_group, resource_type, tags)
+        query = self._build_kql_query(
+            subscription_id, resource_group, resource_type, tags)
         resources = await self._execute_graph_query(query, [subscription_id])
-
         self._cache[cache_key] = (resources, time.time())
         return resources
 
@@ -64,12 +63,10 @@ class ResourceDiscoveryService:
         resource_id: str,
     ) -> dict[str, Any]:
         client = self._get_resource_client(subscription_id)
-
         try:
             resource = await asyncio.to_thread(
                 client.resources.get_by_id, resource_id, api_version="2023-07-01"
             )
-
             return {
                 "id": resource.id,
                 "name": resource.name,
@@ -82,14 +79,14 @@ class ResourceDiscoveryService:
                 "managed_by": getattr(resource, "managed_by", None),
             }
         except AzureError as e:
-            raise ExternalServiceException(f"Failed to get resource details: {e}") from e
+            raise ExternalServiceException(
+                f"Failed to get resource details: {e}") from e
 
     async def list_resource_groups(
         self,
         subscription_id: str,
     ) -> list[ResourceGroupInfo]:
         client = self._get_resource_client(subscription_id)
-
         try:
             groups = await asyncio.to_thread(lambda: list(client.resource_groups.list()))
             return [
@@ -97,13 +94,15 @@ class ResourceDiscoveryService:
                     "name": rg.name,
                     "location": rg.location,
                     "tags": (
-                        cast(dict[str, str], rg.tags) if rg.tags is not None else dict[str, str]()
+                        cast(
+                            dict[str, str], rg.tags) if rg.tags is not None else dict[str, str]()
                     ),
                 }
                 for rg in groups
             ]
         except AzureError as e:
-            raise ExternalServiceException(f"Failed to list resource groups: {e}") from e
+            raise ExternalServiceException(
+                f"Failed to list resource groups: {e}") from e
 
     async def get_resource_metrics(
         self,
@@ -113,12 +112,10 @@ class ResourceDiscoveryService:
         timespan: str = "PT1H",
     ) -> dict[str, Any]:
         from azure.mgmt.monitor import MonitorManagementClient
-
         if "monitor" not in self._clients:
-            self._clients["monitor"] = MonitorManagementClient(self._credential, subscription_id)
-
+            self._clients["monitor"] = MonitorManagementClient(
+                self._credential, subscription_id)
         monitor_client = self._clients["monitor"]
-
         try:
             metrics = await asyncio.to_thread(
                 monitor_client.metrics.list,
@@ -126,7 +123,6 @@ class ResourceDiscoveryService:
                 timespan=timespan,
                 metricnames=",".join(metric_names),
             )
-
             result: dict[str, list[dict[str, Any]]] = {}
             for metric in metrics.value:
                 metric_data: list[dict[str, Any]] = []
@@ -143,10 +139,10 @@ class ResourceDiscoveryService:
                             }
                         )
                 result[metric.name.value] = metric_data
-
             return result
         except AzureError as e:
-            raise ExternalServiceException(f"Failed to get resource metrics: {e}") from e
+            raise ExternalServiceException(
+                f"Failed to get resource metrics: {e}") from e
 
     def _build_kql_query(
         self,
@@ -157,24 +153,18 @@ class ResourceDiscoveryService:
     ) -> str:
         query_parts = ["Resources"]
         where_clauses: list[str] = []
-
         if resource_group:
             where_clauses.append(f"resourceGroup =~ '{resource_group}'")
-
         if resource_type:
             where_clauses.append(f"type =~ '{resource_type}'")
-
         if tags:
             for key, value in tags.items():
                 where_clauses.append(f"tags['{key}'] =~ '{value}'")
-
         if where_clauses:
             query_parts.append(f"| where {' and '.join(where_clauses)}")
-
         query_parts.append(
             "| project id, name, type, location, resourceGroup, tags, properties, sku, kind"
         )
-
         return "\n".join(query_parts)
 
     async def _execute_graph_query(
@@ -187,7 +177,6 @@ class ResourceDiscoveryService:
         client = self._get_graph_client()
         all_results: list[dict[str, Any]] = []
         skip_token: str | None = None
-
         while True:
             request = QueryRequest(
                 query=query,
@@ -198,18 +187,15 @@ class ResourceDiscoveryService:
                     skip_token=skip_token,
                 ),
             )
-
             try:
                 result = await asyncio.to_thread(client.resources, request)
                 all_results.extend(result.data)
-
                 if not result.skip_token or len(all_results) >= max_results:
                     break
-
                 skip_token = result.skip_token
             except AzureError as e:
-                raise ExternalServiceException(f"Failed to execute graph query: {e}") from e
-
+                raise ExternalServiceException(
+                    f"Failed to execute graph query: {e}") from e
         return all_results
 
     async def get_resource_dependencies(
@@ -224,20 +210,17 @@ class ResourceDiscoveryService:
         | mvexpand dependencies
         | project dependency = tostring(dependencies)
         """
-
         results = await self._execute_graph_query(query, [subscription_id])
-
-        dependencies = [r.get("dependency", "") for r in results if r.get("dependency")]
-
+        dependencies = [r.get("dependency", "")
+                        for r in results if r.get("dependency")]
         query_dependents = f"""
         Resources
         | where properties contains '{resource_id}'
         | project id
         """
-
         dependent_results = await self._execute_graph_query(query_dependents, [subscription_id])
-        dependents = [r.get("id", "") for r in dependent_results if r.get("id")]
-
+        dependents = [r.get("id", "")
+                      for r in dependent_results if r.get("id")]
         return {
             "dependencies": dependencies,
             "dependents": dependents,
@@ -250,21 +233,16 @@ class ResourceDiscoveryService:
         batch_size: int = 50,
     ) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []
-
         for i in range(0, len(resource_ids), batch_size):
-            batch = resource_ids[i : i + batch_size]
+            batch = resource_ids[i: i + batch_size]
             batch_query = " or ".join([f"id =~ '{rid}'" for rid in batch])
-
             query = f"""
             Resources
             | where {batch_query}
             | project id, name, type, location, resourceGroup, tags, properties, sku, kind
             """
-
             batch_results = await self._execute_graph_query(query, [subscription_id])
             results.extend(batch_results)
-
             if i + batch_size < len(resource_ids):
                 await asyncio.sleep(0.1)
-
         return results

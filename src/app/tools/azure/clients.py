@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from random import random
 from typing import Any
 
+from azure.core.credentials import TokenCredential
 from azure.core.exceptions import (
     AzureError,
     ClientAuthenticationError,
@@ -15,7 +16,6 @@ from azure.core.exceptions import (
     ServiceRequestError,
     ServiceResponseError,
 )
-from azure.identity import DefaultAzureCredential
 from azure.mgmt.applicationinsights import ApplicationInsightsManagementClient
 from azure.mgmt.authorization import AuthorizationManagementClient
 from azure.mgmt.compute import ComputeManagementClient
@@ -33,22 +33,26 @@ from azure.mgmt.sql import SqlManagementClient
 from azure.mgmt.storage import StorageManagementClient
 from azure.mgmt.web import WebSiteManagementClient
 
+from app.core.config import settings
+from app.core.azure_auth import build_credential
+
 
 def _sub_id(explicit: str | None) -> str:
-    sid = explicit or os.getenv("AZURE_SUBSCRIPTION_ID", "")
+    sid = explicit or settings.azure.subscription_id
     if not sid:
-        raise RuntimeError("AZURE_SUBSCRIPTION_ID missing and no subscription_id provided")
+        raise RuntimeError(
+            "subscription_id missing and no subscription_id provided")
     return sid
 
 
-def _credential() -> DefaultAzureCredential:
-    return DefaultAzureCredential(exclude_interactive_browser_credential=True)
+def _credential() -> TokenCredential:
+    return build_credential()
 
 
 @dataclass(frozen=True)
 class Clients:
     subscription_id: str
-    cred: DefaultAzureCredential
+    cred: TokenCredential
     res: ResourceManagementClient
     stor: StorageManagementClient
     net: NetworkManagementClient

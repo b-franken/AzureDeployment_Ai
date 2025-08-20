@@ -1,6 +1,7 @@
 import logging
-from collections.abc import Awaitable, Callable
+from typing import Awaitable, Callable
 
+import fastapi
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.testclient import TestClient
 
@@ -40,4 +41,11 @@ client = TestClient(app, raise_server_exceptions=False)
 def test_middleware_returns_500_on_exception() -> None:
     resp = client.get("/error")
     assert resp.status_code == 500
-    assert resp.text == "Internal Server Error"
+    major, minor, *_ = fastapi.__version__.split(".")
+    if int(major) > 0 or int(minor) >= 112:
+        try:
+            assert resp.json() == {"detail": "Internal Server Error"}
+        except ValueError:
+            assert resp.text == "Internal Server Error"
+    else:
+        assert resp.text == "Internal Server Error"

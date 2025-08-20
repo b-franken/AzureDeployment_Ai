@@ -200,6 +200,14 @@ class ConfigurationException(BaseApplicationException):
     category = ErrorCategory.CONFIGURATION
 
 
+class ConfigurationError(ConfigurationException):
+    """Error raised when the application configuration is invalid."""
+
+    def __init__(self, field: str, message: str) -> None:
+        super().__init__(f"{field}: {message}")
+        self.field = field
+
+
 class CircuitBreakerException(BaseApplicationException):
     severity = ErrorSeverity.ERROR
     category = ErrorCategory.SYSTEM

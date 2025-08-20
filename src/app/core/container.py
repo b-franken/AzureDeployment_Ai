@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import os
 import types
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Callable
@@ -318,13 +319,20 @@ def inject(container: Container) -> Callable[[Callable[..., Any]], Callable[...,
         @wraps(func)
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
             signature = inspect.signature(func)
+            strict = os.getenv("DI_STRICT_MODE", "").lower() in {"1", "true", "yes"}
             for name, param in signature.parameters.items():
                 if param.annotation != inspect.Parameter.empty and name not in kwargs:
                     try:
                         dependency = await container.aget(param.annotation)
                         kwargs[name] = dependency
-                    except Exception:
-                        pass
+                    except Exception as exc:  # pragma: no cover - defensive
+                        message = (
+                            f"Failed to resolve dependency '{param.annotation}' for parameter "
+                            f"'{name}' in {func.__name__}: {exc}"
+                        )
+                        if strict:
+                            raise ConfigurationError(str(param.annotation), message) from exc
+                        logger.warning(message)
             if asyncio.iscoroutinefunction(func):
                 return await func(*args, **kwargs)
             return func(*args, **kwargs)

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Annotated, Any
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
@@ -9,9 +11,19 @@ from app.ai.tools_router import ToolExecutionContext, maybe_call_tool
 from app.api.routes.auth import TokenData, require_role
 from app.api.schemas import DeploymentRequest
 from app.common.envs import normalize_env
+from app.events.provisioning_task import run_provisioning
 
 router = APIRouter()
 deploy_role_dependency = require_role("deploy")
+
+
+@router.post("/start")
+async def start_deploy(
+    td: Annotated[TokenData, Depends(deploy_role_dependency)]
+) -> dict[str, str]:
+    deployment_id = str(uuid4())
+    asyncio.create_task(run_provisioning(deployment_id))
+    return {"deployment_id": deployment_id}
 
 
 @router.post("")

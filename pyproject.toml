@@ -81,7 +81,6 @@ dependencies = [
   "opentelemetry-instrumentation-redis",
   "psycopg[binary]>=3.2",
   "psycopg_pool",
-  "torch",
 
 
 ]

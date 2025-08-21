@@ -7,6 +7,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import NotRequired, Protocol, TypedDict, runtime_checkable
 
+import numpy as np
+
 from app.ai.arg_mapper import map_args_with_function_call
 from app.ai.generator import generate_response
 from app.ai.llm.factory import get_provider_and_model
@@ -29,7 +31,8 @@ _TOOLS_PLAN = (
     "When you call a tool, return only the JSON with no prose."
 )
 
-_CODEFENCE_JSON_RE = re.compile(r"(?:```(?:json)?\s*)?(\{.*?\})(?:\s*```)?\s*", re.DOTALL)
+_CODEFENCE_JSON_RE = re.compile(
+    r"(?:```(?:json)?\s*)?(\{.*?\})(?:\s*```)?\s*", re.DOTALL)
 DIRECT_TOOL_RE = re.compile(
     r"^\s*tool\s*:\s*([a-z0-9-]+)\s*(\{.*\})\s*$", re.IGNORECASE | re.DOTALL
 )
@@ -82,10 +85,8 @@ def _extract_json_object(text: str) -> dict[str, object] | None:
         try:
             obj = json.loads(extracted)
             return obj if isinstance(obj, dict) else None
-
         except json.JSONDecodeError as exc:
             logger.debug("Failed to parse JSON object: %s", exc)
-
     start = s.find("{")
     if start == -1:
         return None
@@ -104,7 +105,6 @@ def _extract_json_object(text: str) -> dict[str, object] | None:
     try:
         obj = json.loads(s[start:end_idx].strip())
         return obj if isinstance(obj, dict) else None
-
     except json.JSONDecodeError as exc:
         logger.debug("Failed to parse JSON object: %s", exc)
         return None
@@ -230,16 +230,22 @@ async def _run_tool(
         if not svc:
             return {"ok": False, "summary": "Classifier unavailable", "output": ""}
         scores = svc.predict_proba([text])
-        return {
-            "ok": True,
-            "summary": f"Predicted class {int(scores.argmax(dim=-1).item())}",
-            "output": scores.cpu().tolist(),
-        }
+        if hasattr(scores, "detach"):
+            arr = scores.detach().cpu().numpy()
+        elif isinstance(scores, np.ndarray):
+            arr = scores
+        elif isinstance(scores, list):
+            arr = np.asarray(scores, dtype=np.float32)
+        else:
+            arr = np.asarray(scores, dtype=np.float32)
+        pred = int(arr.argmax(axis=-1)[0]) if arr.size else 0
+        return {"ok": True, "summary": f"Predicted class {pred}", "output": arr.tolist()}
     tool = get_tool(name)
     if not tool:
         return {"ok": False, "summary": f"tool {name} not found", "output": ""}
     raw = await tool.run(**args)
-    result = raw if isinstance(raw, dict) else {"ok": True, "summary": "", "output": raw}
+    result = raw if isinstance(raw, dict) else {
+        "ok": True, "summary": "", "output": raw}
     if isinstance(result, dict):
         result = _maybe_wrap_approval(result, context)
     return result
@@ -286,7 +292,8 @@ async def _openai_tools_orchestrator(
         }
     ]
     if memory:
-        messages.extend([{"role": m["role"], "content": m["content"]} for m in memory])
+        messages.extend([{"role": m["role"], "content": m["content"]}
+                        for m in memory])
     messages.append({"role": "user", "content": user_input})
     if not allow_chaining:
         first = await llm.chat_raw(
@@ -417,7 +424,8 @@ async def maybe_call_tool(
                 res = await _run_tool(str(mapped["tool"]), dict(mapped["args"]), context)
                 return json.dumps(res, ensure_ascii=False, indent=2)
             return await _run_tool_and_explain(
-                str(mapped["tool"]), dict(mapped["args"]), provider, model, context
+                str(mapped["tool"]), dict(
+                    mapped["args"]), provider, model, context
             )
         tools = list_tools()
         if allowlist:
@@ -430,7 +438,8 @@ async def maybe_call_tool(
             model,
             allow_chaining=True,
             max_chain_steps=4,
-            token_budget=(int(context.cost_limit) if context and context.cost_limit else 6000),
+            token_budget=(int(context.cost_limit)
+                          if context and context.cost_limit else 6000),
             context=context,
         )
         if isinstance(via_openai, str):
@@ -492,7 +501,8 @@ async def maybe_call_tool(
                 preferred_tool, mapped_args, provider, model, context
             )
         tools_desc = (
-            "\n".join(f"- {t.name}: {t.description} schema={t.schema}" for t in tools) or "None"
+            "\n".join(
+                f"- {t.name}: {t.description} schema={t.schema}" for t in tools) or "None"
         )
         plan = await generate_response(
             f"{_TOOLS_PLAN}\n\nAvailable tools:\n{tools_desc}\n\nUser: {user_input}",
@@ -509,7 +519,8 @@ async def maybe_call_tool(
             return plan
         name = str(req.get("tool"))
         raw_args = req.get("args")
-        args: dict[str, object] = dict(raw_args) if isinstance(raw_args, dict) else {}
+        args: dict[str, object] = dict(
+            raw_args) if isinstance(raw_args, dict) else {}
         if return_json:
             res = await _run_tool(name, args, context)
             return json.dumps(res, ensure_ascii=False, indent=2)

@@ -443,3 +443,17 @@ def maybe_map_provision(text: str) -> dict[str, object] | None:
     if not isinstance(args, dict):
         return None
     return {"tool": "provision_orchestrator", "args": args}
+
+
+async def maybe_map_provision_async(text: str) -> dict[str, object] | None:
+    r = parse_provision_request(text)
+    if r.confidence >= 0.3:
+        args = r.to_orchestrator_args()
+        if isinstance(args, dict):
+            return {"tool": "provision_orchestrator", "args": args}
+    from app.ai.nlu.llm_parser import parse_with_llm
+    r2 = await parse_with_llm(text)
+    args2 = r2.to_orchestrator_args()
+    if not isinstance(args2, dict):
+        return None
+    return {"tool": "provision_orchestrator", "args": args2}

@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import os
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
 from random import random
-from typing import Any
+from typing import Any, Awaitable, Callable
 
-from azure.core.credentials import TokenCredential
+from azure.core.credentials_async import AsyncTokenCredential
 from azure.core.exceptions import (
     AzureError,
     ClientAuthenticationError,
@@ -16,42 +17,43 @@ from azure.core.exceptions import (
     ServiceRequestError,
     ServiceResponseError,
 )
-from azure.mgmt.applicationinsights import ApplicationInsightsManagementClient
-from azure.mgmt.authorization import AuthorizationManagementClient
-from azure.mgmt.compute import ComputeManagementClient
-from azure.mgmt.containerregistry import ContainerRegistryManagementClient
-from azure.mgmt.containerservice import ContainerServiceClient
-from azure.mgmt.cosmosdb import CosmosDBManagementClient
-from azure.mgmt.keyvault import KeyVaultManagementClient
-from azure.mgmt.loganalytics import LogAnalyticsManagementClient
-from azure.mgmt.msi import ManagedServiceIdentityClient
-from azure.mgmt.network import NetworkManagementClient
-from azure.mgmt.privatedns import PrivateDnsManagementClient
-from azure.mgmt.redis import RedisManagementClient
+from azure.mgmt.applicationinsights.aio import ApplicationInsightsManagementClient
+from azure.mgmt.authorization.aio import AuthorizationManagementClient
+from azure.mgmt.compute.aio import ComputeManagementClient
+from azure.mgmt.containerregistry.aio import ContainerRegistryManagementClient
+from azure.mgmt.containerservice.aio import ContainerServiceClient
+from azure.mgmt.cosmosdb.aio import CosmosDBManagementClient
+from azure.mgmt.keyvault.aio import KeyVaultManagementClient
+from azure.mgmt.loganalytics.aio import LogAnalyticsManagementClient
+from azure.mgmt.msi.aio import ManagedServiceIdentityClient
+from azure.mgmt.network.aio import NetworkManagementClient
+from azure.mgmt.privatedns.aio import PrivateDnsManagementClient
+from azure.mgmt.redis.aio import RedisManagementClient
 from azure.mgmt.resource import ResourceManagementClient
-from azure.mgmt.sql import SqlManagementClient
-from azure.mgmt.storage import StorageManagementClient
-from azure.mgmt.web import WebSiteManagementClient
+from azure.mgmt.sql.aio import SqlManagementClient
+from azure.mgmt.storage.aio import StorageManagementClient
+from azure.mgmt.web.aio import WebSiteManagementClient
 
-from app.core.azure_auth import build_credential
+from app.core.azure_auth import build_async_credential
 from app.core.config import settings
 
 
 def _sub_id(explicit: str | None) -> str:
     sid = explicit or settings.azure.subscription_id
     if not sid:
-        raise RuntimeError("subscription_id missing and no subscription_id provided")
+        raise RuntimeError(
+            "subscription_id missing and no subscription_id provided")
     return sid
 
 
-def _credential() -> TokenCredential:
-    return build_credential()
+async def _credential() -> AsyncTokenCredential:
+    return await build_async_credential()
 
 
 @dataclass(frozen=True)
 class Clients:
     subscription_id: str
-    cred: TokenCredential
+    cred: AsyncTokenCredential
     res: ResourceManagementClient
     stor: StorageManagementClient
     net: NetworkManagementClient
@@ -69,8 +71,43 @@ class Clients:
     redis: RedisManagementClient
     pdns: PrivateDnsManagementClient
 
-    async def run(self, fn: Any, *args: Any, **kwargs: Any) -> Any:
+    async def run(self, fn: Callable[..., Any] | Callable[..., Awaitable[Any]], *args: Any, **kwargs: Any) -> Any:
+        if inspect.iscoroutinefunction(fn):
+            return await fn(*args, **kwargs)
+        res = fn(*args, **kwargs)
+        if inspect.isawaitable(res):
+            return await res
         return await asyncio.to_thread(fn, *args, **kwargs)
+
+    async def close(self) -> None:
+        for attr in (
+            "res",
+            "stor",
+            "net",
+            "web",
+            "acr",
+            "aks",
+            "cmp",
+            "auth",
+            "sql",
+            "kv",
+            "cosmos",
+            "law",
+            "appi",
+            "msi",
+            "redis",
+            "pdns",
+        ):
+            obj = getattr(self, attr, None)
+            close = getattr(obj, "close", None)
+            if callable(close):
+                if inspect.iscoroutinefunction(close):
+                    await close()
+                else:
+                    await asyncio.to_thread(close)
+        cclose = getattr(self.cred, "close", None)
+        if callable(cclose):
+            await cclose()
 
 
 _CACHE: OrderedDict[str, tuple[Clients, int]] = OrderedDict()
@@ -94,37 +131,13 @@ class AzureOperationError(Exception):
         super().__init__(self.message)
 
 
-def _dispose(clients: Clients) -> None:
-    for attr in (
-        "res",
-        "stor",
-        "net",
-        "web",
-        "acr",
-        "aks",
-        "cmp",
-        "auth",
-        "sql",
-        "kv",
-        "cosmos",
-        "law",
-        "appi",
-        "msi",
-        "redis",
-        "pdns",
-    ):
-        obj = getattr(clients, attr, None)
-        close = getattr(obj, "close", None)
-        if callable(close):
-            close()
-    cclose = getattr(clients.cred, "close", None)
-    if callable(cclose):
-        cclose()
+async def _dispose(clients: Clients) -> None:
+    await clients.close()
 
 
 async def _build_clients(sid: str) -> tuple[Clients, int]:
-    cred = _credential()
-    token = await asyncio.to_thread(cred.get_token, _TOKEN_SCOPE)
+    cred = await _credential()
+    token = await cred.get_token(_TOKEN_SCOPE)
     expiry = int(token.expires_on) - _EXPIRY_MARGIN_SECONDS
     return (
         Clients(
@@ -159,7 +172,7 @@ async def get_clients(subscription_id: str | None) -> Clients:
         if entry:
             clients, expiry = entry
             if expiry <= now:
-                _dispose(clients)
+                await _dispose(clients)
                 _CACHE.pop(sid, None)
             else:
                 _CACHE.move_to_end(sid)
@@ -169,7 +182,7 @@ async def get_clients(subscription_id: str | None) -> Clients:
         _CACHE.move_to_end(sid)
         while len(_CACHE) > _CACHE_MAX_SIZE:
             _, (old_clients, _) = _CACHE.popitem(last=False)
-            _dispose(old_clients)
+            await _dispose(old_clients)
         return clients
 
 
@@ -189,10 +202,7 @@ def _http_status(e: BaseException) -> int | None:
 def _classify(e: BaseException) -> tuple[bool, str, int | None]:
     if isinstance(e, ClientAuthenticationError):
         return False, "auth_error", _http_status(e)
-    if isinstance(
-        e,
-        ServiceRequestError | ServiceResponseError | TimeoutError | OSError,
-    ):
+    if isinstance(e, ServiceRequestError | ServiceResponseError | TimeoutError | OSError):
         return True, "transient_io", _http_status(e)
     if isinstance(e, HttpResponseError):
         sc = _http_status(e)
@@ -208,28 +218,24 @@ def _is_poller(obj: Any) -> bool:
     return hasattr(obj, "result") and hasattr(obj, "status")
 
 
-async def run_poller(
-    clients: Clients,
-    fn: Any,
-    *args: Any,
-    **kwargs: Any,
-) -> Any:
+async def run_poller(clients: Clients, fn: Callable[..., Any] | Callable[..., Awaitable[Any]], *args: Any, **kwargs: Any) -> Any:
     poller = await clients.run(fn, *args, **kwargs)
     if not _is_poller(poller):
         return poller
     attempt = 0
     while True:
         try:
-            return await clients.run(poller.result)
+            if inspect.iscoroutinefunction(getattr(poller, "result", None)):
+                return await poller.result()
+            res = poller.result()
+            if inspect.isawaitable(res):
+                return await res
+            return await asyncio.to_thread(poller.result)
         except BaseException as e:
             retryable, code, sc = _classify(e)
             if not retryable or attempt >= _RETRY_MAX_ATTEMPTS - 1:
-                raise AzureOperationError(
-                    code=code,
-                    message=str(e),
-                    status_code=sc,
-                    retryable=retryable,
-                ) from e
+                raise AzureOperationError(code=code, message=str(
+                    e), status_code=sc, retryable=retryable) from e
             base = min(_RETRY_BASE_SECONDS * (2**attempt), _RETRY_CAP_SECONDS)
             delay = base * (0.5 + random() * 0.5)
             attempt += 1

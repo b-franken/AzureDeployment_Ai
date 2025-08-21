@@ -7,10 +7,10 @@ from .unified_parser import (
     parse_action,
     parse_provision_request,
     unified_nlu_parser,
+    maybe_map_provision_async,
 )
 
 NLPParser = unified_nlu_parser
-
 
 __all__ = [
     "unified_nlu_parser",
@@ -19,4 +19,5 @@ __all__ = [
     "parse_provision_request",
     "parse_action",
     "maybe_map_provision",
+    "maybe_map_provision_async",
 ]

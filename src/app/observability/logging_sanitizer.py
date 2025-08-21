@@ -40,6 +40,7 @@ def _sanitize_record(record: logging.LogRecord) -> None:
         "processName",
         "process",
         "asctime",
+        "_FixedFindCallerLogger"
     }
     to_delete: list[str] = []
     for key, value in list(record.__dict__.items()):

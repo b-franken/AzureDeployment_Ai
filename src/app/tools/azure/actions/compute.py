@@ -1,11 +1,9 @@
 from __future__ import annotations
-
 import logging
 from collections.abc import Callable
 from typing import Any
-
+from app.common.async_pool import bounded_gather
 from azure.core.exceptions import HttpResponseError
-
 from ..clients import Clients
 from ..validators import validate_name
 
@@ -47,11 +45,13 @@ async def create_vm(
         return "error", existing
     if existing and not force:
         return "exists", {"vmId": existing.vm_id, "id": existing.id}
-    subnet = await clients.run(clients.net.subnets.get, resource_group, vnet_name, subnet_name)
     nic_name = f"{name}-nic"
-    nic_ok, nic_existing = await _safe_get(
-        clients.net.network_interfaces.get, resource_group, nic_name, clients=clients
-    )
+    subnet_coro = clients.run(clients.net.subnets.get,
+                              resource_group, vnet_name, subnet_name)
+    nic_coro = _safe_get(clients.net.network_interfaces.get,
+                         resource_group, nic_name, clients=clients)
+    subnet, nic_tuple = await bounded_gather(subnet_coro, nic_coro, limit=8)
+    nic_ok, nic_existing = nic_tuple
     if not nic_ok:
         return "error", nic_existing
     if not nic_existing:

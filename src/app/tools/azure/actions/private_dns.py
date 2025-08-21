@@ -1,16 +1,13 @@
 from __future__ import annotations
-
 import logging
 from collections.abc import Callable
 from typing import Any
-
+from app.common.async_pool import bounded_gather
 from azure.core.exceptions import HttpResponseError
-
 from ..clients import Clients
 from ..validators import validate_name
 
 logger = logging.getLogger(__name__)
-
 _PCall = Callable[..., Any]
 
 
@@ -81,14 +78,17 @@ async def link_private_dns_zone(
             "vnet": f"{vnet_resource_group}/{vnet_name}",
             "registration_enabled": bool(registration_enabled),
         }
-    vnet = await clients.run(clients.net.virtual_networks.get, vnet_resource_group, vnet_name)
-    ok, existing = await _safe_get(
+    vnet_coro = clients.run(
+        clients.net.virtual_networks.get, vnet_resource_group, vnet_name)
+    link_coro = _safe_get(
         clients.pdns.virtual_network_links.get,
         resource_group,
         zone_name,
         link_name,
         clients=clients,
     )
+    vnet, link_tuple = await bounded_gather(vnet_coro, link_coro, limit=8)
+    ok, existing = link_tuple
     if not ok:
         return "error", existing
     if existing and not force:

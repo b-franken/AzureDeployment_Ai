@@ -2,6 +2,8 @@
 .env
 .env.local
 .env.development
+.env.docker
+
 # Databases
 *.db
 *.sqlite3

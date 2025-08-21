@@ -1,8 +1,7 @@
 from __future__ import annotations
-
 import logging
 from typing import Any, TypedDict, cast
-
+from app.common.async_pool import bounded_gather
 from .base import ApplyResult, Backend, PlanResult
 
 logger = logging.getLogger(__name__)
@@ -40,17 +39,16 @@ class SdkBackend(Backend):
     def __init__(self) -> None:
         self.azure = None
         self._ensure_azure_tool()
+        self._concurrency = 8
 
     def _ensure_azure_tool(self) -> None:
         if self.azure is None:
             try:
                 from app.tools.azure.tool import AzureProvision
-
                 self.azure = AzureProvision()
             except Exception as e:
                 logger.warning(
-                    "Failed to import AzureProvision; proceeding without Azure SDK. %s", e
-                )
+                    "Failed to import AzureProvision; proceeding without Azure SDK. %s", e)
                 self.azure = None
 
     def _tags(self, spec: dict[str, Any]) -> dict[str, str]:
@@ -250,6 +248,21 @@ class SdkBackend(Backend):
 
         return []
 
+    def _build_stages(self, spec: dict[str, Any]) -> list[list[Action]]:
+        seq = self._build_actions(spec)
+        if not seq:
+            return []
+        product = spec.get("product")
+        if product == "web_app":
+            if len(seq) == 3 and seq[0]["action"] == "create_rg" and seq[1]["action"] == "create_plan" and seq[2]["action"] == "create_webapp":
+                return [[seq[0]], [seq[1]], [seq[2]]]
+        first, rest = seq[0], seq[1:]
+        if first["action"] == "create_rg":
+            if not rest:
+                return [[first]]
+            return [[first], rest]
+        return [seq]
+
     async def plan(self, spec: dict[str, Any]) -> PlanResult:
         try:
             actions = self._build_actions(spec)
@@ -262,11 +275,18 @@ class SdkBackend(Backend):
     async def apply(self, spec: dict[str, Any]) -> ApplyResult:
         if self.azure is None:
             return False, {"message": "Azure SDK not initialized"}
-        actions = self._build_actions(spec)
+        stages = self._build_stages(spec)
+        if not stages:
+            return False, {"message": f"No actions defined for product: {spec.get('product')}"}
         results: dict[str, Any] = {"steps": []}
-        for a in actions:
-            try:
-                res = await self.azure.run(action=a["action"], **a["args"])
+        for stage in stages:
+            async def _run_one(a: Action) -> dict[str, Any]:
+                try:
+                    return await self.azure.run(action=a["action"], **a["args"])
+                except Exception as e:
+                    return {"ok": False, "summary": "exception", "output": str(e)}
+            stage_res = await bounded_gather(*[_run_one(a) for a in stage], limit=self._concurrency)
+            for a, res in zip(stage, stage_res):
                 ok = bool(res.get("ok"))
                 results["steps"].append(
                     {
@@ -276,17 +296,7 @@ class SdkBackend(Backend):
                         "output": res.get("output"),
                     }
                 )
-                if not ok:
-                    return False, results
-            except Exception as e:
-                results["steps"].append(
-                    {
-                        "action": a["action"],
-                        "ok": False,
-                        "summary": "exception",
-                        "output": str(e),
-                    }
-                )
+            if not all(bool(r.get("ok")) for r in stage_res):
                 return False, results
         return True, results
 

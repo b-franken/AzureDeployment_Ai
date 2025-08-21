@@ -1,17 +1,16 @@
-FROM python:3.12-slim AS builder
-WORKDIR /w
-RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*
-COPY pyproject.toml README.md ./
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV UV_SYSTEM_PYTHON=1
-RUN uv pip wheel . -w /wheels
-
 FROM python:3.12-slim
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 WORKDIR /app
-COPY --from=builder /wheels /wheels
-RUN python -m pip install --no-index --find-links=/wheels devops-ai
-COPY src ./src
+
+RUN apt-get update -y && apt-get install -y --no-install-recommends curl build-essential && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml /app/
+COPY src /app/src
+
+RUN python -m pip install --upgrade pip && pip install uv
+RUN uv pip install --system .
+
 EXPOSE 8000
-ENV PORT=8000
-CMD ["python","-m","app.api.__main__"]
+HEALTHCHECK --interval=5s --timeout=3s --retries=40 CMD curl -sf http://localhost:8000/api/health || exit 1
+CMD ["sh", "-c", "uvicorn app.api.main:app --host 0.0.0.0 --port 8000"]

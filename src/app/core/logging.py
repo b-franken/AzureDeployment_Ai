@@ -7,6 +7,7 @@ from collections.abc import Callable, Mapping, MutableMapping, Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
+from opentelemetry import trace
 
 import structlog
 from structlog.contextvars import bind_contextvars, clear_contextvars, merge_contextvars
@@ -69,6 +70,15 @@ def _drop_private_keys(_: Any, __: str, event_dict: dict[str, Any]) -> dict[str,
     return {k: v for k, v in event_dict.items() if not str(k).startswith("_")}
 
 
+def _otel_enricher(_: Any, __: str, event_dict: dict[str, Any]) -> dict[str, Any]:
+    span = trace.get_current_span()
+    ctx = span.get_span_context() if span else None
+    if ctx and ctx.is_valid:
+        event_dict["trace_id"] = f"{ctx.trace_id:032x}"
+        event_dict["span_id"] = f"{ctx.span_id:016x}"
+    return event_dict
+
+
 class LoggerFactory:
     _instance: LoggerFactory | None = None
     _configured: bool = False
@@ -107,7 +117,8 @@ class LoggerFactory:
             structlog.stdlib.add_log_level,
             structlog.processors.TimeStamper(fmt="iso", key="@timestamp"),
         ]
-        pre_chain: Sequence[PreProcessor] = cast(Sequence[PreProcessor], pre_chain_raw)
+        pre_chain: Sequence[PreProcessor] = cast(
+            Sequence[PreProcessor], pre_chain_raw)
 
         structlog.configure(
             processors=[
@@ -119,6 +130,7 @@ class LoggerFactory:
                 _drop_private_keys,
                 structlog.processors.StackInfoRenderer(),
                 structlog.processors.format_exc_info,
+                _otel_enricher,
                 ProcessorFormatter.wrap_for_formatter,
             ],
             context_class=dict,
@@ -131,7 +143,8 @@ class LoggerFactory:
         root_logger.handlers.clear()
 
         sanitizer_filter = OTelSanitizingFilter()
-        formatter = ProcessorFormatter(processor=renderer, foreign_pre_chain=pre_chain)
+        formatter = ProcessorFormatter(
+            processor=renderer, foreign_pre_chain=pre_chain)
 
         if enable_console:
             console_handler = logging.StreamHandler(sys.stdout)
@@ -173,7 +186,8 @@ class LoggerFactory:
         logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(
             logging.WARNING
         )
-        logging.getLogger("azure.monitor.opentelemetry").setLevel(logging.WARNING)
+        logging.getLogger("azure.monitor.opentelemetry").setLevel(
+            logging.WARNING)
 
         self._configured = True
 

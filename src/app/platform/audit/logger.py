@@ -3,7 +3,6 @@ import os
 import asyncio
 import hashlib
 import json
-import logging
 import threading
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -13,7 +12,8 @@ from typing import Any
 
 from psycopg_pool import ConnectionPool
 
-logger = logging.getLogger(__name__)
+from app.core.logging import get_logger
+logger = get_logger(__name__)
 
 
 class AuditEventType(Enum):
@@ -164,7 +164,15 @@ class AuditLogger:
                 await self._trigger_alert(event)
             return True
         except Exception:
-            logger.exception("Failed to log audit event")
+            logger.error(
+                "audit_event_log_failed",
+                exc_info=True,
+                event_type=event.event_type.value,
+                severity=event.severity.value,
+                correlation_id=event.correlation_id,
+                resource_id=event.resource_id,
+                action=event.action,
+            )
             return False
 
     def _write_event(self, event: AuditEvent) -> None:
@@ -329,7 +337,9 @@ class AuditLogger:
     async def verify_integrity(self, event_id: str) -> bool:
         with self._lock, self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
-                "SELECT id, timestamp, event_type, severity, user_id, resource_id, action, hash FROM audit_events WHERE id = %s", (event_id,))
+                "SELECT id, timestamp, event_type, severity, user_id, resource_id, action, hash FROM audit_events WHERE id = %s",
+                (event_id,),
+            )
             row = cur.fetchone()
         if not row:
             return False

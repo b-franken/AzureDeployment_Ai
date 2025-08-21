@@ -18,7 +18,20 @@ export function schemaToFormFields(schema: any): FormField[] {
     const fields: FormField[] = []
     const required = new Set(schema.required || [])
 
-    for (const [name, property] of Object.entries(schema.properties as any)) {
+    type PropertySchema = {
+        type?: 'string' | 'number' | 'integer' | 'boolean' | 'object' | 'array'
+        title?: string
+        description?: string
+        placeholder?: string
+        example?: string
+        format?: string
+        maxLength?: number
+        minimum?: number
+        maximum?: number
+        enum?: any[]
+    }
+
+    for (const [name, property] of Object.entries(schema.properties as Record<string, PropertySchema>)) {
         const field: FormField = {
             name,
             label: property.title || name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),

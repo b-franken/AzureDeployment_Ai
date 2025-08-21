@@ -1,14 +1,13 @@
 import { create } from "zustand";
 import { devtools, persist } from "zustand/middleware";
 import { immer } from "zustand/middleware/immer";
-import { withErrorHandling } from "./error-boundary";
+import { withErrorHandling } from "../error-boundary";
 
 import {
   login as apiLogin,
   logout as apiLogout,
   refresh as apiRefresh,
   chat as apiChat,
-  splitModel,
   listDeployRequests,
   createDeployRequest,
   approveDeployRequest,
@@ -109,7 +108,7 @@ export const useAuthStore = create<AuthState>()(
         logout: withErrorHandling("auth/logout", async () => {
           const token = get().token;
           try {
-            if (token) await apiLogout(token);
+            if (token) await apiLogout();
           } finally {
             set((state) => {
               state.user = null;
@@ -198,16 +197,9 @@ export const useChatStore = create<ChatState>()(
         });
         get().addMessage({ role: "user", content });
         try {
-          const { provider, model } = splitModel(get().currentModel);
-          const payload = {
-            input: content,
-            memory: toChatHistory(get().messages),
-            provider,
-            model,
-            enable_tools: get().enableTools,
-          };
-          const data = await apiChat(token, payload);
-          get().addMessage({ role: "assistant", content: data.response });
+          const messages = toChatHistory(get().messages);
+          const reply = await apiChat(token, messages);
+          get().addMessage({ role: "assistant", content: reply });
         } catch (error) {
           set((state) => {
             state.error = error instanceof Error ? error.message : "Unknown error";
@@ -238,7 +230,7 @@ export const useDeploymentStore = create<DeploymentState>()(
           state.requests = (list || []).map(toDeployment);
         });
       }),
-      createRequest: withErrorHandling("deploy/create", async (request) => {
+      createRequest: withErrorHandling("deploy/create", async (request: Partial<DeploymentRequest>) => {
         const { token } = useAuthStore.getState();
         if (!token) throw new Error("Not authenticated");
         const created = await createDeployRequest(token, request as any);
@@ -246,7 +238,7 @@ export const useDeploymentStore = create<DeploymentState>()(
           state.requests.push(toDeployment(created));
         });
       }),
-      approveRequest: withErrorHandling("deploy/approve", async (id) => {
+      approveRequest: withErrorHandling("deploy/approve", async (id: string) => {
         const { token } = useAuthStore.getState();
         if (!token) throw new Error("Not authenticated");
         await approveDeployRequest(token, id);
@@ -258,7 +250,7 @@ export const useDeploymentStore = create<DeploymentState>()(
           }
         });
       }),
-      rejectRequest: withErrorHandling("deploy/reject", async (id) => {
+      rejectRequest: withErrorHandling("deploy/reject", async (id: string) => {
         const { token } = useAuthStore.getState();
         if (!token) throw new Error("Not authenticated");
         await rejectDeployRequest(token, id);
@@ -270,7 +262,7 @@ export const useDeploymentStore = create<DeploymentState>()(
           }
         });
       }),
-      deployRequest: withErrorHandling("deploy/deploy", async (id) => {
+      deployRequest: withErrorHandling("deploy/deploy", async (id: string) => {
         const { token } = useAuthStore.getState();
         if (!token) throw new Error("Not authenticated");
         set((state) => {

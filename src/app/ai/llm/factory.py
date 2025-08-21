@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import httpx
+from openai import OpenAI
+
 from app.ai.llm.base import LLMProvider
 from app.ai.llm.gemini_provider import GeminiProvider
 from app.ai.llm.ollama_provider import OllamaProvider
@@ -10,17 +13,35 @@ from app.core.config import (
     LLM_PROVIDER,
     OLLAMA_MODEL,
     OPENAI_MODEL,
+    get_settings,
 )
 
 _reg = registry()
 
 
 def _openai_list() -> list[str]:
+    fallback = ["gpt-4o-mini", "gpt-4o", "gpt-5"]
     try:
-        prov = OpenAIProvider()
-        return prov.list_models()
+        settings = get_settings()
+        api_key = (
+            settings.llm.openai_api_key.get_secret_value()
+            if settings.llm.openai_api_key
+            else None
+        )
+        if not api_key:
+            return fallback
+        client = OpenAI(
+            api_key=api_key,
+            base_url=settings.llm.openai_api_base,
+            max_retries=3,
+            timeout=httpx.Timeout(10.0, connect=5.0),
+        )
+        resp = client.models.list()
+        models = [m.id for m in getattr(
+            resp, "data", []) if getattr(m, "id", None)]
+        return models if models else fallback
     except Exception:
-        return ["gpt-4o-mini", "gpt-4o", "gpt-5"]
+        return fallback
 
 
 def _gemini_list() -> list[str]:
@@ -31,9 +52,12 @@ def _ollama_list() -> list[str]:
     return _reg._ollama_models()
 
 
-_reg.register(ProviderAdapter("openai", _openai_list, ["gpt-4o-mini", "gpt-4o", "gpt-5"]))
-_reg.register(ProviderAdapter("gemini", _gemini_list, ["gemini-1.5-pro", "gemini-1.5-flash"]))
-_reg.register(ProviderAdapter("ollama", _ollama_list, ["llama3.1", "mistral", "gemma"]))
+_reg.register(ProviderAdapter("openai", _openai_list,
+              ["gpt-4o-mini", "gpt-4o", "gpt-5"]))
+_reg.register(ProviderAdapter("gemini", _gemini_list,
+              ["gemini-1.5-pro", "gemini-1.5-flash"]))
+_reg.register(ProviderAdapter("ollama", _ollama_list,
+              ["llama3.1", "mistral", "gemma"]))
 
 
 def available_providers() -> list[str]:

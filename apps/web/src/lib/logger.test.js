@@ -10,7 +10,6 @@ import { fileURLToPath } from 'node:url'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-// Load and transpile the TypeScript logger module
 const tsPath = path.join(__dirname, 'logger.ts')
 const tsCode = fs.readFileSync(tsPath, 'utf8')
 const { outputText } = ts.transpileModule(tsCode, {

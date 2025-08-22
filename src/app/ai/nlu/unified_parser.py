@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 if TYPE_CHECKING:
     from app.ai.nlu.embeddings_classifier import EmbeddingsClassifierService
@@ -60,7 +60,7 @@ class UnifiedParseResult:
         loc = params.get("location", "westeurope")
         env_in = params.get("environment", "dev")
         env = normalize_env(str(env_in))
-        product = None
+        product: str | None = None
         spec_params: dict[str, Any] = {}
         if rtype == "webapp" and name and rg:
             plan_name = params.get("plan") or f"{name}-{env}-plan"
@@ -98,21 +98,23 @@ class UnifiedParseResult:
         }
 
 
-def _to_scores_list(x):
+def _to_scores_list(x: Any) -> list[float]:
     try:
         import numpy as np
 
         if isinstance(x, np.ndarray):
-            return x.tolist()[0]
+            return cast(list[float], x.tolist()[0])
     except Exception:
         pass
     if hasattr(x, "detach"):
         try:
-            return x.detach().cpu().tolist()[0]
+            return cast(list[float], x.detach().cpu().tolist()[0])
         except Exception:
             return []
     if isinstance(x, list):
-        return x[0] if x and isinstance(x[0], list) else x
+        if x and isinstance(x[0], list):
+            return cast(list[float], x[0])
+        return cast(list[float], x)
     return []
 
 
@@ -123,7 +125,7 @@ def safe_literal_search(haystack: str, needle: str) -> bool:
 
 
 class unified_nlu_parser:
-    location_patterns = [
+    LOCATION_PATTERNS: ClassVar[list[tuple[str, str]]] = [
         (r"\b(?:in|at|to|for)\s+(west\s*europe|westeurope)\b", "westeurope"),
         (r"\b(?:in|at|to|for)\s+(north\s*europe|northeurope)\b", "northeurope"),
         (r"\b(?:in|at|to|for)\s+(uk\s*south|uksouth)\b", "uksouth"),
@@ -135,7 +137,7 @@ class unified_nlu_parser:
         (r"\beurope\b", "westeurope"),
     ]
 
-    resource_patterns: dict[str, list[str]] = {
+    RESOURCE_PATTERNS: ClassVar[dict[str, list[str]]] = {
         "resource_group": [
             r"resource\s+group\s+(?:named\s+|called\s+)?([a-z0-9][\w-]{0,89})",
             r"rg\s+(?:named\s+|called\s+)?([a-z0-9][\w-]{0,89})",
@@ -188,7 +190,7 @@ class unified_nlu_parser:
         ],
     }
 
-    intent_patterns: dict[DeploymentIntent, list[str]] = {
+    INTENT_PATTERNS: ClassVar[dict[DeploymentIntent, list[str]]] = {
         DeploymentIntent.create: [
             r"\b(create|make|provision|deploy|setup|add|new|build|establish|launch)\b",
             r"\bneed\s+(?:a\s+)?(?:new|fresh)\b",
@@ -225,16 +227,14 @@ class unified_nlu_parser:
         dimensions: int | None = None,
         local_model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
     ) -> None:
-        self.location_patterns = [
-            (re.compile(p, re.IGNORECASE), loc) for p, loc in type(self).location_patterns
+        self.location_patterns: list[tuple[re.Pattern[str], str]] = [
+            (re.compile(p, re.IGNORECASE), loc) for p, loc in self.LOCATION_PATTERNS
         ]
-        self.resource_patterns = {
-            k: [re.compile(p, re.IGNORECASE) for p in v]
-            for k, v in type(self).resource_patterns.items()
+        self.resource_patterns: dict[str, list[re.Pattern[str]]] = {
+            k: [re.compile(p, re.IGNORECASE) for p in v] for k, v in self.RESOURCE_PATTERNS.items()
         }
-        self.intent_patterns = {
-            k: [re.compile(p, re.IGNORECASE) for p in v]
-            for k, v in type(self).intent_patterns.items()
+        self.intent_patterns: dict[DeploymentIntent, list[re.Pattern[str]]] = {
+            k: [re.compile(p, re.IGNORECASE) for p in v] for k, v in self.INTENT_PATTERNS.items()
         }
         self._emb: EmbeddingsClassifierService | None = None
         if use_embeddings:
@@ -271,10 +271,13 @@ class unified_nlu_parser:
         ctx = self._build_context(t, params)
         adv = self._build_advanced_context(t, intent, rtype)
         conf = self._confidence(t, intent, rtype, bool(rname))
-        emb_scores = None
+        emb_scores: list[float] | None = None
         if self._emb:
-            probs = self._emb.predict_proba([text])
-            emb_scores = _to_scores_list(probs)
+            try:
+                probs = self._emb.predict_proba([text])
+                emb_scores = _to_scores_list(probs)
+            except Exception:
+                emb_scores = None
         action = self._action(intent, rtype)
         return UnifiedParseResult(
             text=text,
@@ -297,8 +300,8 @@ class unified_nlu_parser:
         scores: dict[DeploymentIntent, int] = {}
         for k, pats in self.intent_patterns.items():
             s = 0
-            for p in pats:
-                if p.search(text):
+            for pat in pats:
+                if pat.search(text):
                     s += 2
             if s > 0:
                 scores[k] = s
@@ -310,8 +313,8 @@ class unified_nlu_parser:
         scores: dict[str, int] = {}
         for rtype, pats in self.resource_patterns.items():
             s = 0
-            for p in pats:
-                if p.search(text):
+            for pat in pats:
+                if pat.search(text):
                     s += 2
             keyword_hints: dict[str, list[str]] = {
                 "resource_group": ["resource group", "rg"],
@@ -335,44 +338,44 @@ class unified_nlu_parser:
 
     def _extract_resource_name(self, text: str, rtype: str) -> str | None:
         if rtype in self.resource_patterns:
-            for p in self.resource_patterns[rtype]:
-                m = p.search(text)
+            for pat in self.resource_patterns[rtype]:
+                m = pat.search(text)
                 if m and m.groups():
                     return m.group(m.lastindex or 1)
-        for p in [
+        for pat2 in [
             re.compile(r"(?:named|called|name)\s+([a-z0-9][\w-]{2,79})", re.IGNORECASE),
             re.compile(r"([a-z0-9][\w-]{2,79})\s+(?:in|for|at)", re.IGNORECASE),
         ]:
-            m = p.search(text)
-            if m:
-                c = m.group(1)
+            m2 = pat2.search(text)
+            if m2:
+                c = m2.group(1)
                 if c not in {"in", "at", "to", "from", "with", "for", "the", "and", "or"}:
                     return c
         return None
 
     def _extract_parameters(self, text: str, rtype: str) -> dict[str, Any]:
         params: dict[str, Any] = {}
-        for p, loc in self.location_patterns:
-            if p.search(text):
+        for pat, loc in self.location_patterns:
+            if pat.search(text):
                 params["location"] = loc
                 break
-        for p in [
+        for pat in [
             re.compile(r"resource\s+group\s+([a-z0-9][\w-]{0,89})", re.IGNORECASE),
             re.compile(r"rg\s+([a-z0-9][\w-]{0,89})", re.IGNORECASE),
             re.compile(r"in\s+(?:resource\s+group|rg)\s+([a-z0-9][\w-]{0,89})", re.IGNORECASE),
         ]:
-            m = p.search(text)
+            m = pat.search(text)
             if m:
                 params["resource_group"] = m.group(1)
                 break
-        m = re.compile(
+        m_env = re.compile(
             r"\b(dev|development|test|testing|staging|stage|prod|production|uat)\b", re.IGNORECASE
         ).search(text)
-        if m:
-            params["environment"] = m.group(1).lower()
-        m = re.compile(r"(?:sku|tier|size)\s+([a-z0-9_]+)", re.IGNORECASE).search(text)
-        if m:
-            params["sku"] = m.group(1).upper()
+        if m_env:
+            params["environment"] = m_env.group(1).lower()
+        m_sku = re.compile(r"(?:sku|tier|size)\s+([a-z0-9_]+)", re.IGNORECASE).search(text)
+        if m_sku:
+            params["sku"] = m_sku.group(1).upper()
         if rtype == "storage":
             if safe_literal_search(text, "cool"):
                 params["access_tier"] = "Cool"
@@ -402,7 +405,7 @@ class unified_nlu_parser:
         self, text: str, intent: DeploymentIntent, rtype: str
     ) -> dict[str, Any]:
         adv: dict[str, Any] = {}
-        comp = []
+        comp: list[str] = []
         for name, pat in {
             "gdpr": re.compile(r"\b(gdpr|general\s+data\s+protection)\b", re.IGNORECASE),
             "hipaa": re.compile(r"\b(hipaa|health\s+insurance\s+portability)\b", re.IGNORECASE),

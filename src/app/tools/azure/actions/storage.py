@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import logging
-from typing import Any
+from typing import Any, cast
 
+from azure.core.credentials import AccessToken, TokenCredential
+from azure.core.credentials_async import AsyncTokenCredential
 from azure.core.exceptions import HttpResponseError, ResourceExistsError
 from azure.storage.blob import BlobServiceClient
 from azure.storage.fileshare import ShareServiceClient
@@ -12,6 +15,37 @@ from ..idempotency import safe_get
 from ..validators import validate_name
 
 logger = logging.getLogger(__name__)
+
+
+class _AsyncToSyncCredential(TokenCredential):
+    def __init__(self, async_cred: AsyncTokenCredential) -> None:
+        self._async_cred = async_cred
+
+    def get_token(self, *scopes: str, **kwargs: Any) -> AccessToken:
+        loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(loop)
+            return cast(
+                AccessToken, loop.run_until_complete(self._async_cred.get_token(*scopes, **kwargs))
+            )
+        finally:
+            loop.close()
+
+    def close(self) -> None:
+        loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(loop)
+            aclose = getattr(self._async_cred, "aclose", None)
+            if callable(aclose):
+                loop.run_until_complete(aclose())
+        finally:
+            loop.close()
+
+
+def _ensure_sync_credential(cred: TokenCredential | AsyncTokenCredential) -> TokenCredential:
+    if isinstance(cred, AsyncTokenCredential):
+        return _AsyncToSyncCredential(cred)
+    return cred
 
 
 async def create_storage_account(
@@ -98,7 +132,8 @@ async def create_blob_container(
         return "plan", {"account": name, "container": container_name}
 
     account_url = f"https://{name}.blob.core.windows.net"
-    svc = BlobServiceClient(account_url=account_url, credential=clients.cred)
+    sync_cred = _ensure_sync_credential(clients.cred)
+    svc = BlobServiceClient(account_url=account_url, credential=sync_cred)
 
     try:
         await clients.run(svc.create_container, container_name, metadata=tags)
@@ -127,7 +162,8 @@ async def create_file_share(
         return "plan", {"account": name, "share": share_name}
 
     account_url = f"https://{name}.file.core.windows.net"
-    svc = ShareServiceClient(account_url=account_url, credential=clients.cred)
+    sync_cred = _ensure_sync_credential(clients.cred)
+    svc = ShareServiceClient(account_url=account_url, credential=sync_cred)
 
     try:
         await clients.run(svc.create_share, share_name, metadata=tags)

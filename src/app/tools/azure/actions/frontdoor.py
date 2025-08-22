@@ -1,14 +1,48 @@
 from __future__ import annotations
 
+import asyncio
 import logging
-from typing import Any
+from typing import Any, cast
 
+from azure.core.credentials import AccessToken, TokenCredential
+from azure.core.credentials_async import AsyncTokenCredential
 from azure.core.exceptions import HttpResponseError
 
 from ..clients import Clients
 from ..validators import validate_name
 
 logger = logging.getLogger(__name__)
+
+
+class _AsyncToSyncCredential(TokenCredential):
+    def __init__(self, async_cred: AsyncTokenCredential) -> None:
+        self._async_cred = async_cred
+
+    def get_token(self, *scopes: str, **kwargs: Any) -> AccessToken:
+        loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(loop)
+            return cast(
+                AccessToken, loop.run_until_complete(self._async_cred.get_token(*scopes, **kwargs))
+            )
+        finally:
+            loop.close()
+
+    def close(self) -> None:
+        loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(loop)
+            aclose = getattr(self._async_cred, "aclose", None)
+            if callable(aclose):
+                loop.run_until_complete(aclose())
+        finally:
+            loop.close()
+
+
+def _ensure_sync_credential(cred: TokenCredential | AsyncTokenCredential) -> TokenCredential:
+    if isinstance(cred, AsyncTokenCredential):
+        return _AsyncToSyncCredential(cred)
+    return cred
 
 
 async def create_front_door(
@@ -52,7 +86,8 @@ async def create_front_door(
         SubResource,
     )
 
-    fd_client = FrontDoorManagementClient(clients.cred, clients.subscription_id)
+    sync_cred = _ensure_sync_credential(clients.cred)
+    fd_client = FrontDoorManagementClient(sync_cred, clients.subscription_id)
 
     try:
         existing = await clients.run(fd_client.front_doors.get, resource_group, name)
@@ -200,7 +235,8 @@ async def create_waf_policy(
         WebApplicationFirewallPolicy,
     )
 
-    fd_client = FrontDoorManagementClient(clients.cred, clients.subscription_id)
+    sync_cred = _ensure_sync_credential(clients.cred)
+    fd_client = FrontDoorManagementClient(sync_cred, clients.subscription_id)
 
     try:
         existing = await clients.run(fd_client.policies.get, resource_group, name)
@@ -243,9 +279,7 @@ async def create_waf_policy(
     waf_policy = WebApplicationFirewallPolicy(
         location="global",
         policy_settings=policy_settings,
-        custom_rules=(
-            CustomRuleList(rules=prepared_custom_rules) if prepared_custom_rules else None
-        ),
+        custom_rules=CustomRuleList(rules=prepared_custom_rules) if prepared_custom_rules else None,
         managed_rules=ManagedRuleSetList(managed_rule_sets=managed_rule_sets),
         tags=tags or {},
     )

@@ -39,34 +39,29 @@ def init_tracing(service_name: str = "devops-ai-api") -> None:
         str(settings.observability.trace_sample_rate),
     )
 
-    configure_azure_monitor(connection_string=os.getenv(
-        "APPLICATIONINSIGHTS_CONNECTION_STRING"))
+    configure_azure_monitor(connection_string=os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"))
 
     try:
         HTTPXClientInstrumentor().instrument()
     except Exception as exc:
-        logger.warning("HTTPX instrumentation failed", extra={
-                       "error": str(exc)}, exc_info=True)
+        logger.warning("HTTPX instrumentation failed", extra={"error": str(exc)}, exc_info=True)
 
     try:
         AsyncPGInstrumentor().instrument()
     except Exception as exc:
-        logger.warning("AsyncPG instrumentation failed", extra={
-                       "error": str(exc)}, exc_info=True)
+        logger.warning("AsyncPG instrumentation failed", extra={"error": str(exc)}, exc_info=True)
 
     try:
         PymongoInstrumentor().instrument()
     except Exception as exc:
-        logger.warning("Pymongo instrumentation failed", extra={
-                       "error": str(exc)}, exc_info=True)
+        logger.warning("Pymongo instrumentation failed", extra={"error": str(exc)}, exc_info=True)
 
     try:
         from opentelemetry.instrumentation.redis import RedisInstrumentor
 
         RedisInstrumentor().instrument()
     except Exception as exc:
-        logger.warning("Redis instrumentation failed", extra={
-                       "error": str(exc)}, exc_info=True)
+        logger.warning("Redis instrumentation failed", extra={"error": str(exc)}, exc_info=True)
 
     provider = trace.get_tracer_provider()
     if isinstance(provider, SDKTracerProvider):

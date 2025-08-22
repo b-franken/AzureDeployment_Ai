@@ -1,6 +1,10 @@
+from __future__ import annotations
+
+import asyncio
 import logging
 import os
 from collections.abc import Sequence
+from typing import Any
 
 from azure.core.credentials import TokenCredential
 from azure.core.credentials_async import AsyncTokenCredential
@@ -31,9 +35,6 @@ from azure.identity.aio import (
     DefaultAzureCredential as DefaultAzureCredentialAsync,
 )
 from azure.identity.aio import (
-    DeviceCodeCredential as DeviceCodeCredentialAsync,
-)
-from azure.identity.aio import (
     EnvironmentCredential as EnvironmentCredentialAsync,
 )
 from azure.identity.aio import (
@@ -52,6 +53,22 @@ _CREDENTIAL_CACHE: TokenCredential | None = None
 _ASYNC_CREDENTIAL_CACHE: AsyncTokenCredential | None = None
 
 
+class _SyncToAsyncCredential(AsyncTokenCredential):
+    def __init__(self, sync_cred: TokenCredential) -> None:
+        self._sync_cred = sync_cred
+
+    async def get_token(self, *scopes: str, **kwargs: Any):
+        return await asyncio.to_thread(self._sync_cred.get_token, *scopes, **kwargs)
+
+    async def close(self) -> None:
+        close = getattr(self._sync_cred, "close", None)
+        if callable(close):
+            await asyncio.to_thread(close)
+
+    async def aclose(self) -> None:
+        await self.close()
+
+
 def _setup_environment() -> None:
     if settings.azure.tenant_id:
         os.environ.setdefault("AZURE_TENANT_ID", settings.azure.tenant_id)
@@ -62,7 +79,8 @@ def _setup_environment() -> None:
             "AZURE_CLIENT_SECRET", settings.azure.client_secret.get_secret_value()
         )
     if settings.azure.subscription_id:
-        os.environ.setdefault("AZURE_SUBSCRIPTION_ID", settings.azure.subscription_id)
+        os.environ.setdefault("AZURE_SUBSCRIPTION_ID",
+                              settings.azure.subscription_id)
 
 
 def _authority_host(cfg: AzureConfig) -> str:
@@ -98,12 +116,14 @@ def build_credential(cfg: AzureConfig | None = None, use_cache: bool = True) -> 
                 authority=authority,
             )
         elif cfg.auth_mode == "managed_identity":
-            credential = ManagedIdentityCredential(client_id=cfg.user_assigned_identity_client_id)
+            credential = ManagedIdentityCredential(
+                client_id=cfg.user_assigned_identity_client_id)
         elif cfg.auth_mode == "azure_cli":
             credential = AzureCliCredential()
         elif cfg.auth_mode == "device_code":
             if not cfg.tenant_id:
-                raise ValueError("tenant_id is required for device_code authentication")
+                raise ValueError(
+                    "tenant_id is required for device_code authentication")
             credential = DeviceCodeCredential(
                 tenant_id=cfg.tenant_id, client_id=cfg.client_id, authority=authority
             )
@@ -181,10 +201,12 @@ async def build_async_credential(
             credential = AzureCliCredentialAsync()
         elif cfg.auth_mode == "device_code":
             if not cfg.tenant_id:
-                raise ValueError("tenant_id is required for device_code authentication")
-            credential = DeviceCodeCredentialAsync(
+                raise ValueError(
+                    "tenant_id is required for device_code authentication")
+            sync_dc = DeviceCodeCredential(
                 tenant_id=cfg.tenant_id, client_id=cfg.client_id, authority=authority
             )
+            credential = _SyncToAsyncCredential(sync_dc)
         elif cfg.auth_mode == "workload_identity":
             if not all([cfg.tenant_id, cfg.client_id, cfg.workload_identity_token_file]):
                 raise ValueError(
@@ -201,7 +223,8 @@ async def build_async_credential(
         else:
             credentials = []
             try:
-                credentials.append(EnvironmentCredentialAsync(authority=authority))
+                credentials.append(
+                    EnvironmentCredentialAsync(authority=authority))
             except Exception:
                 pass
             try:
@@ -243,7 +266,7 @@ async def test_credential(credential: TokenCredential | None = None) -> bool:
     if credential is None:
         credential = build_credential()
     try:
-        token = credential.get_token(_ARM_SCOPE)
+        token = await asyncio.to_thread(credential.get_token, _ARM_SCOPE)
         return token is not None and token.token is not None
     except Exception:
         return False

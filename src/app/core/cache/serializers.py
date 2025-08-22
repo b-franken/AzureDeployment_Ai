@@ -13,16 +13,32 @@ except Exception:  # noqa: BLE001
     orjson = None
 
 
-def dumps(obj: Any) -> bytes:
-    if isinstance(obj, (bytes, bytearray, memoryview)):
-        return bytes(obj)
-    if msgspec is not None:
-        return msgspec.json.encode(obj)
-    if orjson is not None:
-        return orjson.dumps(obj)
+def _std_json_dumps(obj: Any) -> bytes:
     import json
 
-    return json.dumps(obj, separators=(",", ":")).encode()
+    return json.dumps(obj, separators=(",", ":"), ensure_ascii=False).encode()
+
+
+def _std_json_loads(b: bytes) -> Any:
+    import json
+
+    return json.loads(b.decode())
+
+
+def dumps(obj: Any) -> bytes:
+    if isinstance(obj, bytes | bytearray | memoryview):
+        return bytes(obj)
+    if msgspec is not None:
+        try:
+            return msgspec.json.encode(obj)
+        except Exception:  # noqa: BLE001
+            pass
+    if orjson is not None:
+        try:
+            return orjson.dumps(obj)
+        except Exception:  # noqa: BLE001
+            pass
+    return _std_json_dumps(obj)
 
 
 def loads(data: bytes | bytearray | memoryview | None) -> Any:
@@ -30,9 +46,13 @@ def loads(data: bytes | bytearray | memoryview | None) -> Any:
         return None
     b = bytes(data)
     if msgspec is not None:
-        return msgspec.json.decode(b)
+        try:
+            return msgspec.json.decode(b)
+        except Exception:  # noqa: BLE001
+            pass
     if orjson is not None:
-        return orjson.loads(b)
-    import json
-
-    return json.loads(b.decode())
+        try:
+            return orjson.loads(b)
+        except Exception:  # noqa: BLE001
+            pass
+    return _std_json_loads(b)

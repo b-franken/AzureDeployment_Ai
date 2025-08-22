@@ -75,7 +75,10 @@ class OpenAIProvider(LLMProvider):
                     current.record_exception(err)
                     current.set_status(Status(StatusCode.ERROR, str(err)))
                 raise ExternalServiceException(
-                    "The AI service is busy or unreachable. Please retry. If this keeps happening, try a smaller prompt or wait a minute.",
+                    (
+                        "The AI service is busy or unreachable. Please retry. "
+                        "If this keeps happening, try a smaller prompt or wait a minute."
+                    ),
                     retryable=True,
                 ) from err
 
@@ -125,7 +128,10 @@ class OpenAIProvider(LLMProvider):
                     current.record_exception(err)
                     current.set_status(Status(StatusCode.ERROR, str(err)))
                 raise ExternalServiceException(
-                    "The AI service is busy or unreachable. Please retry. If this keeps happening, try a smaller prompt or wait a minute.",
+                    (
+                        "The AI service is busy or unreachable. Please retry. "
+                        "If this keeps happening, try a smaller prompt or wait a minute."
+                    ),
                     retryable=True,
                 ) from err
 
@@ -165,6 +171,9 @@ class OpenAIProvider(LLMProvider):
                     current.record_exception(err)
                     current.set_status(Status(StatusCode.ERROR, str(err)))
                 raise ExternalServiceException(
-                    "The AI service is busy or unreachable. Please retry. If this keeps happening, try a smaller prompt or wait a minute.",
+                    (
+                        "The AI service is busy or unreachable. Please retry. "
+                        "If this keeps happening, try a smaller prompt or wait a minute."
+                    ),
                     retryable=True,
                 ) from err

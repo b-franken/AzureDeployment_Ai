@@ -4,9 +4,8 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
-from app.events.schemas import DeploymentEvent
 from app.core.streams import streaming_handler
-
+from app.events.schemas import DeploymentEvent
 
 router = APIRouter()
 

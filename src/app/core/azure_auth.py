@@ -79,8 +79,7 @@ def _setup_environment() -> None:
             "AZURE_CLIENT_SECRET", settings.azure.client_secret.get_secret_value()
         )
     if settings.azure.subscription_id:
-        os.environ.setdefault("AZURE_SUBSCRIPTION_ID",
-                              settings.azure.subscription_id)
+        os.environ.setdefault("AZURE_SUBSCRIPTION_ID", settings.azure.subscription_id)
 
 
 def _authority_host(cfg: AzureConfig) -> str:
@@ -116,14 +115,12 @@ def build_credential(cfg: AzureConfig | None = None, use_cache: bool = True) -> 
                 authority=authority,
             )
         elif cfg.auth_mode == "managed_identity":
-            credential = ManagedIdentityCredential(
-                client_id=cfg.user_assigned_identity_client_id)
+            credential = ManagedIdentityCredential(client_id=cfg.user_assigned_identity_client_id)
         elif cfg.auth_mode == "azure_cli":
             credential = AzureCliCredential()
         elif cfg.auth_mode == "device_code":
             if not cfg.tenant_id:
-                raise ValueError(
-                    "tenant_id is required for device_code authentication")
+                raise ValueError("tenant_id is required for device_code authentication")
             credential = DeviceCodeCredential(
                 tenant_id=cfg.tenant_id, client_id=cfg.client_id, authority=authority
             )
@@ -201,8 +198,7 @@ async def build_async_credential(
             credential = AzureCliCredentialAsync()
         elif cfg.auth_mode == "device_code":
             if not cfg.tenant_id:
-                raise ValueError(
-                    "tenant_id is required for device_code authentication")
+                raise ValueError("tenant_id is required for device_code authentication")
             sync_dc = DeviceCodeCredential(
                 tenant_id=cfg.tenant_id, client_id=cfg.client_id, authority=authority
             )
@@ -223,8 +219,7 @@ async def build_async_credential(
         else:
             credentials = []
             try:
-                credentials.append(
-                    EnvironmentCredentialAsync(authority=authority))
+                credentials.append(EnvironmentCredentialAsync(authority=authority))
             except Exception:
                 pass
             try:

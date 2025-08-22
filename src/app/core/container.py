@@ -262,9 +262,9 @@ class Container(ServiceProvider):
             params = list(signature.parameters.values())
         for param in params:
             ann = param.annotation
+            origin = get_origin(ann)
             if ann == dep_type:
                 return param.name
-            origin = get_origin(ann)
             if origin in (Union, types.UnionType):
                 if dep_type in get_args(ann):
                     return param.name
@@ -325,8 +325,17 @@ def inject(container: Container) -> Callable[[Callable[..., Any]], Callable[...,
                     try:
                         dependency = await container.aget(param.annotation)
                         kwargs[name] = dependency
-
                     except Exception as exc:
+                        if strict:
+                            logger.error(
+                                "strict DI injection failed for %s on %s: %s",
+                                name,
+                                getattr(func, "__name__", str(func)),
+                                str(exc),
+                            )
+                            raise ConfigurationError(
+                                name, f"Failed to inject dependency for parameter '{name}'"
+                            ) from exc
                         logger.debug("Failed to inject dependency %s: %s", name, exc)
 
             if asyncio.iscoroutinefunction(func):

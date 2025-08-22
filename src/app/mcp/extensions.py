@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, TypedDict, cast, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 from mcp.server.fastmcp import Context
 

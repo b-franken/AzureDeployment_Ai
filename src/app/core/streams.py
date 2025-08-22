@@ -5,7 +5,6 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Final
 
-
 END_MARKER: Final[str] = "__STREAM_END__"
 
 

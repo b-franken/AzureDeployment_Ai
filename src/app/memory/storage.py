@@ -71,8 +71,29 @@ class AsyncMemoryStore:
                     timestamp TIMESTAMPTZ DEFAULT now(),
                     created_at TIMESTAMPTZ DEFAULT now()
                 );
-                CREATE INDEX IF NOT EXISTS idx_user_timestamp ON messages(user_id, timestamp DESC);
-                CREATE INDEX IF NOT EXISTS idx_user_created ON messages(user_id, created_at DESC);
+
+                CREATE INDEX IF NOT EXISTS idx_user_timestamp
+                    ON messages (user_id, timestamp DESC);
+
+                CREATE INDEX IF NOT EXISTS idx_user_created
+                    ON messages (user_id, created_at DESC);
+
+                CREATE INDEX IF NOT EXISTS idx_user_thread_created
+                    ON messages (
+                        user_id,
+                        (metadata->>'thread_id'),
+                        created_at DESC
+                    );
+
+                CREATE INDEX IF NOT EXISTS idx_user_agent_created
+                    ON messages (
+                        user_id,
+                        (metadata->>'agent'),
+                        created_at DESC
+                    );
+
+                CREATE INDEX IF NOT EXISTS idx_messages_metadata_gin
+                    ON messages USING GIN (metadata);
                 """
             )
             self._initialized = True
@@ -90,9 +111,17 @@ class AsyncMemoryStore:
         role: MessageRole | str,
         content: str,
         metadata: dict[str, Any] | None = None,
+        *,
+        thread_id: str | None = None,
+        agent: str | None = None,
     ) -> int:
         if isinstance(role, str):
             role = MessageRole(role)
+        merged = dict(metadata or {})
+        if thread_id is not None:
+            merged["thread_id"] = thread_id
+        if agent is not None:
+            merged["agent"] = agent
         async with self.get_connection() as conn:
             row = await conn.fetchrow(
                 """
@@ -103,11 +132,11 @@ class AsyncMemoryStore:
                 user_id,
                 role.value,
                 content,
-                metadata if metadata is not None else None,
+                merged if merged else None,
             )
         message_id = int(row["id"])
         await self.trim_user_memory(user_id)
-        logger.debug(f"stored message id={message_id} user_id={user_id}")
+        logger.debug("stored message id=%s user_id=%s", message_id, user_id)
         return message_id
 
     async def get_user_memory(
@@ -115,20 +144,33 @@ class AsyncMemoryStore:
         user_id: str,
         limit: int | None = None,
         include_metadata: bool = False,
+        *,
+        thread_id: str | None = None,
+        agent: str | None = None,
     ) -> list[dict[str, Any]]:
         lim = int(limit if limit is not None else self.max_memory)
+        conditions: list[str] = ["user_id = $1"]
+        params: list[Any] = [user_id]
+        idx = 2
+        if thread_id is not None:
+            conditions.append(f"metadata->>'thread_id' = ${idx}")
+            params.append(thread_id)
+            idx += 1
+        if agent is not None:
+            conditions.append(f"metadata->>'agent' = ${idx}")
+            params.append(agent)
+            idx += 1
+        where_sql = " AND ".join(conditions)
+        query = f"""
+            SELECT role, content, metadata, timestamp
+            FROM messages
+            WHERE {where_sql}
+            ORDER BY created_at DESC
+            LIMIT ${idx}
+        """
+        params.append(lim)
         async with self.get_connection() as conn:
-            rows = await conn.fetch(
-                """
-                SELECT role, content, metadata, timestamp
-                FROM messages
-                WHERE user_id = $1
-                ORDER BY created_at DESC
-                LIMIT $2
-                """,
-                user_id,
-                lim,
-            )
+            rows = await conn.fetch(query, *params)
         rows = list(rows)[::-1]
         result: list[dict[str, Any]] = []
         for r in rows:
@@ -141,7 +183,9 @@ class AsyncMemoryStore:
 
     async def get_message_count(self, user_id: str) -> int:
         async with self.get_connection() as conn:
-            row = await conn.fetchrow("SELECT COUNT(*) AS c FROM messages WHERE user_id = $1", user_id)
+            row = await conn.fetchrow(
+                "SELECT COUNT(*) AS c FROM messages WHERE user_id = $1", user_id
+            )
         return int(row["c"] if row else 0)
 
     async def search_messages(
@@ -149,21 +193,38 @@ class AsyncMemoryStore:
         user_id: str,
         query: str,
         limit: int = 10,
+        *,
+        thread_id: str | None = None,
+        agent: str | None = None,
     ) -> list[dict[str, Any]]:
+        conditions: list[str] = ["user_id = $1"]
+        params: list[Any] = [user_id]
+        idx = 2
+        if thread_id is not None:
+            conditions.append(f"metadata->>'thread_id' = ${idx}")
+            params.append(thread_id)
+            idx += 1
+        if agent is not None:
+            conditions.append(f"metadata->>'agent' = ${idx}")
+            params.append(agent)
+            idx += 1
+        conditions.append(f"content ILIKE '%%' || ${idx} || '%%'")
+        params.append(query)
+        idx += 1
+        where_sql = " AND ".join(conditions)
+        sql = f"""
+            SELECT role, content, timestamp
+            FROM messages
+            WHERE {where_sql}
+            ORDER BY created_at DESC
+            LIMIT ${idx}
+        """
+        params.append(int(limit))
         async with self.get_connection() as conn:
-            rows = await conn.fetch(
-                """
-                SELECT role, content, timestamp
-                FROM messages
-                WHERE user_id = $1 AND content ILIKE '%' || $2 || '%'
-                ORDER BY created_at DESC
-                LIMIT $3
-                """,
-                user_id,
-                query,
-                int(limit),
-            )
-        return [{"role": r["role"], "content": r["content"], "timestamp": r["timestamp"]} for r in rows]
+            rows = await conn.fetch(sql, *params)
+        return [
+            {"role": r["role"], "content": r["content"], "timestamp": r["timestamp"]} for r in rows
+        ]
 
     async def trim_user_memory(
         self,
@@ -189,7 +250,7 @@ class AsyncMemoryStore:
             )
         deleted = int(result.split()[-1]) if result else 0
         if deleted > 0:
-            logger.info(f"trimmed {deleted} messages for user_id={user_id}")
+            logger.info("trimmed %s messages for user_id=%s", deleted, user_id)
         return deleted
 
     async def forget_user(self, user_id: str) -> int:
@@ -201,8 +262,8 @@ class AsyncMemoryStore:
         async with self.get_connection() as conn:
             total = await conn.fetchval("SELECT COUNT(*) FROM messages")
             unique_users = await conn.fetchval("SELECT COUNT(DISTINCT user_id) FROM messages")
-            role_rows = await conn.fetch("SELECT role, COUNT(*) FROM messages GROUP BY role")
-            role_distribution = {r["role"]: r["count"] for r in role_rows}
+            role_rows = await conn.fetch("SELECT role, COUNT(*) AS cnt FROM messages GROUP BY role")
+            role_distribution = {r["role"]: r["cnt"] for r in role_rows}
         return {
             "total_messages": int(total or 0),
             "unique_users": int(unique_users or 0),

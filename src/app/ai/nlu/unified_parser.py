@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
@@ -340,10 +340,8 @@ class unified_nlu_parser:
                 if m and m.groups():
                     return m.group(m.lastindex or 1)
         for p in [
-            re.compile(
-                r"(?:named|called|name)\s+([a-z0-9][\w-]{2,79})", re.IGNORECASE),
-            re.compile(
-                r"([a-z0-9][\w-]{2,79})\s+(?:in|for|at)", re.IGNORECASE),
+            re.compile(r"(?:named|called|name)\s+([a-z0-9][\w-]{2,79})", re.IGNORECASE),
+            re.compile(r"([a-z0-9][\w-]{2,79})\s+(?:in|for|at)", re.IGNORECASE),
         ]:
             m = p.search(text)
             if m:
@@ -359,11 +357,9 @@ class unified_nlu_parser:
                 params["location"] = loc
                 break
         for p in [
-            re.compile(
-                r"resource\s+group\s+([a-z0-9][\w-]{0,89})", re.IGNORECASE),
+            re.compile(r"resource\s+group\s+([a-z0-9][\w-]{0,89})", re.IGNORECASE),
             re.compile(r"rg\s+([a-z0-9][\w-]{0,89})", re.IGNORECASE),
-            re.compile(
-                r"in\s+(?:resource\s+group|rg)\s+([a-z0-9][\w-]{0,89})", re.IGNORECASE),
+            re.compile(r"in\s+(?:resource\s+group|rg)\s+([a-z0-9][\w-]{0,89})", re.IGNORECASE),
         ]:
             m = p.search(text)
             if m:
@@ -374,8 +370,7 @@ class unified_nlu_parser:
         ).search(text)
         if m:
             params["environment"] = m.group(1).lower()
-        m = re.compile(
-            r"(?:sku|tier|size)\s+([a-z0-9_]+)", re.IGNORECASE).search(text)
+        m = re.compile(r"(?:sku|tier|size)\s+([a-z0-9_]+)", re.IGNORECASE).search(text)
         if m:
             params["sku"] = m.group(1).upper()
         if rtype == "storage":
@@ -394,7 +389,7 @@ class unified_nlu_parser:
             "tags": {
                 "environment": params.get("environment", "dev"),
                 "managed_by": "devops-ai",
-                "created_date": datetime.now(timezone.utc).isoformat(),
+                "created_date": datetime.now(UTC).isoformat(),
             },
         }
         if safe_literal_search(text, "high availability") or safe_literal_search(text, "ha"):

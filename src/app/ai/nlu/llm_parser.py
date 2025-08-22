@@ -7,9 +7,12 @@ from app.ai.llm.factory import get_provider_and_model
 from app.ai.nlu.unified_parser import DeploymentIntent, UnifiedParseResult, unified_nlu_parser
 
 SYSTEM_PROMPT = (
-    "You are a DevOps assistant. Convert free text into an intent for provisioning."
-    "Use function-calling and produce one function-call that best matches the input."
-    "Fill in fields: action, resource_type, name, location, resource_group, environment, sku, dns_prefix, etc."
+    "You are a DevOps assistant. Convert free text into an intent for "
+    "provisioning. "
+    "Use function-calling and produce one function-call that best "
+    "matches the input. "
+    "Fill in fields: action, resource_type, name, location, resource_group, "
+    "environment, sku, dns_prefix, etc. "
     "Only choose a function if the input truly implies it."
 )
 

@@ -68,8 +68,7 @@ class BaseRepository[T](ABC):
 
     async def update(self, id: str, updates: dict[str, Any]) -> T | None:
         updates["updated_at"] = datetime.utcnow()
-        set_clause = ", ".join(f"{k} = ${i + 2}" for i,
-                               k in enumerate(updates.keys()))
+        set_clause = ", ".join(f"{k} = ${i + 2}" for i, k in enumerate(updates.keys()))
         query = f"UPDATE {self.table_name} SET {set_clause} WHERE id = $1 RETURNING *"
         record = await self.db.fetchrow(query, id, *updates.values())
         return self._to_model(dict(record)) if record else None
@@ -81,15 +80,13 @@ class BaseRepository[T](ABC):
 
     async def count(self, where: dict[str, Any] | None = None) -> int:
         if where:
-            conditions = " AND ".join(
-                f"{k} = ${i + 1}" for i, k in enumerate(where.keys()))
+            conditions = " AND ".join(f"{k} = ${i + 1}" for i, k in enumerate(where.keys()))
             query = f"SELECT COUNT(*) FROM {self.table_name} WHERE {conditions}"
             return await self.db.fetchval(query, *where.values())
         query = f"SELECT COUNT(*) FROM {self.table_name}"
         return await self.db.fetchval(query)
 
     async def exists(self, where: dict[str, Any]) -> bool:
-        conditions = " AND ".join(
-            f"{k} = ${i + 1}" for i, k in enumerate(where.keys()))
+        conditions = " AND ".join(f"{k} = ${i + 1}" for i, k in enumerate(where.keys()))
         query = f"SELECT EXISTS(SELECT 1 FROM {self.table_name} WHERE {conditions})"
         return await self.db.fetchval(query, *where.values())

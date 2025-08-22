@@ -1,15 +1,26 @@
 from __future__ import annotations
 
+import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
-from app.ai.agents.types import AgentContext, ExecutionPlan, ExecutionResult
+from app.ai.agents.types import ExecutionPlan, ExecutionResult
 
 TState = TypeVar("TState")
 TResult = TypeVar("TResult")
+
+
+@dataclass
+class AgentContext:
+    user_id: str | None = None
+    thread_id: str | None = None
+    agent_name: str | None = None
+    environment: str | None = None
+    dry_run: bool = False
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class AgentStatus(Enum):
@@ -47,28 +58,20 @@ class Agent(ABC, Generic[TState, TResult]):
         raise NotImplementedError
 
     async def run(self, goal: str) -> ExecutionResult[TResult]:
-        import time
-
         self.status = AgentStatus.PLANNING
         planning_start = time.perf_counter()
-
         try:
             plan = await self.plan(goal)
             planning_time = (time.perf_counter() - planning_start) * 1000
-
             self.status = AgentStatus.EXECUTING
             execution_start = time.perf_counter()
-
             result = await self.execute(plan)
             execution_time = (time.perf_counter() - execution_start) * 1000
-
             self._update_metrics(
                 success=result.success, planning_time=planning_time, execution_time=execution_time
             )
-
             self.status = AgentStatus.COMPLETED if result.success else AgentStatus.FAILED
             return result
-
         except Exception as e:
             self.status = AgentStatus.FAILED
             self._update_metrics(success=False)
@@ -82,19 +85,16 @@ class Agent(ABC, Generic[TState, TResult]):
             self.metrics.successful_executions += 1
         else:
             self.metrics.failed_executions += 1
-
         if planning_time is not None:
             alpha = 0.1
             self.metrics.average_planning_time_ms = (
                 alpha * planning_time + (1 - alpha) * self.metrics.average_planning_time_ms
             )
-
         if execution_time is not None:
             alpha = 0.1
             self.metrics.average_execution_time_ms = (
                 alpha * execution_time + (1 - alpha) * self.metrics.average_execution_time_ms
             )
-
         self.metrics.last_execution_time = datetime.utcnow()
 
     async def cancel(self) -> None:

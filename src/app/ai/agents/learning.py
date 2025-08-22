@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from typing import Any
 
 from app.ai.agents.base import Agent, AgentContext
-from app.ai.agents.types import ExecutionPlan, ExecutionResult, PlanStep, StepType
-from app.memory.storage import get_async_store
+from app.ai.agents.types import ExecutionPlan, ExecutionResult
 
 
 @dataclass
@@ -34,7 +32,9 @@ class LearningAgent(Agent[list[Experience], dict[str, Any]]):
         Consider different approaches and be creative.
         """
 
-        response = await generate_response(strategy_prompt, provider="openai", user_id=self.context.user_id)
+        response = await generate_response(
+            strategy_prompt, provider="openai", user_id=self.context.user_id
+        )
 
         steps = self._parse_strategy_response(response, goal)
 

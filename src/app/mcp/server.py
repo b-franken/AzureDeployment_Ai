@@ -188,7 +188,9 @@ class MCPServer:
         @self.mcp.resource("tools://registered")
         async def list_registered_tools(context: Context) -> list[dict[str, Any]]:
             tools = list_tools()
-            return [{"name": t.name, "description": t.description, "schema": t.schema} for t in tools]
+            return [
+                {"name": t.name, "description": t.description, "schema": t.schema} for t in tools
+            ]
 
         @self.mcp.resource("deployments://active")
         async def get_active_deployments(context: Context) -> list[dict[str, Any]]:
@@ -267,12 +269,10 @@ class MCPServer:
             await stream.send(f"Starting: {step_name}")
             try:
                 result = await step_func(request)
-                results.append(
-                    {"step": step_name, "status": "success", "result": result})
+                results.append({"step": step_name, "status": "success", "result": result})
                 await stream.send(f"Completed: {step_name}")
             except Exception as e:
-                results.append(
-                    {"step": step_name, "status": "failed", "error": str(e)})
+                results.append({"step": step_name, "status": "failed", "error": str(e)})
                 await stream.send(f"Failed: {step_name} - {str(e)}")
                 if not request.continue_on_error:
                     break
@@ -289,8 +289,7 @@ class MCPServer:
             query=params.kql,
             subscriptions=params.subscriptions or self._get_allowed_subscriptions(),
             options=(
-                QueryRequestOptions(
-                    top=params.top, skip=params.skip, skip_token=params.skip_token)
+                QueryRequestOptions(top=params.top, skip=params.skip, skip_token=params.skip_token)
                 if params.top or params.skip or params.skip_token
                 else None
             ),
@@ -307,8 +306,7 @@ class MCPServer:
 
     def _get_resource_graph_client(self) -> ResourceGraphClient:
         if not hasattr(self, "_rg_client"):
-            cred = ChainedTokenCredential(
-                ManagedIdentityCredential(), AzureCliCredential())
+            cred = ChainedTokenCredential(ManagedIdentityCredential(), AzureCliCredential())
             self._rg_client = ResourceGraphClient(cred)
         return self._rg_client
 
@@ -329,18 +327,18 @@ class MCPServer:
             name = str(r.get("name", "")).strip()
             rtype = str(r.get("type", "")).strip()
             if not name or not rtype:
-                invalid.append(
-                    {"scope": "resource", "name": name or "", "type": rtype or ""})
+                invalid.append({"scope": "resource", "name": name or "", "type": rtype or ""})
                 continue
             if name in seen:
-                invalid.append(
-                    {"scope": "duplicate", "name": name, "type": rtype})
+                invalid.append({"scope": "duplicate", "name": name, "type": rtype})
             seen.add(name)
             if not pattern.match(name):
-                invalid.append(
-                    {"scope": "format", "name": name, "type": rtype})
+                invalid.append({"scope": "format", "name": name, "type": rtype})
         passed = len(invalid) == 0
-        return {"passed": passed, "details": {"invalid": invalid, "checked": len(request.resources)}}
+        return {
+            "passed": passed,
+            "details": {"invalid": invalid, "checked": len(request.resources)},
+        }
 
     async def _check_security_policies(self, request: DeploymentRequest) -> dict[str, Any]:
         required_tags = {"owner", "environment"}
@@ -358,17 +356,15 @@ class MCPServer:
                 https_only = bool(props.get("https_only", True))
                 tls = str(props.get("minimum_tls_version", "1.2"))
                 if not https_only:
-                    enforced.append(
-                        {"name": name, "policy": "https_only", "value": True})
+                    enforced.append({"name": name, "policy": "https_only", "value": True})
                 if tls not in {"1.2", "1.3"}:
-                    enforced.append(
-                        {"name": name, "policy": "minimum_tls_version", "value": "1.2"})
+                    enforced.append({"name": name, "policy": "minimum_tls_version", "value": "1.2"})
             if rtype == "storage_account":
-                allow_public = bool(
-                    props.get("allow_blob_public_access", False))
+                allow_public = bool(props.get("allow_blob_public_access", False))
                 if allow_public:
                     enforced.append(
-                        {"name": name, "policy": "allow_blob_public_access", "value": False})
+                        {"name": name, "policy": "allow_blob_public_access", "value": False}
+                    )
         passed = not missing_tags and not enforced
         return {"passed": passed, "details": {"missing_tags": missing_tags, "enforced": enforced}}
 
@@ -381,17 +377,14 @@ class MCPServer:
             vnet = str(props.get("vnet_id", "")).strip()
             if subnet:
                 if "/subnets/" not in subnet:
-                    issues.append(
-                        {"name": name, "issue": "invalid_subnet_ref"})
+                    issues.append({"name": name, "issue": "invalid_subnet_ref"})
                 if not subnet.startswith("/subscriptions/"):
-                    issues.append(
-                        {"name": name, "issue": "subnet_not_fully_qualified"})
+                    issues.append({"name": name, "issue": "subnet_not_fully_qualified"})
             if vnet:
                 if "/virtualNetworks/" not in vnet:
                     issues.append({"name": name, "issue": "invalid_vnet_ref"})
                 if not vnet.startswith("/subscriptions/"):
-                    issues.append(
-                        {"name": name, "issue": "vnet_not_fully_qualified"})
+                    issues.append({"name": name, "issue": "vnet_not_fully_qualified"})
         return {"passed": len(issues) == 0, "details": {"issues": issues}}
 
     async def _check_resource_quotas(self, request: DeploymentRequest) -> dict[str, Any]:
@@ -410,8 +403,7 @@ class MCPServer:
         over: list[dict[str, Any]] = []
         for rtype, cnt in counts.items():
             if rtype in limit and cnt > limit[rtype]:
-                over.append(
-                    {"type": rtype, "count": cnt, "limit": limit[rtype]})
+                over.append({"type": rtype, "count": cnt, "limit": limit[rtype]})
         return {"passed": len(over) == 0, "details": {"usage": counts, "exceeded": over}}
 
     async def _estimate_deployment_cost(self, request: DeploymentRequest) -> dict[str, Any]:
@@ -436,8 +428,7 @@ class MCPServer:
             else:
                 cost = 0.0
             total += cost
-            breakdown.append(
-                {"name": name, "type": rtype, "monthly_cost": cost})
+            breakdown.append({"name": name, "type": rtype, "monthly_cost": cost})
         return {"monthly_cost": total, "currency": "USD", "items": breakdown}
 
     async def _get_deployment_recommendations(self, request: DeploymentRequest) -> list[str]:
@@ -453,8 +444,7 @@ class MCPServer:
         return str(uuid.uuid4())
 
     async def _init_deployment(self, request: DeploymentRequest) -> dict[str, Any]:
-        required = ["subscription_id",
-                    "resource_group", "location", "resources"]
+        required = ["subscription_id", "resource_group", "location", "resources"]
         for key in required:
             if not getattr(request, key, None):
                 raise ValueError(f"missing_required_field:{key}")
@@ -494,8 +484,7 @@ class MCPServer:
                 if "/subnets/" in subnet and subnet.startswith("/subscriptions/"):
                     configured += 1
                 else:
-                    checks.append(
-                        {"name": str(r.get("name", "")), "issue": "invalid_subnet"})
+                    checks.append({"name": str(r.get("name", "")), "issue": "invalid_subnet"})
         return {"network_configured": configured, "issues": checks}
 
     async def _apply_security(self, request: DeploymentRequest) -> dict[str, Any]:
@@ -504,13 +493,12 @@ class MCPServer:
             rtype = str(r.get("type", "")).lower()
             name = str(r.get("name", ""))
             if rtype == "web_app":
-                applied.append(
-                    {"name": name, "setting": "https_only", "value": True})
-                applied.append(
-                    {"name": name, "setting": "minimum_tls_version", "value": "1.2"})
+                applied.append({"name": name, "setting": "https_only", "value": True})
+                applied.append({"name": name, "setting": "minimum_tls_version", "value": "1.2"})
             if rtype == "storage_account":
                 applied.append(
-                    {"name": name, "setting": "allow_blob_public_access", "value": False})
+                    {"name": name, "setting": "allow_blob_public_access", "value": False}
+                )
         return {"security_applied": True, "changes": applied}
 
     async def _enable_monitoring(self, request: DeploymentRequest) -> dict[str, Any]:

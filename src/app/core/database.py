@@ -19,10 +19,10 @@ class DatabaseManager:
         min_size: int = 5,
         max_size: int = 50,
     ) -> None:
-        self.dsn = dsn or os.getenv(
-            "DATABASE_URL") or "postgresql://dev:dev@localhost:5432/devops_ai"
-        self.pool = DatabasePool(
-            self.dsn, min_size=min_size, max_size=max_size)
+        self.dsn = (
+            dsn or os.getenv("DATABASE_URL") or "postgresql://dev:dev@localhost:5432/devops_ai"
+        )
+        self.pool = DatabasePool(self.dsn, min_size=min_size, max_size=max_size)
         self._init_lock = asyncio.Lock()
         self._ready = False
 
@@ -38,28 +38,22 @@ class DatabaseManager:
 
     @asynccontextmanager
     async def connection(self) -> AsyncIterator[Any]:
-        
         async with self.pool.acquire() as conn:
             yield conn
 
     async def execute(self, query: str, *args: Any) -> str:
-        
         return await self.pool.execute(query, *args)
 
     async def executemany(self, query: str, args_iter: list[tuple[Any, ...]]) -> None:
-        
         await self.pool.executemany(query, args_iter)
 
     async def fetch(self, query: str, *args: Any) -> list[Any]:
-        
         return await self.pool.fetch(query, *args)
 
     async def fetchrow(self, query: str, *args: Any) -> Any | None:
-        
         return await self.pool.fetchrow(query, *args)
 
     async def fetchval(self, query: str, *args: Any) -> Any:
-        
         return await self.pool.fetchval(query, *args)
 
     async def close(self) -> None:

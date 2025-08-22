@@ -99,8 +99,7 @@ class AuditQuery:
 class AuditLogger:
     def __init__(self, dsn: str | None = None) -> None:
         self.db = get_db()
-        self.dsn = dsn or os.getenv(
-            "AUDIT_DB_URL") or os.getenv("DATABASE_URL")
+        self.dsn = dsn or os.getenv("AUDIT_DB_URL") or os.getenv("DATABASE_URL")
         self._ready = False
         self._lock = asyncio.Lock()
 
@@ -151,7 +150,6 @@ class AuditLogger:
         return None
 
     async def log_event(self, event: AuditEvent) -> bool:
-        
         try:
             await self.db.execute(
                 """
@@ -213,47 +211,55 @@ class AuditLogger:
             params.append(query.end_time)
         if query.event_types:
             placeholders = ",".join(
-                f"${len(params) + i + 1}" for i in range(len(query.event_types)))
+                f"${len(params) + i + 1}" for i in range(len(query.event_types))
+            )
             conditions.append(f"event_type IN ({placeholders})")
             params.extend([et.value for et in query.event_types])
         if query.severities:
-            placeholders = ",".join(
-                f"${len(params) + i + 1}" for i in range(len(query.severities)))
+            placeholders = ",".join(f"${len(params) + i + 1}" for i in range(len(query.severities)))
             conditions.append(f"severity IN ({placeholders})")
             params.extend([s.value for s in query.severities])
         if query.user_ids:
-            placeholders = ",".join(
-                f"${len(params) + i + 1}" for i in range(len(query.user_ids)))
+            placeholders = ",".join(f"${len(params) + i + 1}" for i in range(len(query.user_ids)))
             conditions.append(f"user_id IN ({placeholders})")
             params.extend(query.user_ids)
         if query.resource_groups:
             placeholders = ",".join(
-                f"${len(params) + i + 1}" for i in range(len(query.resource_groups)))
+                f"${len(params) + i + 1}" for i in range(len(query.resource_groups))
+            )
             conditions.append(f"resource_group IN ({placeholders})")
             params.extend(query.resource_groups)
         if query.resource_types:
             placeholders = ",".join(
-                f"${len(params) + i + 1}" for i in range(len(query.resource_types)))
+                f"${len(params) + i + 1}" for i in range(len(query.resource_types))
+            )
             conditions.append(f"resource_type IN ({placeholders})")
             params.extend(query.resource_types)
         if query.subscription_ids:
             placeholders = ",".join(
-                f"${len(params) + i + 1}" for i in range(len(query.subscription_ids)))
+                f"${len(params) + i + 1}" for i in range(len(query.subscription_ids))
+            )
             conditions.append(f"subscription_id IN ({placeholders})")
             params.extend(query.subscription_ids)
         if query.correlation_ids:
             placeholders = ",".join(
-                f"${len(params) + i + 1}" for i in range(len(query.correlation_ids)))
+                f"${len(params) + i + 1}" for i in range(len(query.correlation_ids))
+            )
             conditions.append(f"correlation_id IN ({placeholders})")
             params.extend(query.correlation_ids)
         where_clause = " AND ".join(conditions) if conditions else "1=1"
         params.append(int(query.limit))
         params.append(int(query.offset))
-        sql = f"SELECT * FROM audit_events WHERE {where_clause} ORDER BY timestamp DESC LIMIT ${len(params) - 1} OFFSET ${len(params)}"
+        sql = (
+            "SELECT * FROM audit_events "
+            f"WHERE {where_clause} "
+            "ORDER BY timestamp DESC "
+            f"LIMIT ${len(params) - 1} "
+            f"OFFSET ${len(params)}"
+        )
         return sql, params
 
     async def query_events(self, query: AuditQuery) -> list[AuditEvent]:
-        
         sql, params = self._build_query(query)
         rows = await self.db.fetch(sql, *params)
         events: list[AuditEvent] = []
@@ -286,7 +292,6 @@ class AuditLogger:
         return events
 
     async def get_statistics(self, start_time: datetime, end_time: datetime) -> dict[str, Any]:
-        
         total = await self.db.fetchrow(
             """
             SELECT 
@@ -330,9 +335,20 @@ class AuditLogger:
         }
 
     async def verify_integrity(self, event_id: str) -> bool:
-        
         row = await self.db.fetchrow(
-            "SELECT id, timestamp, event_type, severity, user_id, resource_id, action, hash FROM audit_events WHERE id = $1",
+            """
+            SELECT
+            id,
+            timestamp,
+            event_type,
+            severity,
+            user_id,
+            resource_id,
+            action,
+            hash
+            FROM audit_events
+            WHERE id = $1
+            """,
             event_id,
         )
         if not row:
@@ -348,7 +364,9 @@ class AuditLogger:
         )
         return event._calculate_hash() == row["hash"]
 
-    async def export_for_compliance(self, framework: str, start_time: datetime, end_time: datetime) -> dict[str, Any]:
+    async def export_for_compliance(
+        self, framework: str, start_time: datetime, end_time: datetime
+    ) -> dict[str, Any]:
         query = AuditQuery(start_time=start_time, end_time=end_time)
         events = await self.query_events(query)
         filtered = [e for e in events if framework in e.compliance_frameworks]
@@ -365,40 +383,69 @@ class AuditLogger:
     def _format_gdpr_report(self, events: list[AuditEvent]) -> dict[str, Any]:
         return {
             "framework": "gdpr",
-            "data_access_events": [asdict(e) for e in events if e.event_type in [AuditEventType.ACCESS_GRANTED, AuditEventType.ACCESS_DENIED]],
-            "data_modification_events": [asdict(e) for e in events if e.event_type in [AuditEventType.RESOURCE_UPDATED, AuditEventType.RESOURCE_DELETED]],
+            "data_access_events": [
+                asdict(e)
+                for e in events
+                if e.event_type in [AuditEventType.ACCESS_GRANTED, AuditEventType.ACCESS_DENIED]
+            ],
+            "data_modification_events": [
+                asdict(e)
+                for e in events
+                if e.event_type
+                in [AuditEventType.RESOURCE_UPDATED, AuditEventType.RESOURCE_DELETED]
+            ],
             "consent_events": [],
-            "data_breach_events": [asdict(e) for e in events if e.severity == AuditSeverity.CRITICAL],
+            "data_breach_events": [
+                asdict(e) for e in events if e.severity == AuditSeverity.CRITICAL
+            ],
         }
 
     def _format_hipaa_report(self, events: list[AuditEvent]) -> dict[str, Any]:
-        phi = [asdict(e)
-               for e in events if "phi" in e.tags or "healthcare" in e.tags]
-        sec = [asdict(e) for e in events if e.event_type ==
-               AuditEventType.SECURITY_ALERT]
+        phi = [asdict(e) for e in events if "phi" in e.tags or "healthcare" in e.tags]
+        sec = [asdict(e) for e in events if e.event_type == AuditEventType.SECURITY_ALERT]
         aud = [asdict(e) for e in events]
-        return {"framework": "hipaa", "phi_access_events": phi, "security_events": sec, "audit_control_events": aud}
+        return {
+            "framework": "hipaa",
+            "phi_access_events": phi,
+            "security_events": sec,
+            "audit_control_events": aud,
+        }
 
     def _format_pci_report(self, events: list[AuditEvent]) -> dict[str, Any]:
-        card = [asdict(e)
-                for e in events if "payment" in e.tags or "card" in e.tags]
-        net = [asdict(e) for e in events if "network" in (
-            e.resource_type or "") or "firewall" in (e.resource_type or "")]
-        acc = [asdict(e) for e in events if e.event_type in [
-            AuditEventType.ACCESS_GRANTED, AuditEventType.ACCESS_DENIED]]
-        return {"framework": "pci-dss", "cardholder_data_events": card, "network_security_events": net, "access_control_events": acc}
+        card = [asdict(e) for e in events if "payment" in e.tags or "card" in e.tags]
+        net = [
+            asdict(e)
+            for e in events
+            if "network" in (e.resource_type or "") or "firewall" in (e.resource_type or "")
+        ]
+        acc = [
+            asdict(e)
+            for e in events
+            if e.event_type in [AuditEventType.ACCESS_GRANTED, AuditEventType.ACCESS_DENIED]
+        ]
+        return {
+            "framework": "pci-dss",
+            "cardholder_data_events": card,
+            "network_security_events": net,
+            "access_control_events": acc,
+        }
 
     def _format_sox_report(self, events: list[AuditEvent]) -> dict[str, Any]:
-        fin = [
-            asdict(e) for e in events if "financial" in e.tags or "accounting" in e.tags]
-        chg = [asdict(e) for e in events if e.event_type ==
-               AuditEventType.CONFIGURATION_CHANGED]
-        acc = [asdict(e) for e in events if e.event_type in [
-            AuditEventType.ACCESS_GRANTED, AuditEventType.ACCESS_DENIED]]
-        return {"framework": "sox", "financial_system_events": fin, "change_management_events": chg, "access_control_events": acc}
+        fin = [asdict(e) for e in events if "financial" in e.tags or "accounting" in e.tags]
+        chg = [asdict(e) for e in events if e.event_type == AuditEventType.CONFIGURATION_CHANGED]
+        acc = [
+            asdict(e)
+            for e in events
+            if e.event_type in [AuditEventType.ACCESS_GRANTED, AuditEventType.ACCESS_DENIED]
+        ]
+        return {
+            "framework": "sox",
+            "financial_system_events": fin,
+            "change_management_events": chg,
+            "access_control_events": acc,
+        }
 
     async def cleanup_old_events(self) -> None:
-        
         cutoff = datetime.utcnow() - timedelta(days=2555)
         await self.db.execute(
             """

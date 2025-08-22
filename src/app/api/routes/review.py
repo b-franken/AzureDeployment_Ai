@@ -24,7 +24,9 @@ async def get_optional_auth(request: Request) -> dict[str, Any] | None:
 
 
 @router.post("", response_model=ReviewResponse)
-async def review(req: ReviewRequest, auth: dict[str, Any] | None = Depends(get_optional_auth)) -> dict:
+async def review(
+    req: ReviewRequest, auth: dict[str, Any] | None = Depends(get_optional_auth)
+) -> dict:
     text = await run_review(
         req.user_input,
         req.assistant_reply,

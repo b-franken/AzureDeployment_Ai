@@ -20,7 +20,6 @@ async def get_cache() -> MultiLevelCache:
             return _instance
         redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
         l1 = InMemoryCache(max_size=int(os.getenv("CACHE_L1_MAX", "20000")))
-        l2 = RedisCache(url=redis_url, default_ttl=int(
-            os.getenv("CACHE_TTL", "3600")))
+        l2 = RedisCache(url=redis_url, default_ttl=int(os.getenv("CACHE_TTL", "3600")))
         _instance = MultiLevelCache([l1, l2])
         return _instance

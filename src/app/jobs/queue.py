@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, cast
 
+from app.core.cache.base import CacheBackend
 from app.core.cache.dependency import get_cache
 
 logger = logging.getLogger(__name__)
@@ -53,7 +54,7 @@ class Job:
 class JobQueue:
     def __init__(
         self,
-        cache: CacheManager,
+        cache: CacheBackend,
         queue_name: str = "default",
         max_workers: int = 10,
         poll_interval: int = 1,
@@ -62,10 +63,21 @@ class JobQueue:
         self.queue_name = queue_name
         self.max_workers = max_workers
         self.poll_interval = poll_interval
-        self.handlers: dict[str, Callable[[Job], Coroutine[Any, Any, Any]]] = {}
+        self.handlers: dict[str, Callable[[Job],
+                                          Coroutine[Any, Any, Any]]] = {}
         self.workers: list[asyncio.Task] = []
         self._running = False
         self._lock = asyncio.Lock()
+
+    @classmethod
+    async def create(
+        cls,
+        queue_name: str = "default",
+        max_workers: int = 10,
+        poll_interval: int = 1,
+    ) -> JobQueue:
+        cache = await get_cache()
+        return cls(cache, queue_name=queue_name, max_workers=max_workers, poll_interval=poll_interval)
 
     def register_handler(
         self, job_name: str, handler: Callable[[Job], Coroutine[Any, Any, Any]]
@@ -91,13 +103,12 @@ class JobQueue:
 
         if delay > 0:
             job.metadata["scheduled_for"] = (
-                datetime.utcnow() + timedelta(seconds=delay)
-            ).isoformat()
+                datetime.utcnow() + timedelta(seconds=delay)).isoformat()
 
         queue_key = self._get_queue_key(priority)
         await self.cache.lpush(queue_key, self._serialize_job(job))
         job_key = self._get_job_key(job.id)
-        await self.cache.set(job_key, self._serialize_job(job), ttl=0, serialize=False)
+        await self.cache.set(job_key, self._serialize_job(job), ttl=0)
 
         return job.id
 
@@ -159,7 +170,6 @@ class JobQueue:
                     return job
                 elif job:
                     await self.cache.lpush(queue_key, self._serialize_job(job))
-
         return None
 
     async def _process_job(self, job: Job) -> None:
@@ -206,13 +216,9 @@ class JobQueue:
 
     async def _update_job(self, job: Job) -> None:
         job_key = self._get_job_key(job.id)
-        await self.cache.set(job_key, self._serialize_job(job), ttl=0, serialize=False)
+        await self.cache.set(job_key, self._serialize_job(job), ttl=0)
 
-        if job.status in [
-            JobStatus.COMPLETED,
-            JobStatus.FAILED,
-            JobStatus.CANCELLED,
-        ]:
+        if job.status in [JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED]:
             ttl = 86400
             await self.cache.expire(job_key, ttl)
 
@@ -235,7 +241,7 @@ class JobQueue:
             "timeout": job.timeout,
             "created_at": job.created_at.isoformat(),
             "started_at": job.started_at.isoformat() if job.started_at else None,
-            "completed_at": (job.completed_at.isoformat() if job.completed_at else None),
+            "completed_at": job.completed_at.isoformat() if job.completed_at else None,
             "error": job.error,
             "result": job.result,
             "metadata": job.metadata,
@@ -258,9 +264,8 @@ class JobQueue:
         metadata = metadata_raw if isinstance(metadata_raw, dict) else {}
 
         status_val = d.get("status")
-        status = (
-            JobStatus(status_val) if isinstance(status_val, str) else JobStatus(str(status_val))
-        )
+        status = JobStatus(status_val) if isinstance(
+            status_val, str) else JobStatus(str(status_val))
 
         priority_val = d.get("priority")
         if isinstance(priority_val, int):
@@ -288,11 +293,12 @@ class JobQueue:
             retry_delay=int(d.get("retry_delay", 0)),
             timeout=int(d.get("timeout", 0)),
             created_at=datetime.fromisoformat(created_at_str),
-            started_at=(datetime.fromisoformat(str(started_at_str)) if started_at_str else None),
-            completed_at=(
-                datetime.fromisoformat(str(completed_at_str)) if completed_at_str else None
-            ),
-            error=(str(d.get("error")) if d.get("error") is not None else None),
+            started_at=(datetime.fromisoformat(str(started_at_str))
+                        if started_at_str else None),
+            completed_at=(datetime.fromisoformat(
+                str(completed_at_str)) if completed_at_str else None),
+            error=(str(d.get("error")) if d.get(
+                "error") is not None else None),
             result=d.get("result"),
             metadata=metadata,
         )
@@ -302,7 +308,8 @@ class JobQueue:
             return False
 
         if "scheduled_for" in job.metadata:
-            scheduled_time = datetime.fromisoformat(job.metadata["scheduled_for"])
+            scheduled_time = datetime.fromisoformat(
+                job.metadata["scheduled_for"])
             if datetime.utcnow() < scheduled_time:
                 return False
 

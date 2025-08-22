@@ -9,16 +9,16 @@ from typing import Any, Literal, cast
 from azure.identity import AzureCliCredential, ChainedTokenCredential, ManagedIdentityCredential
 from azure.mgmt.resourcegraph import ResourceGraphClient
 from azure.mgmt.resourcegraph.models import QueryRequest, QueryRequestOptions
-from mcp.server.fastmcp import Context, FastMCP
+from fastmcp import Context, FastMCP
 
 from app.ai.tools_router import ToolExecutionContext, maybe_call_tool
 from app.core.cache.dependency import get_cache
+from app.core.streams import StreamingHandler
 from app.mcp.extensions import register_extensions
+from app.mcp.schemas import AzureQueryParams, DeploymentRequest, ToolExecutionRequest
 from app.mcp.tools.what_if import register as register_what_if
 from app.platform.audit.logger import AuditLogger
 from app.tools.registry import ensure_tools_loaded, list_tools
-from app.core.streams import StreamingHandler
-from app.mcp.schemas import AzureQueryParams, DeploymentRequest, ToolExecutionRequest
 
 from .resources import ResourceManager
 
@@ -64,7 +64,6 @@ class MCPServer:
         ) -> dict[str, Any]:
             meta = getattr(context, "meta", None)
             user_id = (meta or {}).get("user_id", "mcp_user")
-
             execution_context = ToolExecutionContext(
                 user_id=user_id,
                 subscription_id=request.subscription_id,
@@ -76,12 +75,10 @@ class MCPServer:
                 dry_run=request.dry_run,
                 audit_logger=self.audit_logger if request.audit_enabled else None,
             )
-
             cache_key = f"tool:{request.tool_name}:{request.get_cache_key()}"
             cached_result = await self.cache.get(cache_key)
             if cached_result and not request.force_refresh:
                 return cast(dict[str, Any], cached_result)
-
             try:
                 result = await maybe_call_tool(
                     user_input=request.input_text,
@@ -93,19 +90,15 @@ class MCPServer:
                     context=execution_context,
                     return_json=True,
                 )
-
                 response: dict[str, Any] = {
                     "success": True,
                     "result": json.loads(result) if isinstance(result, str) else result,
                     "execution_time": datetime.utcnow().isoformat(),
                     "correlation_id": request.correlation_id,
                 }
-
                 if request.cache_ttl > 0:
                     await self.cache.set(cache_key, response, ttl=request.cache_ttl)
-
                 return response
-
             except Exception as e:
                 return {
                     "success": False,
@@ -129,7 +122,6 @@ class MCPServer:
                     "validation_results": validation_results,
                     "deployment_id": request.deployment_id,
                 }
-
             if request.require_approval and not request.approval_token:
                 approval_token = await self._request_approval(request)
                 return {
@@ -137,7 +129,6 @@ class MCPServer:
                     "approval_token": approval_token,
                     "deployment_id": request.deployment_id,
                 }
-
             async with self.streaming_handler.stream_deployment(request.deployment_id) as stream:
                 result = await self._execute_deployment(request, stream)
                 return result
@@ -151,17 +142,13 @@ class MCPServer:
             context: Context,
         ) -> dict[str, Any]:
             cache_key = f"azure_query:{params.get_cache_key()}"
-
             if not params.force_refresh:
                 cached = await self.cache.get(cache_key)
                 if cached:
                     return cast(dict[str, Any], cached)
-
             result = await self._execute_azure_query(params)
-
             if params.cache_ttl > 0:
                 await self.cache.set(cache_key, result, ttl=params.cache_ttl)
-
             return result
 
         @self.mcp.tool(
@@ -201,10 +188,7 @@ class MCPServer:
         @self.mcp.resource("tools://registered")
         async def list_registered_tools(context: Context) -> list[dict[str, Any]]:
             tools = list_tools()
-            return [
-                {"name": t.name, "description": t.description, "schema": t.schema}
-                for t in tools
-            ]
+            return [{"name": t.name, "description": t.description, "schema": t.schema} for t in tools]
 
         @self.mcp.resource("deployments://active")
         async def get_active_deployments(context: Context) -> list[dict[str, Any]]:
@@ -217,23 +201,18 @@ class MCPServer:
             product: str,
             environment: str = "dev",
         ) -> str:
-            template = await self.resource_manager.get_deployment_template(
-                product,
-                environment,
+            template = await self.resource_manager.get_deployment_template(product, environment)
+            return (
+                f"Deploy {product} infrastructure in {environment} environment.\n\n"
+                f"Template:\n{json.dumps(template, indent=2)}\n\n"
+                "Instructions:\n"
+                "1. Validate all parameters\n"
+                "2. Check resource quotas\n"
+                "3. Verify network connectivity\n"
+                "4. Apply security policies\n"
+                "5. Enable monitoring\n"
+                "6. Configure backup if production\n"
             )
-            return f"""Deploy {product} infrastructure in {environment} environment.
-
-Template:
-{json.dumps(template, indent=2)}
-
-Instructions:
-1. Validate all parameters
-2. Check resource quotas
-3. Verify network connectivity
-4. Apply security policies
-5. Enable monitoring
-6. Configure backup if production
-"""
 
         @self.mcp.prompt("cost_optimization")
         async def cost_optimization_prompt(
@@ -245,24 +224,20 @@ Instructions:
                 datetime.utcnow() - timedelta(days=30),
                 datetime.utcnow(),
             )
-            return f"""Analyze and optimize Azure costs for subscription {subscription_id}.
+            return (
+                f"Analyze and optimize Azure costs for subscription {subscription_id}.\n\n"
+                f"Current monthly spend: ${costs.get('total_cost', 0):.2f}\n"
+                "Top expensive resources:\n"
+                f"{json.dumps(costs.get('top_resources', []), indent=2)}\n\n"
+                "Optimization strategies:\n"
+                "1. Identify unused resources\n"
+                "2. Right-size overprovisioned resources\n"
+                "3. Suggest reserved instances\n"
+                "4. Recommend spot instances where applicable\n"
+                "5. Propose auto-shutdown schedules\n"
+            )
 
-Current monthly spend: ${costs.get("total_cost", 0):.2f}
-Top expensive resources:
-{json.dumps(costs.get("top_resources", []), indent=2)}
-
-Optimization strategies:
-1. Identify unused resources
-2. Right-size overprovisioned resources
-3. Suggest reserved instances
-4. Recommend spot instances where applicable
-5. Propose auto-shutdown schedules
-"""
-
-    async def _validate_deployment(
-        self,
-        request: DeploymentRequest,
-    ) -> dict[str, Any]:
+    async def _validate_deployment(self, request: DeploymentRequest) -> dict[str, Any]:
         validations = {
             "naming_conventions": await self._check_naming_conventions(request),
             "security_policies": await self._check_security_policies(request),
@@ -277,11 +252,7 @@ Optimization strategies:
             "recommendations": await self._get_deployment_recommendations(request),
         }
 
-    async def _execute_deployment(
-        self,
-        request: DeploymentRequest,
-        stream: Any,
-    ) -> dict[str, Any]:
+    async def _execute_deployment(self, request: DeploymentRequest, stream: Any) -> dict[str, Any]:
         steps = [
             ("Initializing", self._init_deployment),
             ("Creating resources", self._create_resources),
@@ -312,10 +283,7 @@ Optimization strategies:
             "summary": await self._generate_deployment_summary(request, results),
         }
 
-    async def _execute_azure_query(
-        self,
-        params: AzureQueryParams,
-    ) -> dict[str, Any]:
+    async def _execute_azure_query(self, params: AzureQueryParams) -> dict[str, Any]:
         rg_client = self._get_resource_graph_client()
         request = QueryRequest(
             query=params.kql,
@@ -350,10 +318,7 @@ Optimization strategies:
         raw = os.getenv("AZURE_SUBSCRIPTIONS", "")
         return [s.strip() for s in raw.split(",") if s.strip()]
 
-    async def _check_naming_conventions(
-        self,
-        request: DeploymentRequest,
-    ) -> dict[str, Any]:
+    async def _check_naming_conventions(self, request: DeploymentRequest) -> dict[str, Any]:
         pattern = re.compile(r"^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])?$")
         invalid: list[dict[str, str]] = []
         seen: set[str] = set()
@@ -377,10 +342,7 @@ Optimization strategies:
         passed = len(invalid) == 0
         return {"passed": passed, "details": {"invalid": invalid, "checked": len(request.resources)}}
 
-    async def _check_security_policies(
-        self,
-        request: DeploymentRequest,
-    ) -> dict[str, Any]:
+    async def _check_security_policies(self, request: DeploymentRequest) -> dict[str, Any]:
         required_tags = {"owner", "environment"}
         missing_tags: list[str] = []
         enforced: list[dict[str, Any]] = []
@@ -410,10 +372,7 @@ Optimization strategies:
         passed = not missing_tags and not enforced
         return {"passed": passed, "details": {"missing_tags": missing_tags, "enforced": enforced}}
 
-    async def _check_network_connectivity(
-        self,
-        request: DeploymentRequest,
-    ) -> dict[str, Any]:
+    async def _check_network_connectivity(self, request: DeploymentRequest) -> dict[str, Any]:
         issues: list[dict[str, str]] = []
         for r in request.resources:
             name = str(r.get("name", ""))
@@ -435,10 +394,7 @@ Optimization strategies:
                         {"name": name, "issue": "vnet_not_fully_qualified"})
         return {"passed": len(issues) == 0, "details": {"issues": issues}}
 
-    async def _check_resource_quotas(
-        self,
-        request: DeploymentRequest,
-    ) -> dict[str, Any]:
+    async def _check_resource_quotas(self, request: DeploymentRequest) -> dict[str, Any]:
         env = str(getattr(request, "environment", "dev")).lower()
         limits: dict[str, dict[str, int]] = {
             "dev": {"storage_account": 10, "web_app": 10, "app_service_plan": 10},
@@ -458,10 +414,7 @@ Optimization strategies:
                     {"type": rtype, "count": cnt, "limit": limit[rtype]})
         return {"passed": len(over) == 0, "details": {"usage": counts, "exceeded": over}}
 
-    async def _estimate_deployment_cost(
-        self,
-        request: DeploymentRequest,
-    ) -> dict[str, Any]:
+    async def _estimate_deployment_cost(self, request: DeploymentRequest) -> dict[str, Any]:
         prices: dict[str, Any] = {
             "app_service_plan": {"B1": 13.0, "P1V3": 147.0},
             "storage_account": {"standard_lrs": 5.0, "standard_grs": 10.0},
@@ -487,10 +440,7 @@ Optimization strategies:
                 {"name": name, "type": rtype, "monthly_cost": cost})
         return {"monthly_cost": total, "currency": "USD", "items": breakdown}
 
-    async def _get_deployment_recommendations(
-        self,
-        request: DeploymentRequest,
-    ) -> list[str]:
+    async def _get_deployment_recommendations(self, request: DeploymentRequest) -> list[str]:
         return [
             "Enable auto-scaling for production workloads",
             "Configure backup retention policy",
@@ -502,10 +452,7 @@ Optimization strategies:
 
         return str(uuid.uuid4())
 
-    async def _init_deployment(
-        self,
-        request: DeploymentRequest,
-    ) -> dict[str, Any]:
+    async def _init_deployment(self, request: DeploymentRequest) -> dict[str, Any]:
         required = ["subscription_id",
                     "resource_group", "location", "resources"]
         for key in required:
@@ -522,10 +469,7 @@ Optimization strategies:
             names.add(name)
         return {"initialized": True, "resource_count": len(request.resources)}
 
-    async def _create_resources(
-        self,
-        request: DeploymentRequest,
-    ) -> dict[str, Any]:
+    async def _create_resources(self, request: DeploymentRequest) -> dict[str, Any]:
         plan: list[dict[str, Any]] = []
         for r in request.resources:
             item: dict[str, Any] = {
@@ -540,10 +484,7 @@ Optimization strategies:
             raise ValueError("empty_plan")
         return {"resources_planned": len(plan), "plan": plan}
 
-    async def _configure_network(
-        self,
-        request: DeploymentRequest,
-    ) -> dict[str, Any]:
+    async def _configure_network(self, request: DeploymentRequest) -> dict[str, Any]:
         configured = 0
         checks: list[dict[str, str]] = []
         for r in request.resources:
@@ -557,10 +498,7 @@ Optimization strategies:
                         {"name": str(r.get("name", "")), "issue": "invalid_subnet"})
         return {"network_configured": configured, "issues": checks}
 
-    async def _apply_security(
-        self,
-        request: DeploymentRequest,
-    ) -> dict[str, Any]:
+    async def _apply_security(self, request: DeploymentRequest) -> dict[str, Any]:
         applied: list[dict[str, Any]] = []
         for r in request.resources:
             rtype = str(r.get("type", "")).lower()
@@ -575,18 +513,12 @@ Optimization strategies:
                     {"name": name, "setting": "allow_blob_public_access", "value": False})
         return {"security_applied": True, "changes": applied}
 
-    async def _enable_monitoring(
-        self,
-        request: DeploymentRequest,
-    ) -> dict[str, Any]:
+    async def _enable_monitoring(self, request: DeploymentRequest) -> dict[str, Any]:
         env = str(getattr(request, "environment", "dev")).lower()
         enable_backup = env == "prod"
         return {"monitoring_enabled": True, "backup_enabled": enable_backup}
 
-    async def _run_tests(
-        self,
-        request: DeploymentRequest,
-    ) -> dict[str, Any]:
+    async def _run_tests(self, request: DeploymentRequest) -> dict[str, Any]:
         failures: list[str] = []
         for r in request.resources:
             if not r.get("name"):
@@ -595,10 +527,7 @@ Optimization strategies:
                 failures.append("missing_type")
         return {"tests_passed": len(failures) == 0, "failures": failures}
 
-    async def _finalize_deployment(
-        self,
-        request: DeploymentRequest,
-    ) -> dict[str, Any]:
+    async def _finalize_deployment(self, request: DeploymentRequest) -> dict[str, Any]:
         ts = datetime.utcnow().isoformat()
         return {"finalized": True, "timestamp": ts}
 
@@ -620,8 +549,10 @@ Optimization strategies:
 async def amain() -> None:
     import os
 
-    transport = cast(Literal["stdio", "sse", "streamable-http"],
-                     os.getenv("MCP_TRANSPORT", "stdio").lower())
+    transport = cast(
+        Literal["stdio", "sse", "streamable-http"],
+        os.getenv("MCP_TRANSPORT", "stdio").lower(),
+    )
     server = await MCPServer.create(transport=transport)
     server.run()
 

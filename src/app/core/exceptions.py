@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import random
 import sys
 import traceback
 from collections import defaultdict
@@ -19,14 +20,22 @@ T = TypeVar("T")
 ExceptionHandler = Callable[[Exception], Any]
 
 error_counter = Counter(
-    "app_errors_total", "Total number of errors", ["error_type", "severity", "module", "handled"]
+    "app_errors_total",
+    "Total number of errors",
+    ["error_type", "severity", "module", "handled"],
 )
 
 error_duration = Histogram(
-    "app_error_recovery_duration_seconds", "Time taken to recover from errors", ["error_type"]
+    "app_error_recovery_duration_seconds",
+    "Time taken to recover from errors",
+    ["error_type"],
 )
 
-active_errors = Gauge("app_active_errors", "Currently active unresolved errors", ["error_type"])
+active_errors = Gauge(
+    "app_active_errors",
+    "Currently active unresolved errors",
+    ["error_type"],
+)
 
 
 class ErrorSeverity(Enum):
@@ -201,8 +210,6 @@ class ConfigurationException(BaseApplicationException):
 
 
 class ConfigurationError(ConfigurationException):
-    """Error raised when the application configuration is invalid."""
-
     def __init__(self, field: str, message: str) -> None:
         super().__init__(f"{field}: {message}")
         self.field = field
@@ -254,7 +261,8 @@ class RetryStrategy(ErrorRecoveryStrategy):
         **kwargs: Any,
     ) -> Any:
         for attempt in range(self.max_retries):
-            delay = min(self.base_delay * (self.exponential_base**attempt), self.max_delay)
+            delay = min(self.base_delay *
+                        (self.exponential_base**attempt), self.max_delay)
             await asyncio.sleep(delay)
             try:
                 result = await func(*args, **kwargs)
@@ -298,7 +306,8 @@ class CircuitBreaker:
     def _should_attempt_reset(self) -> bool:
         if self.last_failure_time is None:
             return True
-        time_since_failure = (datetime.utcnow() - self.last_failure_time).total_seconds()
+        time_since_failure = (datetime.utcnow() -
+                              self.last_failure_time).total_seconds()
         return time_since_failure >= self.recovery_timeout
 
     def _on_success(self) -> None:
@@ -315,8 +324,10 @@ class CircuitBreaker:
 class ErrorHandler:
     def __init__(self) -> None:
         self.logger = structlog.get_logger()
-        self.handlers: dict[type[Exception], list[ExceptionHandler]] = defaultdict(list)
-        self.recovery_strategies: dict[ErrorCategory, ErrorRecoveryStrategy] = {}
+        self.handlers: dict[type[Exception],
+                            list[ExceptionHandler]] = defaultdict(list)
+        self.recovery_strategies: dict[ErrorCategory,
+                                       ErrorRecoveryStrategy] = {}
         self.circuit_breakers: dict[str, CircuitBreaker] = {}
         self.error_history: list[ErrorContext] = []
         self.max_history_size = 1000
@@ -324,14 +335,18 @@ class ErrorHandler:
 
     def _setup_default_strategies(self) -> None:
         self.recovery_strategies[ErrorCategory.NETWORK] = RetryStrategy()
-        self.recovery_strategies[ErrorCategory.DATABASE] = RetryStrategy(max_retries=5)
-        self.recovery_strategies[ErrorCategory.EXTERNAL_SERVICE] = RetryStrategy()
+        self.recovery_strategies[ErrorCategory.DATABASE] = RetryStrategy(
+            max_retries=5)
+        self.recovery_strategies[ErrorCategory.EXTERNAL_SERVICE] = RetryStrategy(
+        )
 
     def register_handler(self, exception_type: type[Exception], handler: ExceptionHandler) -> None:
         self.handlers[exception_type].append(handler)
 
     def register_recovery_strategy(
-        self, category: ErrorCategory, strategy: ErrorRecoveryStrategy
+        self,
+        category: ErrorCategory,
+        strategy: ErrorRecoveryStrategy,
     ) -> None:
         self.recovery_strategies[category] = strategy
 
@@ -392,7 +407,8 @@ class ErrorHandler:
         finally:
             if metrics_updated and error_type_for_metrics:
                 duration = time.monotonic() - start
-                error_duration.labels(error_type=error_type_for_metrics).observe(duration)
+                error_duration.labels(
+                    error_type=error_type_for_metrics).observe(duration)
                 active_errors.labels(error_type=error_type_for_metrics).dec()
 
     def _create_error_context(self, error: Exception) -> ErrorContext:
@@ -429,7 +445,7 @@ class ErrorHandler:
     def _store_error(self, context: ErrorContext) -> None:
         self.error_history.append(context)
         if len(self.error_history) > self.max_history_size:
-            self.error_history = self.error_history[-self.max_history_size :]
+            self.error_history = self.error_history[-self.max_history_size:]
 
     def get_error_summary(self, time_window: timedelta | None = None) -> dict[str, Any]:
         if time_window:
@@ -476,15 +492,20 @@ def handle_errors(
                     if default_return is not None:
                         logger = structlog.get_logger()
                         if log_level == ErrorSeverity.DEBUG:
-                            logger.debug("Handled error with default return", error=str(e))
+                            logger.debug(
+                                "Handled error with default return", error=str(e))
                         elif log_level == ErrorSeverity.INFO:
-                            logger.info("Handled error with default return", error=str(e))
+                            logger.info(
+                                "Handled error with default return", error=str(e))
                         elif log_level == ErrorSeverity.WARNING:
-                            logger.warning("Handled error with default return", error=str(e))
+                            logger.warning(
+                                "Handled error with default return", error=str(e))
                         elif log_level in (ErrorSeverity.CRITICAL, ErrorSeverity.FATAL):
-                            logger.critical("Handled error with default return", error=str(e))
+                            logger.critical(
+                                "Handled error with default return", error=str(e))
                         else:
-                            logger.error("Handled error with default return", error=str(e))
+                            logger.error(
+                                "Handled error with default return", error=str(e))
                         return default_return
                     raise
 
@@ -509,23 +530,28 @@ def handle_errors(
                                     logger = structlog.get_logger()
                                     if log_level == ErrorSeverity.DEBUG:
                                         logger.debug(
-                                            "Handled error with default return", error=str(exc)
+                                            "Handled error with default return",
+                                            error=str(exc),
                                         )
                                     elif log_level == ErrorSeverity.INFO:
                                         logger.info(
-                                            "Handled error with default return", error=str(exc)
+                                            "Handled error with default return",
+                                            error=str(exc),
                                         )
                                     elif log_level == ErrorSeverity.WARNING:
                                         logger.warning(
-                                            "Handled error with default return", error=str(exc)
+                                            "Handled error with default return",
+                                            error=str(exc),
                                         )
                                     elif log_level in (ErrorSeverity.CRITICAL, ErrorSeverity.FATAL):
                                         logger.critical(
-                                            "Handled error with default return", error=str(exc)
+                                            "Handled error with default return",
+                                            error=str(exc),
                                         )
                                     else:
                                         logger.error(
-                                            "Handled error with default return", error=str(exc)
+                                            "Handled error with default return",
+                                            error=str(exc),
                                         )
                                     return default_return
                                 raise
@@ -536,15 +562,20 @@ def handle_errors(
                     if default_return is not None:
                         logger = structlog.get_logger()
                         if log_level == ErrorSeverity.DEBUG:
-                            logger.debug("Handled error with default return", error=str(e))
+                            logger.debug(
+                                "Handled error with default return", error=str(e))
                         elif log_level == ErrorSeverity.INFO:
-                            logger.info("Handled error with default return", error=str(e))
+                            logger.info(
+                                "Handled error with default return", error=str(e))
                         elif log_level == ErrorSeverity.WARNING:
-                            logger.warning("Handled error with default return", error=str(e))
+                            logger.warning(
+                                "Handled error with default return", error=str(e))
                         elif log_level in (ErrorSeverity.CRITICAL, ErrorSeverity.FATAL):
-                            logger.critical("Handled error with default return", error=str(e))
+                            logger.critical(
+                                "Handled error with default return", error=str(e))
                         else:
-                            logger.error("Handled error with default return", error=str(e))
+                            logger.error(
+                                "Handled error with default return", error=str(e))
                         return default_return
                     raise
 
@@ -554,40 +585,48 @@ def handle_errors(
 
 
 def retry_on_error(
-    max_retries: int = 3,
-    delay: float = 1.0,
+    max_retries: int = 5,
+    base_delay: float = 0.2,
+    max_delay: float = 30.0,
     exceptions: tuple[type[BaseException], ...] = (Exception,),
-) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+    predicate: Callable[[BaseException], bool] | None = None,
+) -> Callable[[Callable[..., T]], Callable[..., T]]:
+    def backoff(attempt: int) -> float:
+        d = min(max_delay, base_delay * (2**attempt))
+        return d * (0.5 + random.random())
+
+    def decorator(func: Callable[..., T]) -> Callable[..., T]:
         @wraps(func)
-        async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
-            last_exception: BaseException | None = None
+        async def async_wrapper(*args: Any, **kwargs: Any) -> T:
+            last: BaseException | None = None
             for attempt in range(max_retries):
                 try:
-                    return await func(*args, **kwargs)
+                    return await func(*args, **kwargs)  # type: ignore[misc]
                 except exceptions as e:
-                    last_exception = e
+                    if predicate and not predicate(e):
+                        raise
+                    last = e
                     if attempt < max_retries - 1:
-                        await asyncio.sleep(delay * (2**attempt))
-            if last_exception is not None:
-                raise last_exception
-            raise RuntimeError("retry_on_error reached an impossible state")
+                        await asyncio.sleep(backoff(attempt))
+            assert last is not None
+            raise last
 
         @wraps(func)
-        def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+        def sync_wrapper(*args: Any, **kwargs: Any) -> T:
             import time
 
-            last_exception: BaseException | None = None
+            last: BaseException | None = None
             for attempt in range(max_retries):
                 try:
                     return func(*args, **kwargs)
                 except exceptions as e:
-                    last_exception = e
+                    if predicate and not predicate(e):
+                        raise
+                    last = e
                     if attempt < max_retries - 1:
-                        time.sleep(delay * (2**attempt))
-            if last_exception is not None:
-                raise last_exception
-            raise RuntimeError("retry_on_error reached an impossible state")
+                        time.sleep(backoff(attempt))
+            assert last is not None
+            raise last
 
         return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
 

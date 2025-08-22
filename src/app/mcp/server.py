@@ -18,9 +18,10 @@ from app.mcp.extensions import register_extensions
 from app.mcp.tools.what_if import register as register_what_if
 from app.platform.audit.logger import AuditLogger
 from app.tools.registry import ensure_tools_loaded, list_tools
+from app.core.streams import StreamingHandler
+
 
 from .resources import ResourceManager
-from .streaming import StreamingHandler
 
 
 class ToolExecutionRequest(Protocol):

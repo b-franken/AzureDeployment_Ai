@@ -5,6 +5,7 @@ import inspect
 import random
 import sys
 import traceback
+import warnings
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -521,7 +522,6 @@ def handle_errors(
                     except RuntimeError:
                         loop = None
                     if loop and loop.is_running():
-
                         async def run_handler(exc: Exception = e) -> Any:
                             try:
                                 return await handler.handle_error(exc, recover=recover)
@@ -530,29 +530,19 @@ def handle_errors(
                                     logger = structlog.get_logger()
                                     if log_level == ErrorSeverity.DEBUG:
                                         logger.debug(
-                                            "Handled error with default return",
-                                            error=str(exc),
-                                        )
+                                            "Handled error with default return", error=str(exc))
                                     elif log_level == ErrorSeverity.INFO:
                                         logger.info(
-                                            "Handled error with default return",
-                                            error=str(exc),
-                                        )
+                                            "Handled error with default return", error=str(exc))
                                     elif log_level == ErrorSeverity.WARNING:
                                         logger.warning(
-                                            "Handled error with default return",
-                                            error=str(exc),
-                                        )
+                                            "Handled error with default return", error=str(exc))
                                     elif log_level in (ErrorSeverity.CRITICAL, ErrorSeverity.FATAL):
                                         logger.critical(
-                                            "Handled error with default return",
-                                            error=str(exc),
-                                        )
+                                            "Handled error with default return", error=str(exc))
                                     else:
                                         logger.error(
-                                            "Handled error with default return",
-                                            error=str(exc),
-                                        )
+                                            "Handled error with default return", error=str(exc))
                                     return default_return
                                 raise
 
@@ -590,10 +580,17 @@ def retry_on_error(
     max_delay: float = 30.0,
     exceptions: tuple[type[BaseException], ...] = (Exception,),
     predicate: Callable[[BaseException], bool] | None = None,
+    delay: float | None = None,
 ) -> Callable[[Callable[..., T]], Callable[..., T]]:
+    if delay is not None:
+        warnings.warn("retry_on_error(delay=...) is deprecated. Use base_delay=...",
+                      DeprecationWarning, stacklevel=2)
+        base = delay
+    else:
+        base = base_delay
+
     def backoff(attempt: int) -> float:
-        d = min(max_delay, base_delay * (2**attempt))
-        return d * (0.5 + random.random())
+        return min(max_delay, base * (2**attempt)) * random.uniform(0.5, 1.5)
 
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         @wraps(func)

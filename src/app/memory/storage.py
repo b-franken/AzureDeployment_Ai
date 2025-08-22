@@ -1,7 +1,7 @@
 from __future__ import annotations
-import os
+
 import asyncio
-import json
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -52,8 +52,12 @@ class AsyncMemoryStore:
         pool_min_size: int = 1,
         pool_max_size: int = 5,
     ):
-        self.dsn = dsn or os.getenv("MEMORY_DB_URL") or os.getenv(
-            "DATABASE_URL") or "postgresql://dev:dev@localhost:5432/devops_ai"
+        self.dsn = (
+            dsn
+            or os.getenv("MEMORY_DB_URL")
+            or os.getenv("DATABASE_URL")
+            or "postgresql://dev:dev@localhost:5432/devops_ai"
+        )
         self.max_memory = int(max_memory)
         self.max_total_memory = int(max_total_memory)
         self.pool_min_size = int(pool_min_size)
@@ -68,7 +72,9 @@ class AsyncMemoryStore:
         async with self._init_lock:
             if self._initialized:
                 return
-            self._pool = await asyncpg.create_pool(self.dsn, min_size=self.pool_min_size, max_size=self.pool_max_size)
+            self._pool = await asyncpg.create_pool(
+                self.dsn, min_size=self.pool_min_size, max_size=self.pool_max_size
+            )
             async with self._pool.acquire() as conn:
                 await conn.execute(
                     """
@@ -86,8 +92,7 @@ class AsyncMemoryStore:
                     """
                 )
             self._initialized = True
-            logger.info(
-                f"initialized memory store pool_size={self.pool_max_size}")
+            logger.info(f"initialized memory store pool_size={self.pool_max_size}")
 
     @asynccontextmanager
     async def get_connection(self) -> AsyncIterator[asyncpg.Connection]:
@@ -156,7 +161,9 @@ class AsyncMemoryStore:
 
     async def get_message_count(self, user_id: str) -> int:
         async with self.get_connection() as conn:
-            row = await conn.fetchrow("SELECT COUNT(*) AS c FROM messages WHERE user_id = $1", user_id)
+            row = await conn.fetchrow(
+                "SELECT COUNT(*) AS c FROM messages WHERE user_id = $1", user_id
+            )
         return int(row["c"] if row else 0)
 
     async def search_messages(
@@ -178,7 +185,9 @@ class AsyncMemoryStore:
                 query,
                 int(limit),
             )
-        return [{"role": r["role"], "content": r["content"], "timestamp": r["timestamp"]} for r in rows]
+        return [
+            {"role": r["role"], "content": r["content"], "timestamp": r["timestamp"]} for r in rows
+        ]
 
     async def trim_user_memory(
         self,

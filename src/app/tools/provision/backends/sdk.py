@@ -1,7 +1,10 @@
 from __future__ import annotations
+
 import logging
 from typing import Any, TypedDict, cast
+
 from app.common.async_pool import bounded_gather
+
 from .base import ApplyResult, Backend, PlanResult
 
 logger = logging.getLogger(__name__)
@@ -45,10 +48,12 @@ class SdkBackend(Backend):
         if self.azure is None:
             try:
                 from app.tools.azure.tool import AzureProvision
+
                 self.azure = AzureProvision()
             except Exception as e:
                 logger.warning(
-                    "Failed to import AzureProvision; proceeding without Azure SDK. %s", e)
+                    "Failed to import AzureProvision; proceeding without Azure SDK. %s", e
+                )
                 self.azure = None
 
     def _tags(self, spec: dict[str, Any]) -> dict[str, str]:
@@ -254,7 +259,12 @@ class SdkBackend(Backend):
             return []
         product = spec.get("product")
         if product == "web_app":
-            if len(seq) == 3 and seq[0]["action"] == "create_rg" and seq[1]["action"] == "create_plan" and seq[2]["action"] == "create_webapp":
+            if (
+                len(seq) == 3
+                and seq[0]["action"] == "create_rg"
+                and seq[1]["action"] == "create_plan"
+                and seq[2]["action"] == "create_webapp"
+            ):
                 return [[seq[0]], [seq[1]], [seq[2]]]
         first, rest = seq[0], seq[1:]
         if first["action"] == "create_rg":
@@ -280,13 +290,15 @@ class SdkBackend(Backend):
             return False, {"message": f"No actions defined for product: {spec.get('product')}"}
         results: dict[str, Any] = {"steps": []}
         for stage in stages:
+
             async def _run_one(a: Action) -> dict[str, Any]:
                 try:
                     return await self.azure.run(action=a["action"], **a["args"])
                 except Exception as e:
                     return {"ok": False, "summary": "exception", "output": str(e)}
+
             stage_res = await bounded_gather(*[_run_one(a) for a in stage], limit=self._concurrency)
-            for a, res in zip(stage, stage_res):
+            for a, res in zip(stage, stage_res, strict=False):
                 ok = bool(res.get("ok"))
                 results["steps"].append(
                     {

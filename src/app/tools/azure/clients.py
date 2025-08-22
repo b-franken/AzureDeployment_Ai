@@ -5,9 +5,10 @@ import inspect
 import os
 import time
 from collections import OrderedDict
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from random import random
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from azure.core.credentials_async import AsyncTokenCredential
 from azure.core.exceptions import (
@@ -41,8 +42,7 @@ from app.core.config import settings
 def _sub_id(explicit: str | None) -> str:
     sid = explicit or settings.azure.subscription_id
     if not sid:
-        raise RuntimeError(
-            "subscription_id missing and no subscription_id provided")
+        raise RuntimeError("subscription_id missing and no subscription_id provided")
     return sid
 
 
@@ -71,7 +71,9 @@ class Clients:
     redis: RedisManagementClient
     pdns: PrivateDnsManagementClient
 
-    async def run(self, fn: Callable[..., Any] | Callable[..., Awaitable[Any]], *args: Any, **kwargs: Any) -> Any:
+    async def run(
+        self, fn: Callable[..., Any] | Callable[..., Awaitable[Any]], *args: Any, **kwargs: Any
+    ) -> Any:
         if inspect.iscoroutinefunction(fn):
             return await fn(*args, **kwargs)
         res = fn(*args, **kwargs)
@@ -218,7 +220,12 @@ def _is_poller(obj: Any) -> bool:
     return hasattr(obj, "result") and hasattr(obj, "status")
 
 
-async def run_poller(clients: Clients, fn: Callable[..., Any] | Callable[..., Awaitable[Any]], *args: Any, **kwargs: Any) -> Any:
+async def run_poller(
+    clients: Clients,
+    fn: Callable[..., Any] | Callable[..., Awaitable[Any]],
+    *args: Any,
+    **kwargs: Any,
+) -> Any:
     poller = await clients.run(fn, *args, **kwargs)
     if not _is_poller(poller):
         return poller
@@ -234,8 +241,9 @@ async def run_poller(clients: Clients, fn: Callable[..., Any] | Callable[..., Aw
         except BaseException as e:
             retryable, code, sc = _classify(e)
             if not retryable or attempt >= _RETRY_MAX_ATTEMPTS - 1:
-                raise AzureOperationError(code=code, message=str(
-                    e), status_code=sc, retryable=retryable) from e
+                raise AzureOperationError(
+                    code=code, message=str(e), status_code=sc, retryable=retryable
+                ) from e
             base = min(_RETRY_BASE_SECONDS * (2**attempt), _RETRY_CAP_SECONDS)
             delay = base * (0.5 + random() * 0.5)
             attempt += 1

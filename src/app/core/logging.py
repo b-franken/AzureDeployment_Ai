@@ -1,3 +1,4 @@
+# src/app/core/logging.py
 from __future__ import annotations
 
 import logging
@@ -7,18 +8,89 @@ from collections.abc import Callable, Mapping, MutableMapping, Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
-from opentelemetry import trace
 
 import structlog
+from opentelemetry import trace
 from structlog.contextvars import bind_contextvars, clear_contextvars, merge_contextvars
 from structlog.stdlib import ProcessorFormatter
-
-from app.observability.logging_sanitizer import install_log_record_sanitizer
 
 PreProcessor = Callable[
     [Any, str, MutableMapping[str, Any]],
     Mapping[str, Any] | str | bytes | bytearray | tuple[Any, ...],
 ]
+
+_SIMPLE_TYPES = (type(None), bool, int, float, str, bytes)
+
+
+def _is_simple(value: Any) -> bool:
+    if isinstance(value, _SIMPLE_TYPES):
+        return True
+    if isinstance(value, Mapping):
+        return all(isinstance(k, str) and _is_simple(v) for k, v in value.items())
+    if isinstance(value, Sequence) and not isinstance(value, (str | bytes | bytearray)):
+        return all(_is_simple(v) for v in value)
+    return False
+
+
+def _coerce(value: Any) -> Any:
+    if _is_simple(value):
+        return value
+    if isinstance(value, Mapping):
+        return {str(_coerce(k)): _coerce(v) for k, v in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, (str | bytes | bytearray)):
+        return [_coerce(v) for v in value]
+    try:
+        return str(value)
+    except Exception:
+        return repr(value)
+
+
+def install_log_record_sanitizer() -> None:
+    std = {
+        "name",
+        "msg",
+        "args",
+        "levelname",
+        "levelno",
+        "pathname",
+        "filename",
+        "module",
+        "exc_info",
+        "exc_text",
+        "stack_info",
+        "lineno",
+        "funcName",
+        "created",
+        "msecs",
+        "relativeCreated",
+        "thread",
+        "threadName",
+        "processName",
+        "process",
+        "asctime",
+        "_FixedFindCallerLogger",
+    }
+    original_factory = logging.getLogRecordFactory()
+
+    def factory(*args: Any, **kwargs: Any) -> logging.LogRecord:
+        record = original_factory(*args, **kwargs)  # type: ignore[misc]
+
+        for key in list(record.__dict__.keys()):
+            if key.startswith("_"):
+                del record.__dict__[key]
+
+        for key, value in list(record.__dict__.items()):
+            if key == "exc_info":
+                if value and value is not True and not isinstance(value, tuple):
+                    record.__dict__[key] = True
+                continue
+            if key in std:
+                continue
+            record.__dict__[key] = _coerce(value)
+
+        return record
+
+    logging.setLogRecordFactory(factory)
 
 
 class ContextFilter(logging.Filter):
@@ -29,40 +101,6 @@ class ContextFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         for key, value in self.context.items():
             setattr(record, key, value)
-        return True
-
-
-class OTelSanitizingFilter(logging.Filter):
-    _allowed_scalars = (type(None), bool, bytes, int, float, str)
-    _allowed_containers = (Sequence, Mapping)
-
-    def _coerce(self, v: Any) -> Any:
-        if isinstance(v, self._allowed_scalars):
-            return v
-        if isinstance(v, Mapping):
-            return {str(self._coerce(k)): self._coerce(val) for k, val in v.items()}
-        if isinstance(v, Sequence) and not isinstance(v, (str | bytes | bytearray)):
-            return [self._coerce(x) for x in v]
-        return str(v)
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        keys = list(record.__dict__.keys())
-        for k in keys:
-            if k.startswith("_"):
-                delattr(record, k)
-        for k, v in list(record.__dict__.items()):
-            if k in (
-                "args",
-                "msg",
-                "message",
-                "exc_info",
-                "exc_text",
-                "stack_info",
-                "stack_text",
-                "msecs",
-            ):
-                continue
-            record.__dict__[k] = self._coerce(v)
         return True
 
 
@@ -117,8 +155,7 @@ class LoggerFactory:
             structlog.stdlib.add_log_level,
             structlog.processors.TimeStamper(fmt="iso", key="@timestamp"),
         ]
-        pre_chain: Sequence[PreProcessor] = cast(
-            Sequence[PreProcessor], pre_chain_raw)
+        pre_chain: Sequence[PreProcessor] = cast(Sequence[PreProcessor], pre_chain_raw)
 
         structlog.configure(
             processors=[
@@ -142,15 +179,12 @@ class LoggerFactory:
         root_logger.setLevel(log_level)
         root_logger.handlers.clear()
 
-        sanitizer_filter = OTelSanitizingFilter()
-        formatter = ProcessorFormatter(
-            processor=renderer, foreign_pre_chain=pre_chain)
+        formatter = ProcessorFormatter(processor=renderer, foreign_pre_chain=pre_chain)
 
         if enable_console:
             console_handler = logging.StreamHandler(sys.stdout)
             console_handler.setFormatter(formatter)
             console_handler.addFilter(ContextFilter(context))
-            console_handler.addFilter(sanitizer_filter)
             root_logger.addHandler(console_handler)
 
         if log_file:
@@ -176,18 +210,15 @@ class LoggerFactory:
                 )
             file_handler.setFormatter(formatter)
             file_handler.addFilter(ContextFilter(context))
-            file_handler.addFilter(sanitizer_filter)
             root_logger.addHandler(file_handler)
 
-        root_logger.addFilter(sanitizer_filter)
         if context:
             bind_contextvars(**context)
 
         logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(
             logging.WARNING
         )
-        logging.getLogger("azure.monitor.opentelemetry").setLevel(
-            logging.WARNING)
+        logging.getLogger("azure.monitor.opentelemetry").setLevel(logging.WARNING)
 
         self._configured = True
 
@@ -374,4 +405,5 @@ __all__ = [
     "LoggerFactory",
     "LoggingMiddleware",
     "AuditLogger",
+    "install_log_record_sanitizer",
 ]

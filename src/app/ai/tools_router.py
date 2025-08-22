@@ -31,10 +31,10 @@ _TOOLS_PLAN = (
     "When you call a tool, return only the JSON with no prose."
 )
 
-_CODEFENCE_JSON_RE = re.compile(
-    r"(?:```(?:json)?\s*)?(\{.*?\})(?:\s*```)?\s*", re.DOTALL)
+_CODEFENCE_JSON_RE = re.compile(r"(?:```(?:json)?\s*)?(\{.*?\})(?:\s*```)?\s*", re.DOTALL)
 DIRECT_TOOL_RE = re.compile(
-    r"^\s*tool\s*:\s*([a-z0-9-]+)\s*(\{.*\})\s*$", re.IGNORECASE | re.DOTALL)
+    r"^\s*tool\s*:\s*([a-z0-9-]+)\s*(\{.*\})\s*$", re.IGNORECASE | re.DOTALL
+)
 
 
 class ToolFunction(TypedDict, total=False):
@@ -243,8 +243,7 @@ async def _run_tool(
     if not tool:
         return {"ok": False, "summary": f"tool {name} not found", "output": ""}
     raw = await tool.run(**args)
-    result = raw if isinstance(raw, dict) else {
-        "ok": True, "summary": "", "output": raw}
+    result = raw if isinstance(raw, dict) else {"ok": True, "summary": "", "output": raw}
     if isinstance(result, dict):
         result = _maybe_wrap_approval(result, context)
     return result
@@ -291,11 +290,12 @@ async def _openai_tools_orchestrator(
         }
     ]
     if memory:
-        messages.extend([{"role": m["role"], "content": m["content"]}
-                        for m in memory])
+        messages.extend([{"role": m["role"], "content": m["content"]} for m in memory])
     messages.append({"role": "user", "content": user_input})
     if not allow_chaining:
-        first = await llm.chat_raw(model=selected_model, messages=messages, tools=tools, tool_choice="auto")
+        first = await llm.chat_raw(
+            model=selected_model, messages=messages, tools=tools, tool_choice="auto"
+        )
         choices = first.get("choices", [])
         if not choices:
             return None
@@ -317,7 +317,9 @@ async def _openai_tools_orchestrator(
         return f"{tname} • {result.get('summary', '')}\n\njson\n{body}\n"
     steps = 0
     while steps < max_chain_steps and _within_budget(messages, token_budget):
-        resp = await llm.chat_raw(model=selected_model, messages=messages, tools=tools, tool_choice="auto")
+        resp = await llm.chat_raw(
+            model=selected_model, messages=messages, tools=tools, tool_choice="auto"
+        )
         choices2 = resp.get("choices", [])
         if not choices2:
             return None
@@ -326,8 +328,9 @@ async def _openai_tools_orchestrator(
         if not tool_calls:
             content = (msg.get("content") or "").strip()
             return content or None
-        messages.append({"role": "assistant", "content": msg.get(
-            "content") or "", "tool_calls": tool_calls})
+        messages.append(
+            {"role": "assistant", "content": msg.get("content") or "", "tool_calls": tool_calls}
+        )
         for call in tool_calls:
             if steps >= max_chain_steps or not _within_budget(messages, token_budget):
                 break
@@ -346,7 +349,9 @@ async def _openai_tools_orchestrator(
                 }
             )
             steps += 1
-    final = await llm.chat_raw(model=selected_model, messages=messages, tools=tools, tool_choice="none")
+    final = await llm.chat_raw(
+        model=selected_model, messages=messages, tools=tools, tool_choice="none"
+    )
     choicesf = final.get("choices", [])
     if not choicesf:
         return None
@@ -393,7 +398,9 @@ async def maybe_call_tool(
             logger.debug("Classifier prediction failed: %s", exc)
     if not enable_tools:
         try:
-            return await generate_response(user_input, list(memory or []), model=model, provider=provider)
+            return await generate_response(
+                user_input, list(memory or []), model=model, provider=provider
+            )
         except Exception as e:
             await _log_error(e, context)
             return "Failed to generate response."
@@ -402,11 +409,18 @@ async def maybe_call_tool(
         mapped = maybe_map_provision(user_input)
         if not mapped:
             mapped = await maybe_map_provision_async(user_input)
-        if mapped and isinstance(mapped, dict) and mapped.get("tool") and isinstance(mapped.get("args"), dict):
+        if (
+            mapped
+            and isinstance(mapped, dict)
+            and mapped.get("tool")
+            and isinstance(mapped.get("args"), dict)
+        ):
             if return_json:
                 res = await _run_tool(str(mapped["tool"]), dict(mapped["args"]), context)
                 return json.dumps(res, ensure_ascii=False, indent=2)
-            return await _run_tool_and_explain(str(mapped["tool"]), dict(mapped["args"]), provider, model, context)
+            return await _run_tool_and_explain(
+                str(mapped["tool"]), dict(mapped["args"]), provider, model, context
+            )
         tools = list_tools()
         if allowlist:
             allowed = set(allowlist)
@@ -418,15 +432,19 @@ async def maybe_call_tool(
             model,
             allow_chaining=True,
             max_chain_steps=4,
-            token_budget=(int(context.cost_limit)
-                          if context and context.cost_limit else 6000),
+            token_budget=(int(context.cost_limit) if context and context.cost_limit else 6000),
             context=context,
         )
         if isinstance(via_openai, str):
             mapped2 = maybe_map_provision(via_openai)
             if not mapped2:
                 mapped2 = await maybe_map_provision_async(via_openai)
-            if mapped2 and isinstance(mapped2, dict) and mapped2.get("tool") and isinstance(mapped2.get("args"), dict):
+            if (
+                mapped2
+                and isinstance(mapped2, dict)
+                and mapped2.get("tool")
+                and isinstance(mapped2.get("args"), dict)
+            ):
                 if return_json:
                     res = await _run_tool(str(mapped2["tool"]), dict(mapped2["args"]), context)
                     return json.dumps(res, ensure_ascii=False, indent=2)
@@ -457,7 +475,8 @@ async def maybe_call_tool(
             if not t or (allowlist and preferred_tool not in set(allowlist)):
                 return f"Preferred tool {preferred_tool} is not available."
             schema = getattr(
-                t, "schema", {"type": "object", "properties": {}, "additionalProperties": True})
+                t, "schema", {"type": "object", "properties": {}, "additionalProperties": True}
+            )
             try:
                 mapped_args = await map_args_with_function_call(
                     tool_name=preferred_tool,
@@ -471,9 +490,12 @@ async def maybe_call_tool(
             if return_json:
                 res = await _run_tool(preferred_tool, mapped_args, context)
                 return json.dumps(res, ensure_ascii=False, indent=2)
-            return await _run_tool_and_explain(preferred_tool, mapped_args, provider, model, context)
-        tools_desc = "\n".join(
-            f"- {t.name}: {t.description} schema={t.schema}" for t in tools) or "None"
+            return await _run_tool_and_explain(
+                preferred_tool, mapped_args, provider, model, context
+            )
+        tools_desc = (
+            "\n".join(f"- {t.name}: {t.description} schema={t.schema}" for t in tools) or "None"
+        )
         plan = await generate_response(
             f"{_TOOLS_PLAN}\n\nAvailable tools:\n{tools_desc}\n\nUser: {user_input}",
             list(memory or []),
@@ -489,8 +511,7 @@ async def maybe_call_tool(
             return plan
         name = str(req.get("tool"))
         raw_args = req.get("args")
-        args: dict[str, object] = dict(
-            raw_args) if isinstance(raw_args, dict) else {}
+        args: dict[str, object] = dict(raw_args) if isinstance(raw_args, dict) else {}
         if return_json:
             res = await _run_tool(name, args, context)
             return json.dumps(res, ensure_ascii=False, indent=2)

@@ -13,8 +13,7 @@ from opentelemetry.trace import Status, StatusCode
 from app.ai.llm.base import LLMProvider
 from app.ai.types import Message
 from app.core.config import get_settings
-from app.core.exceptions import ExternalServiceException, ConfigurationError, retry_on_error
-
+from app.core.exceptions import ConfigurationError, ExternalServiceException, retry_on_error
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +22,7 @@ class OpenAIProvider(LLMProvider):
     def __init__(self) -> None:
         settings = get_settings()
         api_key = (
-            settings.llm.openai_api_key.get_secret_value(
-            ) if settings.llm.openai_api_key else None
+            settings.llm.openai_api_key.get_secret_value() if settings.llm.openai_api_key else None
         )
         if not api_key:
             raise ConfigurationError("OPENAI_API_KEY", "not configured")
@@ -52,13 +50,11 @@ class OpenAIProvider(LLMProvider):
         with self._tracer.start_as_current_span("openai.chat.completions") as span:
             span.set_attribute("llm.provider", "openai")
             span.set_attribute("llm.endpoint", "chat.completions")
-            span.set_attribute("llm.model.requested",
-                               model or self._default_model)
+            span.set_attribute("llm.model.requested", model or self._default_model)
             try:
                 formatted = cast(
                     list[ChatCompletionMessageParam],
-                    [{"role": str(m["role"]), "content": str(m["content"])}
-                     for m in messages],
+                    [{"role": str(m["role"]), "content": str(m["content"])} for m in messages],
                 )
                 resp = await self._client.chat.completions.create(
                     model=model or self._default_model,
@@ -66,14 +62,11 @@ class OpenAIProvider(LLMProvider):
                 )
                 usage = getattr(resp, "usage", None)
                 if usage is not None:
-                    span.set_attribute("llm.tokens.prompt",
-                                       getattr(usage, "prompt_tokens", 0))
+                    span.set_attribute("llm.tokens.prompt", getattr(usage, "prompt_tokens", 0))
                     span.set_attribute(
-                        "llm.tokens.completion", getattr(
-                            usage, "completion_tokens", 0)
+                        "llm.tokens.completion", getattr(usage, "completion_tokens", 0)
                     )
-                    span.set_attribute("llm.tokens.total",
-                                       getattr(usage, "total_tokens", 0))
+                    span.set_attribute("llm.tokens.total", getattr(usage, "total_tokens", 0))
                 content = resp.choices[0].message.content or ""
                 return content.strip()
             except Exception as err:
@@ -100,8 +93,7 @@ class OpenAIProvider(LLMProvider):
         with self._tracer.start_as_current_span("openai.chat.completions.raw") as span:
             span.set_attribute("llm.provider", "openai")
             span.set_attribute("llm.endpoint", "chat.completions")
-            span.set_attribute("llm.model.requested",
-                               model or self._default_model)
+            span.set_attribute("llm.model.requested", model or self._default_model)
             try:
                 msg_params = cast(list[ChatCompletionMessageParam], messages)
                 kwargs: dict[str, Any] = {
@@ -121,14 +113,11 @@ class OpenAIProvider(LLMProvider):
                 resp = await self._client.chat.completions.create(**kwargs)
                 usage = getattr(resp, "usage", None)
                 if usage is not None:
-                    span.set_attribute("llm.tokens.prompt",
-                                       getattr(usage, "prompt_tokens", 0))
+                    span.set_attribute("llm.tokens.prompt", getattr(usage, "prompt_tokens", 0))
                     span.set_attribute(
-                        "llm.tokens.completion", getattr(
-                            usage, "completion_tokens", 0)
+                        "llm.tokens.completion", getattr(usage, "completion_tokens", 0)
                     )
-                    span.set_attribute("llm.tokens.total",
-                                       getattr(usage, "total_tokens", 0))
+                    span.set_attribute("llm.tokens.total", getattr(usage, "total_tokens", 0))
                 return resp.model_dump()
             except Exception as err:
                 current = trace.get_current_span()
@@ -147,13 +136,11 @@ class OpenAIProvider(LLMProvider):
         with self._tracer.start_as_current_span("openai.chat.completions.stream") as span:
             span.set_attribute("llm.provider", "openai")
             span.set_attribute("llm.endpoint", "chat.completions")
-            span.set_attribute("llm.model.requested",
-                               model or self._default_model)
+            span.set_attribute("llm.model.requested", model or self._default_model)
             try:
                 formatted = cast(
                     list[ChatCompletionMessageParam],
-                    [{"role": str(m["role"]), "content": str(m["content"])}
-                     for m in messages],
+                    [{"role": str(m["role"]), "content": str(m["content"])} for m in messages],
                 )
                 kwargs: dict[str, Any] = {
                     "model": model or self._default_model,

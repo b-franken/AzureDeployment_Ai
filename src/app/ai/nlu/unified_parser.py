@@ -1,9 +1,10 @@
 from __future__ import annotations
+
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Tuple
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from app.ai.nlu.embeddings_classifier import EmbeddingsClassifierService
@@ -48,8 +49,10 @@ class UnifiedParseResult:
         try:
             from app.common.envs import normalize_env
         except Exception:
+
             def normalize_env(v: str) -> str:
                 return "dev"
+
         rtype = self.resource_type
         params = dict(self.parameters)
         name = params.get("name")
@@ -98,6 +101,7 @@ class UnifiedParseResult:
 def _to_scores_list(x):
     try:
         import numpy as np
+
         if isinstance(x, np.ndarray):
             return x.tolist()[0]
     except Exception:
@@ -215,20 +219,40 @@ class unified_nlu_parser:
         dimensions: int | None = None,
         local_model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
     ) -> None:
-        self.location_patterns = [(re.compile(p, re.IGNORECASE), loc)
-                                  for p, loc in type(self).location_patterns]
-        self.resource_patterns = {k: [re.compile(
-            p, re.IGNORECASE) for p in v] for k, v in type(self).resource_patterns.items()}
-        self.intent_patterns = {k: [re.compile(
-            p, re.IGNORECASE) for p in v] for k, v in type(self).intent_patterns.items()}
+        self.location_patterns = [
+            (re.compile(p, re.IGNORECASE), loc) for p, loc in type(self).location_patterns
+        ]
+        self.resource_patterns = {
+            k: [re.compile(p, re.IGNORECASE) for p in v]
+            for k, v in type(self).resource_patterns.items()
+        }
+        self.intent_patterns = {
+            k: [re.compile(p, re.IGNORECASE) for p in v]
+            for k, v in type(self).intent_patterns.items()
+        }
         self._emb: EmbeddingsClassifierService | None = None
         if use_embeddings:
             self._emb = self._load_embeddings_service(
-                embeddings_provider, num_labels, ckpt, dimensions, local_model_name)
+                embeddings_provider, num_labels, ckpt, dimensions, local_model_name
+            )
 
-    def _load_embeddings_service(self, provider: str | None, num_labels: int, ckpt: str | None, dimensions: int | None, local_model_name: str) -> EmbeddingsClassifierService:
+    def _load_embeddings_service(
+        self,
+        provider: str | None,
+        num_labels: int,
+        ckpt: str | None,
+        dimensions: int | None,
+        local_model_name: str,
+    ) -> EmbeddingsClassifierService:
         from app.ai.nlu.embeddings_classifier import EmbeddingsClassifierService
-        return EmbeddingsClassifierService(num_labels=num_labels, provider=provider, dimensions=dimensions, ckpt=ckpt, local_model_name=local_model_name)
+
+        return EmbeddingsClassifierService(
+            num_labels=num_labels,
+            provider=provider,
+            dimensions=dimensions,
+            ckpt=ckpt,
+            local_model_name=local_model_name,
+        )
 
     def parse(self, text: str) -> UnifiedParseResult:
         t = text.lower().strip()
@@ -259,7 +283,7 @@ class unified_nlu_parser:
             embeddings_scores=emb_scores,
         )
 
-    def parse_action(self, text: str) -> Tuple[str, dict[str, Any]]:
+    def parse_action(self, text: str) -> tuple[str, dict[str, Any]]:
         r = self.parse(text)
         return r.action, r.parameters
 
@@ -310,10 +334,8 @@ class unified_nlu_parser:
                 if m and m.groups():
                     return m.group(m.lastindex or 1)
         for p in [
-            re.compile(
-                r"(?:named|called|name)\s+([a-z0-9][\w-]{2,79})", re.IGNORECASE),
-            re.compile(
-                r"([a-z0-9][\w-]{2,79})\s+(?:in|for|at)", re.IGNORECASE),
+            re.compile(r"(?:named|called|name)\s+([a-z0-9][\w-]{2,79})", re.IGNORECASE),
+            re.compile(r"([a-z0-9][\w-]{2,79})\s+(?:in|for|at)", re.IGNORECASE),
         ]:
             m = p.search(text)
             if m:
@@ -329,22 +351,20 @@ class unified_nlu_parser:
                 params["location"] = loc
                 break
         for p in [
-            re.compile(
-                r"resource\s+group\s+([a-z0-9][\w-]{0,89})", re.IGNORECASE),
+            re.compile(r"resource\s+group\s+([a-z0-9][\w-]{0,89})", re.IGNORECASE),
             re.compile(r"rg\s+([a-z0-9][\w-]{0,89})", re.IGNORECASE),
-            re.compile(
-                r"in\s+(?:resource\s+group|rg)\s+([a-z0-9][\w-]{0,89})", re.IGNORECASE),
+            re.compile(r"in\s+(?:resource\s+group|rg)\s+([a-z0-9][\w-]{0,89})", re.IGNORECASE),
         ]:
             m = p.search(text)
             if m:
                 params["resource_group"] = m.group(1)
                 break
         m = re.compile(
-            r"\b(dev|development|test|testing|staging|stage|prod|production|uat)\b", re.IGNORECASE).search(text)
+            r"\b(dev|development|test|testing|staging|stage|prod|production|uat)\b", re.IGNORECASE
+        ).search(text)
         if m:
             params["environment"] = m.group(1).lower()
-        m = re.compile(
-            r"(?:sku|tier|size)\s+([a-z0-9_]+)", re.IGNORECASE).search(text)
+        m = re.compile(r"(?:sku|tier|size)\s+([a-z0-9_]+)", re.IGNORECASE).search(text)
         if m:
             params["sku"] = m.group(1).upper()
         if rtype == "storage":
@@ -372,7 +392,9 @@ class unified_nlu_parser:
             ctx["disaster_recovery"] = True
         return ctx
 
-    def _build_advanced_context(self, text: str, intent: DeploymentIntent, rtype: str) -> dict[str, Any]:
+    def _build_advanced_context(
+        self, text: str, intent: DeploymentIntent, rtype: str
+    ) -> dict[str, Any]:
         adv: dict[str, Any] = {}
         comp = []
         for name, pat in {
@@ -431,7 +453,7 @@ def parse_provision_request(text: str) -> UnifiedParseResult:
     return unified_nlu_parser(use_embeddings=True).parse(text)
 
 
-def parse_action(text: str) -> Tuple[str, dict[str, Any]]:
+def parse_action(text: str) -> tuple[str, dict[str, Any]]:
     return unified_nlu_parser(use_embeddings=True).parse_action(text)
 
 
@@ -452,6 +474,7 @@ async def maybe_map_provision_async(text: str) -> dict[str, object] | None:
         if isinstance(args, dict):
             return {"tool": "provision_orchestrator", "args": args}
     from app.ai.nlu.llm_parser import parse_with_llm
+
     r2 = await parse_with_llm(text)
     args2 = r2.to_orchestrator_args()
     if not isinstance(args2, dict):

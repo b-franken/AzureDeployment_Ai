@@ -24,9 +24,7 @@ def _openai_list() -> list[str]:
     try:
         settings = get_settings()
         api_key = (
-            settings.llm.openai_api_key.get_secret_value()
-            if settings.llm.openai_api_key
-            else None
+            settings.llm.openai_api_key.get_secret_value() if settings.llm.openai_api_key else None
         )
         if not api_key:
             return fallback
@@ -37,8 +35,7 @@ def _openai_list() -> list[str]:
             timeout=httpx.Timeout(10.0, connect=5.0),
         )
         resp = client.models.list()
-        models = [m.id for m in getattr(
-            resp, "data", []) if getattr(m, "id", None)]
+        models = [m.id for m in getattr(resp, "data", []) if getattr(m, "id", None)]
         return models if models else fallback
     except Exception:
         return fallback
@@ -52,12 +49,9 @@ def _ollama_list() -> list[str]:
     return _reg._ollama_models()
 
 
-_reg.register(ProviderAdapter("openai", _openai_list,
-              ["gpt-4o-mini", "gpt-4o", "gpt-5"]))
-_reg.register(ProviderAdapter("gemini", _gemini_list,
-              ["gemini-1.5-pro", "gemini-1.5-flash"]))
-_reg.register(ProviderAdapter("ollama", _ollama_list,
-              ["llama3.1", "mistral", "gemma"]))
+_reg.register(ProviderAdapter("openai", _openai_list, ["gpt-4o-mini", "gpt-4o", "gpt-5"]))
+_reg.register(ProviderAdapter("gemini", _gemini_list, ["gemini-1.5-pro", "gemini-1.5-flash"]))
+_reg.register(ProviderAdapter("ollama", _ollama_list, ["llama3.1", "mistral", "gemma"]))
 
 
 def available_providers() -> list[str]:

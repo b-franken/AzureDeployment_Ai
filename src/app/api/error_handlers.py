@@ -68,8 +68,7 @@ def _error_response(
         "detail": detail,
     }
     headers: dict[str, str] = {}
-    corr = request.headers.get(
-        "x-correlation-id") or request.headers.get("x-request-id")
+    corr = request.headers.get("x-correlation-id") or request.headers.get("x-request-id")
     if corr:
         headers["x-correlation-id"] = corr
     if status_code == 429 and retry_after is not None:
@@ -80,10 +79,15 @@ def _error_response(
 
 def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(RequestValidationError)
-    async def _handle_request_validation(request: Request, exc: RequestValidationError) -> JSONResponse:
+    async def _handle_request_validation(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
         errors: list[dict[str, Any]] = [
-            {"loc": e.get("loc", []), "msg": e.get(
-                "msg", "Invalid value"), "type": e.get("type", "value_error")}
+            {
+                "loc": e.get("loc", []),
+                "msg": e.get("msg", "Invalid value"),
+                "type": e.get("type", "value_error"),
+            }
             for e in exc.errors()
         ]
         return _error_response(
@@ -97,8 +101,11 @@ def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(ValidationError)
     async def _handle_pydantic_validation(request: Request, exc: ValidationError) -> JSONResponse:
         errors: list[dict[str, Any]] = [
-            {"loc": e.get("loc", []), "msg": e.get(
-                "msg", "Invalid value"), "type": e.get("type", "value_error")}
+            {
+                "loc": e.get("loc", []),
+                "msg": e.get("msg", "Invalid value"),
+                "type": e.get("type", "value_error"),
+            }
             for e in exc.errors()
         ]
         return _error_response(
@@ -110,7 +117,9 @@ def install_error_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(BaseApplicationException)
-    async def _handle_app_exceptions(request: Request, exc: BaseApplicationException) -> JSONResponse:
+    async def _handle_app_exceptions(
+        request: Request, exc: BaseApplicationException
+    ) -> JSONResponse:
         status_map: dict[type[BaseApplicationException], int] = {
             ValidationException: 400,
             AuthenticationException: 401,
@@ -129,18 +138,22 @@ def install_error_handlers(app: FastAPI) -> None:
                 break
         retry_after = None
         if isinstance(exc, RateLimitException):
-            retry_after = int(exc.details.get("retry_after", 0)) if isinstance(
-                exc.details, dict) else None
+            retry_after = (
+                int(exc.details.get("retry_after", 0)) if isinstance(exc.details, dict) else None
+            )
         logger.warning(
             "Application error",
-            extra={"error_code": exc.__class__.__name__,
-                   "message": str(exc), "detail": exc.details},
+            extra={
+                "error_code": exc.__class__.__name__,
+                "message": str(exc),
+                "detail": exc.details,
+            },
         )
         return _error_response(
             request,
             status_code=status_code,
-            error_code=exc.__class__.__name__.replace(
-                "Exception", "").lower() or "application_error",
+            error_code=exc.__class__.__name__.replace("Exception", "").lower()
+            or "application_error",
             message=exc.user_message or str(exc),
             detail=exc.details,
             retry_after=retry_after,
@@ -152,10 +165,8 @@ def install_error_handlers(app: FastAPI) -> None:
         error_code = "http_error"
         message = "HTTP error"
         if isinstance(detail_obj, dict):
-            message = str(detail_obj.get("message")
-                          or detail_obj.get("msg") or message)
-            error_code = str(detail_obj.get("error_code")
-                             or detail_obj.get("error") or error_code)
+            message = str(detail_obj.get("message") or detail_obj.get("msg") or message)
+            error_code = str(detail_obj.get("error_code") or detail_obj.get("error") or error_code)
         elif isinstance(detail_obj, str):
             message = detail_obj
         retry_after = None
@@ -169,8 +180,7 @@ def install_error_handlers(app: FastAPI) -> None:
             status_code=exc.status_code,
             error_code=error_code,
             message=message,
-            detail=detail_obj if isinstance(
-                detail_obj, (dict | list | tuple)) else None,
+            detail=detail_obj if isinstance(detail_obj, (dict | list | tuple)) else None,
             retry_after=retry_after,
         )
 
@@ -186,14 +196,18 @@ def install_error_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(httpx.RequestError)
-    async def _handle_httpx_request_error(request: Request, exc: httpx.RequestError) -> JSONResponse:
+    async def _handle_httpx_request_error(
+        request: Request, exc: httpx.RequestError
+    ) -> JSONResponse:
         return _error_response(
             request,
             status_code=503,
             error_code="network_error",
             message="Upstream network error",
-            detail={"type": type(exc).__name__, "request": str(
-                exc.request.url) if exc.request else None},
+            detail={
+                "type": type(exc).__name__,
+                "request": str(exc.request.url) if exc.request else None,
+            },
         )
 
     @app.exception_handler(AzureError)
@@ -226,9 +240,12 @@ def install_error_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(AzureOperationError)
-    async def _handle_azure_operation_error(request: Request, exc: AzureOperationError) -> JSONResponse:
-        status_code = 502 if exc.retryable else (
-            int(exc.status_code) if exc.status_code is not None else 400)
+    async def _handle_azure_operation_error(
+        request: Request, exc: AzureOperationError
+    ) -> JSONResponse:
+        status_code = (
+            502 if exc.retryable else (int(exc.status_code) if exc.status_code is not None else 400)
+        )
         detail = {"status_code": exc.status_code, "retryable": exc.retryable}
         return _error_response(
             request,

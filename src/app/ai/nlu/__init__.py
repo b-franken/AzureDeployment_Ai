@@ -4,10 +4,10 @@ from .unified_parser import (
     DeploymentIntent,
     UnifiedParseResult,
     maybe_map_provision,
+    maybe_map_provision_async,
     parse_action,
     parse_provision_request,
     unified_nlu_parser,
-    maybe_map_provision_async,
 )
 
 NLPParser = unified_nlu_parser

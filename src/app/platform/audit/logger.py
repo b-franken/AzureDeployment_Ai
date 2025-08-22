@@ -1,8 +1,9 @@
 from __future__ import annotations
-import os
+
 import asyncio
 import hashlib
 import json
+import os
 import threading
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -13,6 +14,7 @@ from typing import Any
 from psycopg_pool import ConnectionPool
 
 from app.core.logging import get_logger
+
 logger = get_logger(__name__)
 
 
@@ -99,11 +101,14 @@ class AuditQuery:
 
 class AuditLogger:
     def __init__(self, dsn: str | None = None) -> None:
-        self.dsn = dsn or os.getenv("AUDIT_DB_URL") or os.getenv(
-            "DATABASE_URL") or "postgresql://dev:dev@localhost:5432/devops_ai"
+        self.dsn = (
+            dsn
+            or os.getenv("AUDIT_DB_URL")
+            or os.getenv("DATABASE_URL")
+            or "postgresql://dev:dev@localhost:5432/devops_ai"
+        )
         self._lock = threading.RLock()
-        self._pool = ConnectionPool(
-            self.dsn, min_size=1, max_size=5, kwargs={"autocommit": True})
+        self._pool = ConnectionPool(self.dsn, min_size=1, max_size=5, kwargs={"autocommit": True})
         self._retention_days = 2555
         self._compliance_mode = True
         self._init_database()
@@ -209,8 +214,7 @@ class AuditLogger:
                     event.correlation_id,
                     json.dumps(event.details, ensure_ascii=False),
                     json.dumps(event.tags, ensure_ascii=False),
-                    json.dumps(event.compliance_frameworks,
-                               ensure_ascii=False),
+                    json.dumps(event.compliance_frameworks, ensure_ascii=False),
                     event.hash,
                 ),
             )
@@ -285,8 +289,7 @@ class AuditLogger:
                     correlation_id=row[16],
                     details=json.loads(row[17]) if row[17] else {},
                     tags=json.loads(row[18]) if row[18] else {},
-                    compliance_frameworks=json.loads(
-                        row[19]) if row[19] else [],
+                    compliance_frameworks=json.loads(row[19]) if row[19] else [],
                     hash=row[20],
                 )
             )
@@ -356,7 +359,9 @@ class AuditLogger:
         stored_hash = row[7]
         return calculated_hash == stored_hash
 
-    async def export_for_compliance(self, framework: str, start_time: datetime, end_time: datetime) -> dict[str, Any]:
+    async def export_for_compliance(
+        self, framework: str, start_time: datetime, end_time: datetime
+    ) -> dict[str, Any]:
         query = AuditQuery(start_time=start_time, end_time=end_time)
         events = await self.query_events(query)
         filtered = [e for e in events if framework in e.compliance_frameworks]
@@ -373,37 +378,69 @@ class AuditLogger:
     def _format_gdpr_report(self, events: list[AuditEvent]) -> dict[str, Any]:
         return {
             "framework": "gdpr",
-            "data_access_events": [asdict(e) for e in events if e.event_type in [AuditEventType.ACCESS_GRANTED, AuditEventType.ACCESS_DENIED]],
-            "data_modification_events": [asdict(e) for e in events if e.event_type in [AuditEventType.RESOURCE_UPDATED, AuditEventType.RESOURCE_DELETED]],
+            "data_access_events": [
+                asdict(e)
+                for e in events
+                if e.event_type in [AuditEventType.ACCESS_GRANTED, AuditEventType.ACCESS_DENIED]
+            ],
+            "data_modification_events": [
+                asdict(e)
+                for e in events
+                if e.event_type
+                in [AuditEventType.RESOURCE_UPDATED, AuditEventType.RESOURCE_DELETED]
+            ],
             "consent_events": [],
-            "data_breach_events": [asdict(e) for e in events if e.severity == AuditSeverity.CRITICAL],
+            "data_breach_events": [
+                asdict(e) for e in events if e.severity == AuditSeverity.CRITICAL
+            ],
         }
 
     def _format_hipaa_report(self, events: list[AuditEvent]) -> dict[str, Any]:
-        phi_access_events = [
-            asdict(e) for e in events if "phi" in e.tags or "healthcare" in e.tags]
+        phi_access_events = [asdict(e) for e in events if "phi" in e.tags or "healthcare" in e.tags]
         security_events = [
-            asdict(e) for e in events if e.event_type == AuditEventType.SECURITY_ALERT]
+            asdict(e) for e in events if e.event_type == AuditEventType.SECURITY_ALERT
+        ]
         audit_control_events = [asdict(e) for e in events]
-        return {"framework": "hipaa", "phi_access_events": phi_access_events, "security_events": security_events, "audit_control_events": audit_control_events}
+        return {
+            "framework": "hipaa",
+            "phi_access_events": phi_access_events,
+            "security_events": security_events,
+            "audit_control_events": audit_control_events,
+        }
 
     def _format_pci_report(self, events: list[AuditEvent]) -> dict[str, Any]:
-        card = [asdict(e)
-                for e in events if "payment" in e.tags or "card" in e.tags]
-        net = [asdict(e) for e in events if "network" in (
-            e.resource_type or "") or "firewall" in (e.resource_type or "")]
-        acc = [asdict(e) for e in events if e.event_type in [
-            AuditEventType.ACCESS_GRANTED, AuditEventType.ACCESS_DENIED]]
-        return {"framework": "pci-dss", "cardholder_data_events": card, "network_security_events": net, "access_control_events": acc}
+        card = [asdict(e) for e in events if "payment" in e.tags or "card" in e.tags]
+        net = [
+            asdict(e)
+            for e in events
+            if "network" in (e.resource_type or "") or "firewall" in (e.resource_type or "")
+        ]
+        acc = [
+            asdict(e)
+            for e in events
+            if e.event_type in [AuditEventType.ACCESS_GRANTED, AuditEventType.ACCESS_DENIED]
+        ]
+        return {
+            "framework": "pci-dss",
+            "cardholder_data_events": card,
+            "network_security_events": net,
+            "access_control_events": acc,
+        }
 
     def _format_sox_report(self, events: list[AuditEvent]) -> dict[str, Any]:
-        fin = [
-            asdict(e) for e in events if "financial" in e.tags or "accounting" in e.tags]
-        chg = [asdict(e) for e in events if e.event_type ==
-               AuditEventType.CONFIGURATION_CHANGED]
-        acc = [asdict(e) for e in events if e.event_type in [
-            AuditEventType.ACCESS_GRANTED, AuditEventType.ACCESS_DENIED]]
-        return {"framework": "sox", "financial_system_events": fin, "change_management_events": chg, "access_control_events": acc}
+        fin = [asdict(e) for e in events if "financial" in e.tags or "accounting" in e.tags]
+        chg = [asdict(e) for e in events if e.event_type == AuditEventType.CONFIGURATION_CHANGED]
+        acc = [
+            asdict(e)
+            for e in events
+            if e.event_type in [AuditEventType.ACCESS_GRANTED, AuditEventType.ACCESS_DENIED]
+        ]
+        return {
+            "framework": "sox",
+            "financial_system_events": fin,
+            "change_management_events": chg,
+            "access_control_events": acc,
+        }
 
     async def cleanup_old_events(self) -> None:
         cutoff = datetime.utcnow() - timedelta(days=self._retention_days)
@@ -418,8 +455,7 @@ class AuditLogger:
                     (cutoff,),
                 )
             else:
-                cur.execute(
-                    "DELETE FROM audit_events WHERE timestamp < %s", (cutoff,))
+                cur.execute("DELETE FROM audit_events WHERE timestamp < %s", (cutoff,))
 
     async def _trigger_alert(self, event: AuditEvent) -> None:
         return None

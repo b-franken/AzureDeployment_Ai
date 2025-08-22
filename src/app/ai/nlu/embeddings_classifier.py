@@ -1,19 +1,27 @@
 from __future__ import annotations
+
 import os
-from typing import Sequence
+from collections.abc import Sequence
+
 import numpy as np
+
 from app.ai.nlu.embeddings_clients import get_embedding_client
 
 
 class EmbeddingsClassifierService:
-    def __init__(self, num_labels: int = 2, provider: str | None = None, dimensions: int | None = None, ckpt: str | None = None, local_model_name: str = "sentence-transformers/all-MiniLM-L6-v2") -> None:
+    def __init__(
+        self,
+        num_labels: int = 2,
+        provider: str | None = None,
+        dimensions: int | None = None,
+        ckpt: str | None = None,
+        local_model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
+    ) -> None:
         self._num_labels = int(num_labels)
         if dimensions is not None:
             os.environ["EMBEDDINGS_DIMENSIONS"] = str(int(dimensions))
-        self._provider = (provider or os.getenv(
-            "EMBEDDINGS_PROVIDER", "azure")).lower()
-        self._enc = None if self._provider == "local" else get_embedding_client(
-            self._provider)
+        self._provider = (provider or os.getenv("EMBEDDINGS_PROVIDER", "azure")).lower()
+        self._enc = None if self._provider == "local" else get_embedding_client(self._provider)
         self._W: np.ndarray | None = None
         self._b: np.ndarray | None = None
         self._ckpt = ckpt
@@ -36,10 +44,12 @@ class EmbeddingsClassifierService:
                 from sentence_transformers import SentenceTransformer
             except Exception as e:
                 raise RuntimeError(
-                    "local embeddings require torch and sentence-transformers") from e
+                    "local embeddings require torch and sentence-transformers"
+                ) from e
             self._local_encoder = SentenceTransformer(self._local_model_name)
         vecs = self._local_encoder.encode(
-            list(texts), convert_to_numpy=True, normalize_embeddings=False)
+            list(texts), convert_to_numpy=True, normalize_embeddings=False
+        )
         return np.asarray(vecs, dtype=np.float32)
 
     def _encode(self, texts: Sequence[str]) -> np.ndarray:
@@ -60,7 +70,15 @@ class EmbeddingsClassifierService:
         P = P / P.sum(axis=1, keepdims=True)
         return P.astype(np.float32)
 
-    def fit(self, texts: Sequence[str], labels: Sequence[int], epochs: int = 10, lr: float = 1e-2, batch_size: int = 32, l2: float = 0.0) -> None:
+    def fit(
+        self,
+        texts: Sequence[str],
+        labels: Sequence[int],
+        epochs: int = 10,
+        lr: float = 1e-2,
+        batch_size: int = 32,
+        l2: float = 0.0,
+    ) -> None:
         X = self._encode(texts)
         y = np.asarray(labels, dtype=np.int64)
         n, d = X.shape

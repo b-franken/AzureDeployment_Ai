@@ -1,7 +1,9 @@
 from __future__ import annotations
-from typing import Sequence, Iterable
+
 import os
 import time
+from collections.abc import Iterable, Sequence
+
 import httpx
 import numpy as np
 
@@ -14,12 +16,13 @@ class EmbeddingClient:
 def _chunks(xs: Sequence[str], n: int) -> Iterable[Sequence[str]]:
     m = max(1, int(n))
     for i in range(0, len(xs), m):
-        yield xs[i:i + m]
+        yield xs[i : i + m]
 
 
 class _AADTokenProvider:
     def __init__(self, scope: str = "https://cognitiveservices.azure.com/.default") -> None:
         from azure.identity import DefaultAzureCredential
+
         self._cred = DefaultAzureCredential()
         self._scope = scope
         self._token: str | None = None
@@ -35,14 +38,20 @@ class _AADTokenProvider:
 
 
 class AzureOpenAIClient(EmbeddingClient):
-    def __init__(self, endpoint: str | None = None, deployment: str | None = None, api_key: str | None = None, api_version: str | None = None, dimensions: int | None = None, auth: str | None = None, timeout: float = 60.0) -> None:
-        self.endpoint = (endpoint or os.getenv(
-            "AZURE_OPENAI_ENDPOINT", "")).rstrip("/")
-        self.deployment = deployment or os.getenv(
-            "AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT", "")
+    def __init__(
+        self,
+        endpoint: str | None = None,
+        deployment: str | None = None,
+        api_key: str | None = None,
+        api_version: str | None = None,
+        dimensions: int | None = None,
+        auth: str | None = None,
+        timeout: float = 60.0,
+    ) -> None:
+        self.endpoint = (endpoint or os.getenv("AZURE_OPENAI_ENDPOINT", "")).rstrip("/")
+        self.deployment = deployment or os.getenv("AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT", "")
         self.key = api_key or os.getenv("AZURE_OPENAI_API_KEY", "")
-        self.api_version = api_version or os.getenv(
-            "AZURE_OPENAI_API_VERSION", "2024-10-21")
+        self.api_version = api_version or os.getenv("AZURE_OPENAI_API_VERSION", "2024-10-21")
         self.dimensions = dimensions
         self.timeout = timeout
         self.auth = (auth or os.getenv("AZURE_OPENAI_AUTH", "key")).lower()
@@ -72,11 +81,17 @@ class AzureOpenAIClient(EmbeddingClient):
 
 
 class OpenAIClient(EmbeddingClient):
-    def __init__(self, model: str = "text-embedding-3-large", api_key: str | None = None, base_url: str | None = None, dimensions: int | None = None, timeout: float = 60.0) -> None:
+    def __init__(
+        self,
+        model: str = "text-embedding-3-large",
+        api_key: str | None = None,
+        base_url: str | None = None,
+        dimensions: int | None = None,
+        timeout: float = 60.0,
+    ) -> None:
         self.model = model
         self.key = api_key or os.getenv("OPENAI_API_KEY", "")
-        self.base_url = base_url or os.getenv(
-            "OPENAI_BASE_URL", "https://api.openai.com/v1")
+        self.base_url = base_url or os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
         self.dimensions = dimensions
         self.timeout = timeout
 
@@ -84,8 +99,7 @@ class OpenAIClient(EmbeddingClient):
         if not texts:
             return np.empty((0, 0), dtype=np.float32)
         url = f"{self.base_url}/embeddings"
-        headers = {"Authorization": f"Bearer {self.key}",
-                   "Content-Type": "application/json"}
+        headers = {"Authorization": f"Bearer {self.key}", "Content-Type": "application/json"}
         out: list[list[float]] = []
         with httpx.Client(timeout=self.timeout) as s:
             for chunk in _chunks(texts, batch_size):
@@ -100,7 +114,14 @@ class OpenAIClient(EmbeddingClient):
 
 
 class CohereClient(EmbeddingClient):
-    def __init__(self, model: str = "embed-v4.0", api_key: str | None = None, output_dimension: int | None = None, input_type: str | None = "search_document", timeout: float = 60.0) -> None:
+    def __init__(
+        self,
+        model: str = "embed-v4.0",
+        api_key: str | None = None,
+        output_dimension: int | None = None,
+        input_type: str | None = "search_document",
+        timeout: float = 60.0,
+    ) -> None:
         self.model = model
         self.key = api_key or os.getenv("COHERE_API_KEY", "")
         self.output_dimension = output_dimension
@@ -111,8 +132,7 @@ class CohereClient(EmbeddingClient):
         if not texts:
             return np.empty((0, 0), dtype=np.float32)
         url = "https://api.cohere.com/v2/embed"
-        headers = {"Authorization": f"Bearer {self.key}",
-                   "Content-Type": "application/json"}
+        headers = {"Authorization": f"Bearer {self.key}", "Content-Type": "application/json"}
         out: list[list[float]] = []
         with httpx.Client(timeout=self.timeout) as s:
             for chunk in _chunks(texts, batch_size):
@@ -124,8 +144,9 @@ class CohereClient(EmbeddingClient):
                 r = s.post(url, headers=headers, json=payload)
                 r.raise_for_status()
                 data = r.json()
-                vecs = data.get("embeddings", {}).get("float") or data.get(
-                    "embeddings", {}).get("embeddings")
+                vecs = data.get("embeddings", {}).get("float") or data.get("embeddings", {}).get(
+                    "embeddings"
+                )
                 if vecs is None:
                     vecs = data["embeddings"]
                 out.extend(vecs)
@@ -133,7 +154,14 @@ class CohereClient(EmbeddingClient):
 
 
 class VoyageClient(EmbeddingClient):
-    def __init__(self, model: str = "voyage-3-large", api_key: str | None = None, output_dimension: int | None = None, input_type: str | None = "document", timeout: float = 60.0) -> None:
+    def __init__(
+        self,
+        model: str = "voyage-3-large",
+        api_key: str | None = None,
+        output_dimension: int | None = None,
+        input_type: str | None = "document",
+        timeout: float = 60.0,
+    ) -> None:
         self.model = model
         self.key = api_key or os.getenv("VOYAGE_API_KEY", "")
         self.output_dimension = output_dimension
@@ -144,8 +172,7 @@ class VoyageClient(EmbeddingClient):
         if not texts:
             return np.empty((0, 0), dtype=np.float32)
         url = "https://api.voyageai.com/v1/embeddings"
-        headers = {"Authorization": f"Bearer {self.key}",
-                   "Content-Type": "application/json"}
+        headers = {"Authorization": f"Bearer {self.key}", "Content-Type": "application/json"}
         out: list[list[float]] = []
         with httpx.Client(timeout=self.timeout) as s:
             for chunk in _chunks(texts, batch_size):
@@ -157,13 +184,18 @@ class VoyageClient(EmbeddingClient):
                 r = s.post(url, headers=headers, json=payload)
                 r.raise_for_status()
                 data = r.json()
-                out.extend(data["data"][0]["embeddings"]
-                           if "data" in data and "embeddings" in data["data"][0] else data["embeddings"])
+                out.extend(
+                    data["data"][0]["embeddings"]
+                    if "data" in data and "embeddings" in data["data"][0]
+                    else data["embeddings"]
+                )
         return np.asarray(out, dtype=np.float32)
 
 
 class MistralClient(EmbeddingClient):
-    def __init__(self, model: str = "mistral-embed", api_key: str | None = None, timeout: float = 60.0) -> None:
+    def __init__(
+        self, model: str = "mistral-embed", api_key: str | None = None, timeout: float = 60.0
+    ) -> None:
         self.model = model
         self.key = api_key or os.getenv("MISTRAL_API_KEY", "")
         self.timeout = timeout
@@ -172,8 +204,7 @@ class MistralClient(EmbeddingClient):
         if not texts:
             return np.empty((0, 0), dtype=np.float32)
         url = "https://api.mistral.ai/v1/embeddings"
-        headers = {"Authorization": f"Bearer {self.key}",
-                   "Content-Type": "application/json"}
+        headers = {"Authorization": f"Bearer {self.key}", "Content-Type": "application/json"}
         out: list[list[float]] = []
         with httpx.Client(timeout=self.timeout) as s:
             for chunk in _chunks(texts, batch_size):

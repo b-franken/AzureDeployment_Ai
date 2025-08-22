@@ -17,13 +17,29 @@ from azure.identity import (
 )
 from azure.identity.aio import (
     AzureCliCredential as AzureCliCredentialAsync,
+)
+from azure.identity.aio import (
     AzureDeveloperCliCredential as AzureDeveloperCliCredentialAsync,
+)
+from azure.identity.aio import (
     ChainedTokenCredential as ChainedTokenCredentialAsync,
+)
+from azure.identity.aio import (
     ClientSecretCredential as ClientSecretCredentialAsync,
+)
+from azure.identity.aio import (
     DefaultAzureCredential as DefaultAzureCredentialAsync,
+)
+from azure.identity.aio import (
     DeviceCodeCredential as DeviceCodeCredentialAsync,
+)
+from azure.identity.aio import (
     EnvironmentCredential as EnvironmentCredentialAsync,
+)
+from azure.identity.aio import (
     ManagedIdentityCredential as ManagedIdentityCredentialAsync,
+)
+from azure.identity.aio import (
     WorkloadIdentityCredential as WorkloadIdentityCredentialAsync,
 )
 
@@ -42,11 +58,11 @@ def _setup_environment() -> None:
     if settings.azure.client_id:
         os.environ.setdefault("AZURE_CLIENT_ID", settings.azure.client_id)
     if settings.azure.client_secret:
-        os.environ.setdefault("AZURE_CLIENT_SECRET",
-                              settings.azure.client_secret.get_secret_value())
+        os.environ.setdefault(
+            "AZURE_CLIENT_SECRET", settings.azure.client_secret.get_secret_value()
+        )
     if settings.azure.subscription_id:
-        os.environ.setdefault("AZURE_SUBSCRIPTION_ID",
-                              settings.azure.subscription_id)
+        os.environ.setdefault("AZURE_SUBSCRIPTION_ID", settings.azure.subscription_id)
 
 
 def _authority_host(cfg: AzureConfig) -> str:
@@ -73,7 +89,8 @@ def build_credential(cfg: AzureConfig | None = None, use_cache: bool = True) -> 
         if cfg.auth_mode == "service_principal":
             if not all([cfg.tenant_id, cfg.client_id, cfg.client_secret]):
                 raise ValueError(
-                    "tenant_id, client_id and client_secret are required for service_principal")
+                    "tenant_id, client_id and client_secret are required for service_principal"
+                )
             credential = ClientSecretCredential(
                 tenant_id=cfg.tenant_id,
                 client_id=cfg.client_id,
@@ -81,20 +98,20 @@ def build_credential(cfg: AzureConfig | None = None, use_cache: bool = True) -> 
                 authority=authority,
             )
         elif cfg.auth_mode == "managed_identity":
-            credential = ManagedIdentityCredential(
-                client_id=cfg.user_assigned_identity_client_id)
+            credential = ManagedIdentityCredential(client_id=cfg.user_assigned_identity_client_id)
         elif cfg.auth_mode == "azure_cli":
             credential = AzureCliCredential()
         elif cfg.auth_mode == "device_code":
             if not cfg.tenant_id:
-                raise ValueError(
-                    "tenant_id is required for device_code authentication")
+                raise ValueError("tenant_id is required for device_code authentication")
             credential = DeviceCodeCredential(
-                tenant_id=cfg.tenant_id, client_id=cfg.client_id, authority=authority)
+                tenant_id=cfg.tenant_id, client_id=cfg.client_id, authority=authority
+            )
         elif cfg.auth_mode == "workload_identity":
             if not all([cfg.tenant_id, cfg.client_id, cfg.workload_identity_token_file]):
                 raise ValueError(
-                    "tenant_id, client_id and workload_identity_token_file are required")
+                    "tenant_id, client_id and workload_identity_token_file are required"
+                )
             credential = WorkloadIdentityCredential(
                 tenant_id=cfg.tenant_id,
                 client_id=cfg.client_id,
@@ -122,8 +139,11 @@ def build_credential(cfg: AzureConfig | None = None, use_cache: bool = True) -> 
                 credentials.append(AzureDeveloperCliCredential())
             except Exception:
                 pass
-            credential = ChainedTokenCredential(
-                *credentials) if credentials else DefaultAzureCredential(authority=authority)
+            credential = (
+                ChainedTokenCredential(*credentials)
+                if credentials
+                else DefaultAzureCredential(authority=authority)
+            )
     except Exception:
         credential = DefaultAzureCredential(authority=authority)
     if credential and use_cache:
@@ -131,7 +151,9 @@ def build_credential(cfg: AzureConfig | None = None, use_cache: bool = True) -> 
     return credential
 
 
-async def build_async_credential(cfg: AzureConfig | None = None, use_cache: bool = True) -> AsyncTokenCredential:
+async def build_async_credential(
+    cfg: AzureConfig | None = None, use_cache: bool = True
+) -> AsyncTokenCredential:
     global _ASYNC_CREDENTIAL_CACHE
     if use_cache and _ASYNC_CREDENTIAL_CACHE is not None:
         return _ASYNC_CREDENTIAL_CACHE
@@ -143,7 +165,8 @@ async def build_async_credential(cfg: AzureConfig | None = None, use_cache: bool
         if cfg.auth_mode == "service_principal":
             if not all([cfg.tenant_id, cfg.client_id, cfg.client_secret]):
                 raise ValueError(
-                    "tenant_id, client_id and client_secret are required for service_principal")
+                    "tenant_id, client_id and client_secret are required for service_principal"
+                )
             credential = ClientSecretCredentialAsync(
                 tenant_id=cfg.tenant_id,
                 client_id=cfg.client_id,
@@ -152,19 +175,21 @@ async def build_async_credential(cfg: AzureConfig | None = None, use_cache: bool
             )
         elif cfg.auth_mode == "managed_identity":
             credential = ManagedIdentityCredentialAsync(
-                client_id=cfg.user_assigned_identity_client_id)
+                client_id=cfg.user_assigned_identity_client_id
+            )
         elif cfg.auth_mode == "azure_cli":
             credential = AzureCliCredentialAsync()
         elif cfg.auth_mode == "device_code":
             if not cfg.tenant_id:
-                raise ValueError(
-                    "tenant_id is required for device_code authentication")
+                raise ValueError("tenant_id is required for device_code authentication")
             credential = DeviceCodeCredentialAsync(
-                tenant_id=cfg.tenant_id, client_id=cfg.client_id, authority=authority)
+                tenant_id=cfg.tenant_id, client_id=cfg.client_id, authority=authority
+            )
         elif cfg.auth_mode == "workload_identity":
             if not all([cfg.tenant_id, cfg.client_id, cfg.workload_identity_token_file]):
                 raise ValueError(
-                    "tenant_id, client_id and workload_identity_token_file are required")
+                    "tenant_id, client_id and workload_identity_token_file are required"
+                )
             credential = WorkloadIdentityCredentialAsync(
                 tenant_id=cfg.tenant_id,
                 client_id=cfg.client_id,
@@ -176,8 +201,7 @@ async def build_async_credential(cfg: AzureConfig | None = None, use_cache: bool
         else:
             credentials = []
             try:
-                credentials.append(
-                    EnvironmentCredentialAsync(authority=authority))
+                credentials.append(EnvironmentCredentialAsync(authority=authority))
             except Exception:
                 pass
             try:
@@ -193,8 +217,11 @@ async def build_async_credential(cfg: AzureConfig | None = None, use_cache: bool
                 credentials.append(AzureDeveloperCliCredentialAsync())
             except Exception:
                 pass
-            credential = ChainedTokenCredentialAsync(
-                *credentials) if credentials else DefaultAzureCredentialAsync(authority=authority)
+            credential = (
+                ChainedTokenCredentialAsync(*credentials)
+                if credentials
+                else DefaultAzureCredentialAsync(authority=authority)
+            )
     except Exception:
         credential = DefaultAzureCredentialAsync(authority=authority)
     if credential and use_cache:

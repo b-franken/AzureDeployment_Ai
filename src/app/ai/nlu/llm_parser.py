@@ -4,7 +4,7 @@ import json
 from typing import Any
 
 from app.ai.llm.factory import get_provider_and_model
-from app.ai.nlu.unified_parser import UnifiedParseResult, DeploymentIntent, unified_nlu_parser
+from app.ai.nlu.unified_parser import DeploymentIntent, UnifiedParseResult, unified_nlu_parser
 
 SYSTEM_PROMPT = (
     "You are a DevOps assistant. Convert free text into an intent for provisioning."
@@ -27,7 +27,9 @@ def _tools() -> list[dict[str, Any]]:
         "additionalProperties": False,
     }
 
-    def tool(name: str, extra: dict[str, Any] | None = None, required: list[str] | None = None) -> dict[str, Any]:
+    def tool(
+        name: str, extra: dict[str, Any] | None = None, required: list[str] | None = None
+    ) -> dict[str, Any]:
         base = json.loads(json.dumps(common_fields))
         if extra:
             base["properties"].update(extra)
@@ -96,7 +98,10 @@ def _tools() -> list[dict[str, Any]]:
                     "type": "array",
                     "items": {
                         "type": "object",
-                        "properties": {"name": {"type": "string"}, "address_prefix": {"type": "string"}},
+                        "properties": {
+                            "name": {"type": "string"},
+                            "address_prefix": {"type": "string"},
+                        },
                         "required": ["name", "address_prefix"],
                         "additionalProperties": False,
                     },
@@ -135,14 +140,18 @@ def _pick_args(raw: Any) -> dict[str, Any]:
     return {}
 
 
-async def parse_with_llm(text: str, provider: str | None = None, model: str | None = None) -> UnifiedParseResult:
+async def parse_with_llm(
+    text: str, provider: str | None = None, model: str | None = None
+) -> UnifiedParseResult:
     llm, selected = await get_provider_and_model(provider, model)
     tools = _tools()
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": text},
     ]
-    resp = await llm.chat_raw(model=selected, messages=messages, tools=tools, tool_choice="auto", temperature=0)
+    resp = await llm.chat_raw(
+        model=selected, messages=messages, tools=tools, tool_choice="auto", temperature=0
+    )
     choices = resp.get("choices") or []
     if not choices:
         base = unified_nlu_parser(use_embeddings=True).parse(text)

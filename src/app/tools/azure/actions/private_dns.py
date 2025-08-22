@@ -1,9 +1,13 @@
 from __future__ import annotations
+
 import logging
 from collections.abc import Callable
 from typing import Any
-from app.common.async_pool import bounded_gather
+
 from azure.core.exceptions import HttpResponseError
+
+from app.common.async_pool import bounded_gather
+
 from ..clients import Clients
 from ..validators import validate_name
 
@@ -78,8 +82,7 @@ async def link_private_dns_zone(
             "vnet": f"{vnet_resource_group}/{vnet_name}",
             "registration_enabled": bool(registration_enabled),
         }
-    vnet_coro = clients.run(
-        clients.net.virtual_networks.get, vnet_resource_group, vnet_name)
+    vnet_coro = clients.run(clients.net.virtual_networks.get, vnet_resource_group, vnet_name)
     link_coro = _safe_get(
         clients.pdns.virtual_network_links.get,
         resource_group,

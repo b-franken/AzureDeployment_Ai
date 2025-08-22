@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from collections.abc import AsyncIterator
 from datetime import datetime, timedelta
 from typing import Any, Literal, cast
 
@@ -172,7 +171,7 @@ class MCPServer:
         async def stream_logs(
             deployment_id: str,
             context: Context,
-        ) -> AsyncIterator[str]:
+        ) -> Any:
             async for log_line in self.streaming_handler.stream_logs(deployment_id):
                 yield log_line
 

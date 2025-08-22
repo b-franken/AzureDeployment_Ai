@@ -3,14 +3,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date as date_type
 from datetime import datetime, timedelta
+from statistics import NormalDist
 from typing import Any, TypedDict
 
 import numpy as np
-from scipy import stats
+from numpy.typing import NDArray
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import PolynomialFeatures
 
 from app.tools.finops.cost_ingestion import CostIngestionService
+
+
+def _z_score(confidence_level: float) -> float:
+    return float(NormalDist().inv_cdf((1.0 + confidence_level) / 2.0))
 
 
 @dataclass
@@ -74,14 +79,14 @@ class ForecastingService:
         include_seasonality: bool = True,
     ) -> CostForecast:
         historical_data = await self._get_historical_data(subscription_id, days=90)
-
         if not historical_data:
             return self._create_default_forecast(forecast_days)
 
         dates = [d["date"] for d in historical_data]
         costs = [d["cost"] for d in historical_data]
 
-        X = np.array([(d - dates[0]).days for d in dates]).reshape(-1, 1)
+        X = np.array([(d - dates[0]).days for d in dates],
+                     dtype=float).reshape(-1, 1)
         y = np.array(costs, dtype=float)
 
         if include_seasonality:
@@ -91,17 +96,18 @@ class ForecastingService:
             model, accuracy = self._fit_trend_model(X, y)
             seasonality = False
 
-        future_X = np.array(range(len(dates), len(dates) + forecast_days)).reshape(-1, 1)
+        future_X = np.arange(len(dates), len(dates) +
+                             forecast_days, dtype=float).reshape(-1, 1)
         predictions = model.predict(future_X)
-
         residuals = y - model.predict(X)
-        std_error = float(np.std(residuals)) if residuals.size > 0 else 0.0
-        z_score = float(stats.norm.ppf((1 + confidence_level) / 2))
-        margin = z_score * std_error
+        std_error = float(np.std(residuals, ddof=1)
+                          ) if residuals.size > 1 else 0.0
+        margin = _z_score(confidence_level) * std_error * \
+            float(np.sqrt(forecast_days))
 
         total_predicted = float(np.sum(predictions))
-        lower_bound = float(total_predicted - margin * forecast_days)
-        upper_bound = float(total_predicted + margin * forecast_days)
+        lower_bound = float(total_predicted - margin)
+        upper_bound = float(total_predicted + margin)
 
         trend = self._determine_trend(predictions)
         anomalies = await self._detect_anomalies(historical_data, model, X)
@@ -126,48 +132,50 @@ class ForecastingService:
         sensitivity: float = 2.0,
     ) -> list[AnomalyDetection]:
         historical_data = await self._get_historical_data(subscription_id, days=lookback_days)
-
         if len(historical_data) < 7:
             return []
 
         dates = [d["date"] for d in historical_data]
         costs = [d["cost"] for d in historical_data]
 
-        X = np.array([(d - dates[0]).days for d in dates]).reshape(-1, 1)
+        X = np.array([(d - dates[0]).days for d in dates],
+                     dtype=float).reshape(-1, 1)
         y = np.array(costs, dtype=float)
 
         model, _ = self._fit_trend_model(X, y)
         predictions = model.predict(X)
 
         residuals = y - predictions
-        std_residual = float(np.std(residuals))
-        mean_residual = float(np.mean(residuals))
-
-        # If there is no variance, nothing is anomalous relative to the trend line.
+        std_residual = float(np.std(residuals, ddof=1)
+                             ) if residuals.size > 1 else 0.0
+        mean_residual = float(
+            np.mean(residuals)) if residuals.size > 0 else 0.0
         if std_residual == 0.0:
             return []
 
         anomalies: list[AnomalyDetection] = []
         for idx, (ts, actual, expected) in enumerate(zip(dates, costs, predictions, strict=False)):
-            z_score = abs((float(actual) - float(expected) - mean_residual) / std_residual)
-            if z_score > sensitivity:
+            z = abs((float(actual) - float(expected) -
+                    mean_residual) / std_residual)
+            if z > sensitivity:
                 deviation = (
-                    ((float(actual) - float(expected)) / float(expected)) * 100
+                    ((float(actual) - float(expected)) / float(expected)) * 100.0
                     if expected != 0
                     else 0.0
                 )
-                anomaly = AnomalyDetection(
-                    index=idx,
-                    timestamp=ts,
-                    actual_value=float(actual),
-                    expected_value=float(expected),
-                    deviation_percentage=float(deviation),
-                    severity=self._classify_severity(z_score),
-                    probable_cause=await self._identify_probable_cause(
-                        subscription_id, ts, deviation
-                    ),
+                anomalies.append(
+                    AnomalyDetection(
+                        index=idx,
+                        timestamp=ts,
+                        actual_value=float(actual),
+                        expected_value=float(expected),
+                        deviation_percentage=float(deviation),
+                        severity=self._classify_severity(z),
+                        probable_cause=await self._identify_probable_cause(
+                            subscription_id, ts, deviation
+                        ),
+                    )
                 )
-                anomalies.append(anomaly)
 
         return anomalies
 
@@ -178,8 +186,8 @@ class ForecastingService:
     ) -> dict[str, Any]:
         current_month_cost = await self._get_current_month_cost(subscription_id)
         forecast = await self.forecast_costs(subscription_id, forecast_days=30)
-
-        target_budget = current_month_cost * (1 - target_reduction_percentage / 100)
+        target_budget = current_month_cost * \
+            (1 - target_reduction_percentage / 100.0)
 
         recommendations: dict[str, Any] = {
             "current_monthly_cost": current_month_cost,
@@ -187,20 +195,22 @@ class ForecastingService:
             "recommended_budget": target_budget,
             "confidence_level": forecast.confidence_level,
             "budget_thresholds": [
-                {"percentage": 50, "action": "notification", "recipients": ["finance_team"]},
+                {"percentage": 50, "action": "notification",
+                    "recipients": ["finance_team"]},
                 {
                     "percentage": 75,
                     "action": "alert",
                     "recipients": ["finance_team", "engineering_leads"],
                 },
-                {"percentage": 90, "action": "critical_alert", "recipients": ["all_stakeholders"]},
-                {"percentage": 100, "action": "cost_controls", "recipients": ["executives"]},
+                {"percentage": 90, "action": "critical_alert",
+                    "recipients": ["all_stakeholders"]},
+                {"percentage": 100, "action": "cost_controls",
+                    "recipients": ["executives"]},
             ],
             "cost_reduction_strategies": await self._identify_reduction_strategies(
                 subscription_id, target_reduction_percentage
             ),
         }
-
         return recommendations
 
     async def predict_cost_impact(
@@ -220,23 +230,21 @@ class ForecastingService:
             resource_type = str(change["resource_type"])
             action = str(change["action"])
             quantity = int(change.get("quantity", 1))
-
-            # type: ignore[arg-type]
             unit_cost = await self._get_resource_unit_cost(resource_type, change.get("sku"))
 
             if action == "add":
-                monthly_impact = unit_cost * quantity * 30
+                monthly_impact = unit_cost * quantity * 30.0
                 old_cost = 0.0
                 new_cost = monthly_impact
             elif action == "remove":
-                monthly_impact = -unit_cost * quantity * 30
+                monthly_impact = -unit_cost * quantity * 30.0
                 old_cost = -monthly_impact
                 new_cost = 0.0
             elif action == "modify":
-                old_cost = unit_cost * quantity * 30
+                old_cost = unit_cost * quantity * 30.0
                 new_sku = change.get("new_sku")
                 new_unit_cost = await self._get_resource_unit_cost(resource_type, new_sku)
-                new_cost = new_unit_cost * quantity * 30
+                new_cost = new_unit_cost * quantity * 30.0
                 monthly_impact = new_cost - old_cost
             else:
                 monthly_impact = 0.0
@@ -250,17 +258,18 @@ class ForecastingService:
                     old_monthly_cost=float(old_cost),
                     new_monthly_cost=float(new_cost),
                     monthly_impact=float(monthly_impact),
-                    annual_impact=float(monthly_impact * 12),
+                    annual_impact=float(monthly_impact * 12.0),
                 )
             )
-
-            draft["total_impact"] = float(draft["total_impact"]) + float(monthly_impact)
+            draft["total_impact"] = float(
+                draft["total_impact"]) + float(monthly_impact)
 
         current_monthly_cost = float(draft["current_monthly_cost"])
         total_impact = float(draft["total_impact"])
         predicted_monthly_cost = current_monthly_cost + total_impact
         percentage_change = (
-            (total_impact / current_monthly_cost) * 100 if current_monthly_cost > 0 else 0.0
+            (total_impact / current_monthly_cost) *
+            100.0 if current_monthly_cost > 0.0 else 0.0
         )
 
         result: ImpactAnalysisDict = {
@@ -270,17 +279,16 @@ class ForecastingService:
             "predicted_monthly_cost": predicted_monthly_cost,
             "percentage_change": percentage_change,
         }
-
         return result
 
-    def _fit_trend_model(self, X: np.ndarray, y: np.ndarray) -> tuple[LinearRegression, float]:
+    def _fit_trend_model(self, X: NDArray[np.floating], y: NDArray[np.floating]) -> tuple[LinearRegression, float]:
         model = LinearRegression()
         model.fit(X, y)
         r2_score = float(model.score(X, y))
         return model, r2_score
 
     def _fit_seasonal_model(
-        self, X: np.ndarray, y: np.ndarray
+        self, X: NDArray[np.floating], y: NDArray[np.floating]
     ) -> tuple[SeasonalModelWrapper, float]:
         poly_features = PolynomialFeatures(degree=3)
         X_poly = poly_features.fit_transform(X)
@@ -290,7 +298,7 @@ class ForecastingService:
         wrapped_model = SeasonalModelWrapper(model, poly_features)
         return wrapped_model, r2_score
 
-    def _detect_seasonality(self, y: np.ndarray) -> bool:
+    def _detect_seasonality(self, y: NDArray[np.floating]) -> bool:
         if len(y) < 14:
             return False
         weekly_pattern: list[float] = []
@@ -299,44 +307,45 @@ class ForecastingService:
             if len(daily_values) > 1:
                 weekly_pattern.append(float(np.mean(daily_values)))
         if len(weekly_pattern) >= 7:
-            pattern_variance = float(np.var(weekly_pattern))
-            total_variance = float(np.var(y))
-            return pattern_variance / total_variance > 0.1 if total_variance > 0 else False
+            pattern_variance = float(np.var(weekly_pattern, ddof=0))
+            total_variance = float(np.var(y, ddof=0))
+            return pattern_variance / total_variance > 0.1 if total_variance > 0.0 else False
         return False
 
-    def _determine_trend(self, predictions: np.ndarray) -> str:
+    def _determine_trend(self, predictions: NDArray[np.floating]) -> str:
         if len(predictions) < 2:
             return "stable"
         first_week = (
-            float(np.mean(predictions[:7])) if len(predictions) >= 7 else float(predictions[0])
+            float(np.mean(predictions[:7])) if len(
+                predictions) >= 7 else float(predictions[0])
         )
         last_week = (
-            float(np.mean(predictions[-7:])) if len(predictions) >= 7 else float(predictions[-1])
+            float(
+                np.mean(predictions[-7:])) if len(predictions) >= 7 else float(predictions[-1])
         )
-        change_percentage = ((last_week - first_week) / first_week) * 100 if first_week > 0 else 0.0
-        if change_percentage > 5:
+        change_percentage = ((last_week - first_week) /
+                             first_week) * 100.0 if first_week > 0.0 else 0.0
+        if change_percentage > 5.0:
             return "increasing"
-        elif change_percentage < -5:
+        if change_percentage < -5.0:
             return "decreasing"
-        else:
-            return "stable"
+        return "stable"
 
     async def _detect_anomalies(
         self,
         historical_data: list[dict[str, Any]],
         model: Any,
-        X: np.ndarray,
+        X: NDArray[np.floating],
     ) -> list[dict[str, Any]]:
         if not historical_data:
             return []
         predictions = model.predict(X)
         anomalies: list[dict[str, Any]] = []
-        for idx, (data_point, prediction) in enumerate(
-            zip(historical_data, predictions, strict=False)
-        ):
+        for idx, (data_point, prediction) in enumerate(zip(historical_data, predictions, strict=False)):
             actual = float(data_point["cost"])
             pred_val = float(prediction)
-            deviation = abs(actual - pred_val) / pred_val if pred_val > 0 else 0.0
+            deviation = abs(actual - pred_val) / \
+                pred_val if pred_val > 0.0 else 0.0
             if deviation > 0.3:
                 anomalies.append(
                     {
@@ -344,21 +353,20 @@ class ForecastingService:
                         "date": data_point["date"].isoformat(),
                         "actual_cost": actual,
                         "expected_cost": pred_val,
-                        "deviation_percentage": deviation * 100,
+                        "deviation_percentage": deviation * 100.0,
                         "severity": "high" if deviation > 0.5 else "medium",
                     }
                 )
         return anomalies
 
-    def _classify_severity(self, z_score: float) -> str:
-        if z_score > 4:
+    def _classify_severity(self, z_score_value: float) -> str:
+        if z_score_value > 4.0:
             return "critical"
-        elif z_score > 3:
+        if z_score_value > 3.0:
             return "high"
-        elif z_score > 2:
+        if z_score_value > 2.0:
             return "medium"
-        else:
-            return "low"
+        return "low"
 
     async def _identify_probable_cause(
         self,
@@ -366,15 +374,13 @@ class ForecastingService:
         ts: datetime,
         deviation: float,
     ) -> str:
-        # Placeholder heuristic while keeping signature stable
-        if deviation > 50:
+        if deviation > 50.0:
             return "Major resource deployment or scaling event"
-        elif deviation > 20:
+        if deviation > 20.0:
             return "Increased usage or new service activation"
-        elif deviation < -20:
+        if deviation < -20.0:
             return "Resource decommissioning or optimization applied"
-        else:
-            return "Normal variation or minor configuration change"
+        return "Normal variation or minor configuration change"
 
     async def _get_historical_data(
         self,
@@ -406,7 +412,8 @@ class ForecastingService:
 
     async def _get_current_month_cost(self, subscription_id: str) -> float:
         now = datetime.utcnow()
-        start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        start_date = now.replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0)
         scope = f"/subscriptions/{subscription_id}"
         usage_data = await self.cost_ingestion.get_usage_details(
             scope,
@@ -421,7 +428,8 @@ class ForecastingService:
         subscription_id: str,
     ) -> dict[str, float]:
         now = datetime.utcnow()
-        start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        start_date = now.replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0)
         scope = f"/subscriptions/{subscription_id}"
         usage_data = await self.cost_ingestion.get_usage_details(
             scope,
@@ -434,7 +442,8 @@ class ForecastingService:
         for item in usage_data:
             resource_type = str(item.get("ResourceType", "Unknown"))
             cost = float(item.get("Cost", 0))
-            costs_by_type[resource_type] = costs_by_type.get(resource_type, 0.0) + cost
+            costs_by_type[resource_type] = costs_by_type.get(
+                resource_type, 0.0) + cost
         return costs_by_type
 
     async def _identify_reduction_strategies(
@@ -445,9 +454,9 @@ class ForecastingService:
         from app.tools.finops.optimization import OptimizationService, OptimizationStrategy
 
         optimizer = OptimizationService()
-        if target_percentage > 20:
+        if target_percentage > 20.0:
             strategy = OptimizationStrategy.AGGRESSIVE
-        elif target_percentage > 10:
+        elif target_percentage > 10.0:
             strategy = OptimizationStrategy.BALANCED
         else:
             strategy = OptimizationStrategy.CONSERVATIVE
@@ -457,7 +466,7 @@ class ForecastingService:
         strategies: list[dict[str, Any]] = []
         cumulative_savings = 0.0
         current_monthly_cost = await self._get_current_month_cost(subscription_id)
-        target_savings = current_monthly_cost * (target_percentage / 100)
+        target_savings = current_monthly_cost * (target_percentage / 100.0)
         for rec in recommendations:
             if cumulative_savings >= target_savings:
                 break
@@ -538,6 +547,6 @@ class SeasonalModelWrapper:
         self.model = model
         self.poly_features = poly_features
 
-    def predict(self, X: np.ndarray) -> np.ndarray:
+    def predict(self, X: NDArray[np.floating]) -> NDArray[np.floating]:
         X_poly = self.poly_features.transform(X)
         return self.model.predict(X_poly)

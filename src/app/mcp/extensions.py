@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, TypedDict, cast
+from typing import Any, TypedDict, cast, TYPE_CHECKING
 
 from mcp.server.fastmcp import Context
 
-from app.mcp.server import MCPServer
+if TYPE_CHECKING:
+    from app.mcp.server import MCPServer
+
 from app.tools.azure.clients import get_clients
 from app.tools.provision.orchestrator import ProvisionOrchestrator
 

@@ -16,7 +16,7 @@ def test_cache_manager_async_context_manages_lifecycle() -> None:
             with patch("app.cache.redis_cache.redis.Redis", return_value=fake_client):
                 cache = await get_cache()
 
-                    assert cache._client is fake_client
+                assert cache._client is fake_client
 
     asyncio.run(run())
     fake_client.close.assert_awaited_once()

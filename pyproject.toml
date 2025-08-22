@@ -82,6 +82,8 @@ dependencies = [
   "opentelemetry-instrumentation-redis",
   "psycopg[binary]>=3.2",
   "psycopg_pool",
+  "jsonschema",
+  "scikit-learn",
 
 
 ]
@@ -102,7 +104,8 @@ dev = [
   "coverage>=7.6.0",
   "build>=1.2.1",
   "wheel>=0.43.0",
-  "pip>=24.0"
+  "pip>=24.0",
+  "scipy",
 ]
 nlp = [
   "torch",

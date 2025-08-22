@@ -5,7 +5,7 @@ import json
 import re
 from collections.abc import AsyncIterator
 from datetime import datetime, timedelta
-from typing import Any, Literal, Protocol, cast
+from typing import Any, Literal, cast
 
 from azure.identity import AzureCliCredential, ChainedTokenCredential, ManagedIdentityCredential
 from azure.mgmt.resourcegraph import ResourceGraphClient
@@ -19,49 +19,9 @@ from app.mcp.tools.what_if import register as register_what_if
 from app.platform.audit.logger import AuditLogger
 from app.tools.registry import ensure_tools_loaded, list_tools
 from app.core.streams import StreamingHandler
-
+from app.mcp.schemas import AzureQueryParams, DeploymentRequest, ToolExecutionRequest
 
 from .resources import ResourceManager
-
-
-class ToolExecutionRequest(Protocol):
-    tool_name: str
-    input_text: str
-    memory: Any
-    provider: str | None
-    model: str | None
-    subscription_id: str | None
-    resource_group: str | None
-    environment: str | None
-    correlation_id: str | None
-    audit_enabled: bool
-    cost_limit: float | None
-    dry_run: bool
-    cache_ttl: int
-    force_refresh: bool
-
-    def get_cache_key(self) -> str: ...
-
-
-class DeploymentRequest(Protocol):
-    deployment_id: str
-    resources: list[dict[str, Any]]
-    validate_only: bool
-    require_approval: bool
-    approval_token: str | None
-    continue_on_error: bool
-
-
-class AzureQueryParams(Protocol):
-    kql: str
-    subscriptions: list[str] | None
-    top: int | None
-    skip: int | None
-    skip_token: str | None
-    cache_ttl: int
-    force_refresh: bool
-
-    def get_cache_key(self) -> str: ...
 
 
 class MCPServer:

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-import uuid
 import logging
+import uuid
 from typing import Any
 
 import httpx
-from azure.core.credentials import TokenCredential, AccessToken
+from azure.core.credentials import AccessToken, TokenCredential
 from azure.core.credentials_async import AsyncTokenCredential
 from azure.core.exceptions import HttpResponseError
 
@@ -37,8 +37,7 @@ async def create_service_principal(
     except Exception as exc:
         logger.error("Failed to acquire Graph token: %s", str(exc))
         return "error", {"message": "failed to acquire graph token"}
-    headers = {"Authorization": f"Bearer {token}",
-               "Content-Type": "application/json"}
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     try:
         async with httpx.AsyncClient(timeout=120) as client:
             app_res = await client.post(
@@ -125,8 +124,7 @@ async def assign_role(
         logger.error("Role assignment list failed: %s", exc.message)
         return "error", {"code": exc.status_code, "message": exc.message}
     for ra in existing:
-        rid = ra.properties.role_definition_id if getattr(
-            ra, "properties", None) else None
+        rid = ra.properties.role_definition_id if getattr(ra, "properties", None) else None
         if rid and rid.endswith(role_id.split("/")[-1]):
             return "exists", ra.as_dict()
     assign_id = str(uuid.uuid4())

@@ -22,7 +22,9 @@ class _AsyncToSyncCredential(TokenCredential):
         loop = asyncio.new_event_loop()
         try:
             asyncio.set_event_loop(loop)
-            return cast(AccessToken, loop.run_until_complete(self._async_cred.get_token(*scopes, **kwargs)))
+            return cast(
+                AccessToken, loop.run_until_complete(self._async_cred.get_token(*scopes, **kwargs))
+            )
         finally:
             loop.close()
 

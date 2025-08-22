@@ -25,7 +25,9 @@ class _AsyncToSyncCredential(TokenCredential):
         loop = asyncio.new_event_loop()
         try:
             asyncio.set_event_loop(loop)
-            return cast(AccessToken, loop.run_until_complete(self._async_cred.get_token(*scopes, **kwargs)))
+            return cast(
+                AccessToken, loop.run_until_complete(self._async_cred.get_token(*scopes, **kwargs))
+            )
         finally:
             loop.close()
 
@@ -85,8 +87,7 @@ async def create_keyvault(
         enable_rbac_authorization=bool(enable_rbac),
         enable_purge_protection=True,
     )
-    params = VaultCreateOrUpdateParameters(
-        location=location, properties=props, tags=tags or {})
+    params = VaultCreateOrUpdateParameters(location=location, properties=props, tags=tags or {})
     poller = await clients.run(
         clients.kv.vaults.begin_create_or_update, resource_group, vault_name, params
     )

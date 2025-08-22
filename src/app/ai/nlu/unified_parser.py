@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
@@ -114,6 +114,12 @@ def _to_scores_list(x):
     if isinstance(x, list):
         return x[0] if x and isinstance(x[0], list) else x
     return []
+
+
+def safe_literal_search(haystack: str, needle: str) -> bool:
+    if not needle:
+        return False
+    return re.compile(re.escape(needle), re.IGNORECASE).search(haystack) is not None
 
 
 class unified_nlu_parser:
@@ -334,8 +340,10 @@ class unified_nlu_parser:
                 if m and m.groups():
                     return m.group(m.lastindex or 1)
         for p in [
-            re.compile(r"(?:named|called|name)\s+([a-z0-9][\w-]{2,79})", re.IGNORECASE),
-            re.compile(r"([a-z0-9][\w-]{2,79})\s+(?:in|for|at)", re.IGNORECASE),
+            re.compile(
+                r"(?:named|called|name)\s+([a-z0-9][\w-]{2,79})", re.IGNORECASE),
+            re.compile(
+                r"([a-z0-9][\w-]{2,79})\s+(?:in|for|at)", re.IGNORECASE),
         ]:
             m = p.search(text)
             if m:
@@ -351,9 +359,11 @@ class unified_nlu_parser:
                 params["location"] = loc
                 break
         for p in [
-            re.compile(r"resource\s+group\s+([a-z0-9][\w-]{0,89})", re.IGNORECASE),
+            re.compile(
+                r"resource\s+group\s+([a-z0-9][\w-]{0,89})", re.IGNORECASE),
             re.compile(r"rg\s+([a-z0-9][\w-]{0,89})", re.IGNORECASE),
-            re.compile(r"in\s+(?:resource\s+group|rg)\s+([a-z0-9][\w-]{0,89})", re.IGNORECASE),
+            re.compile(
+                r"in\s+(?:resource\s+group|rg)\s+([a-z0-9][\w-]{0,89})", re.IGNORECASE),
         ]:
             m = p.search(text)
             if m:
@@ -364,13 +374,14 @@ class unified_nlu_parser:
         ).search(text)
         if m:
             params["environment"] = m.group(1).lower()
-        m = re.compile(r"(?:sku|tier|size)\s+([a-z0-9_]+)", re.IGNORECASE).search(text)
+        m = re.compile(
+            r"(?:sku|tier|size)\s+([a-z0-9_]+)", re.IGNORECASE).search(text)
         if m:
             params["sku"] = m.group(1).upper()
         if rtype == "storage":
-            if "cool" in text:
+            if safe_literal_search(text, "cool"):
                 params["access_tier"] = "Cool"
-            elif "hot" in text:
+            elif safe_literal_search(text, "hot"):
                 params["access_tier"] = "Hot"
         return params
 
@@ -383,12 +394,12 @@ class unified_nlu_parser:
             "tags": {
                 "environment": params.get("environment", "dev"),
                 "managed_by": "devops-ai",
-                "created_date": datetime.utcnow().isoformat(),
+                "created_date": datetime.now(timezone.utc).isoformat(),
             },
         }
-        if "high availability" in text or "ha" in text:
+        if safe_literal_search(text, "high availability") or safe_literal_search(text, "ha"):
             ctx["high_availability"] = True
-        if "disaster recovery" in text or "dr" in text:
+        if safe_literal_search(text, "disaster recovery") or safe_literal_search(text, "dr"):
             ctx["disaster_recovery"] = True
         return ctx
 

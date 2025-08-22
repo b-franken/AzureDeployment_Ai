@@ -6,7 +6,7 @@ import os
 from collections.abc import Sequence
 from typing import Any
 
-from azure.core.credentials import TokenCredential
+from azure.core.credentials import AccessToken, TokenCredential
 from azure.core.credentials_async import AsyncTokenCredential
 from azure.identity import (
     AzureCliCredential,
@@ -19,30 +19,14 @@ from azure.identity import (
     ManagedIdentityCredential,
     WorkloadIdentityCredential,
 )
-from azure.identity.aio import (
-    AzureCliCredential as AzureCliCredentialAsync,
-)
-from azure.identity.aio import (
-    AzureDeveloperCliCredential as AzureDeveloperCliCredentialAsync,
-)
-from azure.identity.aio import (
-    ChainedTokenCredential as ChainedTokenCredentialAsync,
-)
-from azure.identity.aio import (
-    ClientSecretCredential as ClientSecretCredentialAsync,
-)
-from azure.identity.aio import (
-    DefaultAzureCredential as DefaultAzureCredentialAsync,
-)
-from azure.identity.aio import (
-    EnvironmentCredential as EnvironmentCredentialAsync,
-)
-from azure.identity.aio import (
-    ManagedIdentityCredential as ManagedIdentityCredentialAsync,
-)
-from azure.identity.aio import (
-    WorkloadIdentityCredential as WorkloadIdentityCredentialAsync,
-)
+from azure.identity.aio import AzureCliCredential as AzureCliCredentialAsync
+from azure.identity.aio import AzureDeveloperCliCredential as AzureDeveloperCliCredentialAsync
+from azure.identity.aio import ChainedTokenCredential as ChainedTokenCredentialAsync
+from azure.identity.aio import ClientSecretCredential as ClientSecretCredentialAsync
+from azure.identity.aio import DefaultAzureCredential as DefaultAzureCredentialAsync
+from azure.identity.aio import EnvironmentCredential as EnvironmentCredentialAsync
+from azure.identity.aio import ManagedIdentityCredential as ManagedIdentityCredentialAsync
+from azure.identity.aio import WorkloadIdentityCredential as WorkloadIdentityCredentialAsync
 
 from app.core.config import AzureConfig, settings
 
@@ -57,7 +41,14 @@ class _SyncToAsyncCredential(AsyncTokenCredential):
     def __init__(self, sync_cred: TokenCredential) -> None:
         self._sync_cred = sync_cred
 
-    async def get_token(self, *scopes: str, **kwargs: Any):
+    async def __aenter__(self) -> _SyncToAsyncCredential:
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> bool:
+        await self.aclose()
+        return False
+
+    async def get_token(self, *scopes: str, **kwargs: Any) -> AccessToken:
         return await asyncio.to_thread(self._sync_cred.get_token, *scopes, **kwargs)
 
     async def close(self) -> None:
@@ -122,7 +113,9 @@ def build_credential(cfg: AzureConfig | None = None, use_cache: bool = True) -> 
             if not cfg.tenant_id:
                 raise ValueError("tenant_id is required for device_code authentication")
             credential = DeviceCodeCredential(
-                tenant_id=cfg.tenant_id, client_id=cfg.client_id, authority=authority
+                tenant_id=cfg.tenant_id,
+                client_id=cfg.client_id,
+                authority=authority,
             )
         elif cfg.auth_mode == "workload_identity":
             if not all([cfg.tenant_id, cfg.client_id, cfg.workload_identity_token_file]):
@@ -138,30 +131,31 @@ def build_credential(cfg: AzureConfig | None = None, use_cache: bool = True) -> 
         elif cfg.auth_mode == "environment":
             credential = EnvironmentCredential(authority=authority)
         else:
-            credentials = []
+            credentials: list[TokenCredential] = []
             try:
                 credentials.append(EnvironmentCredential(authority=authority))
             except Exception:
-                pass
+                logger.debug("EnvironmentCredential unavailable", exc_info=True)
             try:
                 credentials.append(ManagedIdentityCredential())
             except Exception:
-                pass
+                logger.debug("ManagedIdentityCredential unavailable", exc_info=True)
             if cfg.enable_cli_fallback:
                 try:
                     credentials.append(AzureCliCredential())
                 except Exception:
-                    pass
+                    logger.debug("AzureCliCredential unavailable", exc_info=True)
             try:
                 credentials.append(AzureDeveloperCliCredential())
             except Exception:
-                pass
+                logger.debug("AzureDeveloperCliCredential unavailable", exc_info=True)
             credential = (
                 ChainedTokenCredential(*credentials)
                 if credentials
                 else DefaultAzureCredential(authority=authority)
             )
     except Exception:
+        logger.exception("Falling back to DefaultAzureCredential")
         credential = DefaultAzureCredential(authority=authority)
     if credential and use_cache:
         _CREDENTIAL_CACHE = credential
@@ -200,7 +194,9 @@ async def build_async_credential(
             if not cfg.tenant_id:
                 raise ValueError("tenant_id is required for device_code authentication")
             sync_dc = DeviceCodeCredential(
-                tenant_id=cfg.tenant_id, client_id=cfg.client_id, authority=authority
+                tenant_id=cfg.tenant_id,
+                client_id=cfg.client_id,
+                authority=authority,
             )
             credential = _SyncToAsyncCredential(sync_dc)
         elif cfg.auth_mode == "workload_identity":
@@ -217,30 +213,31 @@ async def build_async_credential(
         elif cfg.auth_mode == "environment":
             credential = EnvironmentCredentialAsync(authority=authority)
         else:
-            credentials = []
+            credentials: list[AsyncTokenCredential] = []
             try:
                 credentials.append(EnvironmentCredentialAsync(authority=authority))
             except Exception:
-                pass
+                logger.debug("EnvironmentCredentialAsync unavailable", exc_info=True)
             try:
                 credentials.append(ManagedIdentityCredentialAsync())
             except Exception:
-                pass
+                logger.debug("ManagedIdentityCredentialAsync unavailable", exc_info=True)
             if cfg.enable_cli_fallback:
                 try:
                     credentials.append(AzureCliCredentialAsync())
                 except Exception:
-                    pass
+                    logger.debug("AzureCliCredentialAsync unavailable", exc_info=True)
             try:
                 credentials.append(AzureDeveloperCliCredentialAsync())
             except Exception:
-                pass
+                logger.debug("AzureDeveloperCliCredentialAsync unavailable", exc_info=True)
             credential = (
                 ChainedTokenCredentialAsync(*credentials)
                 if credentials
                 else DefaultAzureCredentialAsync(authority=authority)
             )
     except Exception:
+        logger.exception("Falling back to DefaultAzureCredentialAsync")
         credential = DefaultAzureCredentialAsync(authority=authority)
     if credential and use_cache:
         _ASYNC_CREDENTIAL_CACHE = credential
@@ -258,20 +255,18 @@ def clear_credential_cache() -> None:
 
 
 async def test_credential(credential: TokenCredential | None = None) -> bool:
-    if credential is None:
-        credential = build_credential()
+    cred = credential or build_credential()
     try:
-        token = await asyncio.to_thread(credential.get_token, _ARM_SCOPE)
+        token = await asyncio.to_thread(cred.get_token, _ARM_SCOPE)
         return token is not None and token.token is not None
     except Exception:
         return False
 
 
 async def test_credential_async(credential: AsyncTokenCredential | None = None) -> bool:
-    if credential is None:
-        credential = await build_async_credential()
+    cred = credential or await build_async_credential()
     try:
-        token = await credential.get_token(_ARM_SCOPE)
+        token = await cred.get_token(_ARM_SCOPE)
         return token is not None and token.token is not None
     except Exception:
         return False

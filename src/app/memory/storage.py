@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -9,9 +8,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
 
-import asyncpg
-
 from app.core.config import MAX_MEMORY, MAX_TOTAL_MEMORY
+from app.core.database import get_db
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -46,23 +44,12 @@ class Message:
 class AsyncMemoryStore:
     def __init__(
         self,
-        dsn: str | None = None,
         max_memory: int = MAX_MEMORY,
         max_total_memory: int = MAX_TOTAL_MEMORY,
-        pool_min_size: int = 1,
-        pool_max_size: int = 5,
     ):
-        self.dsn = (
-            dsn
-            or os.getenv("MEMORY_DB_URL")
-            or os.getenv("DATABASE_URL")
-            or "postgresql://dev:dev@localhost:5432/devops_ai"
-        )
         self.max_memory = int(max_memory)
         self.max_total_memory = int(max_total_memory)
-        self.pool_min_size = int(pool_min_size)
-        self.pool_max_size = int(pool_max_size)
-        self._pool: asyncpg.Pool | None = None
+        self.db = get_db()
         self._init_lock = asyncio.Lock()
         self._initialized = False
 
@@ -72,37 +59,30 @@ class AsyncMemoryStore:
         async with self._init_lock:
             if self._initialized:
                 return
-            self._pool = await asyncpg.create_pool(
-                self.dsn, min_size=self.pool_min_size, max_size=self.pool_max_size
+            await self.db.initialize()
+            await self.db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS messages (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    metadata JSONB,
+                    timestamp TIMESTAMPTZ DEFAULT now(),
+                    created_at TIMESTAMPTZ DEFAULT now()
+                );
+                CREATE INDEX IF NOT EXISTS idx_user_timestamp ON messages(user_id, timestamp DESC);
+                CREATE INDEX IF NOT EXISTS idx_user_created ON messages(user_id, created_at DESC);
+                """
             )
-            async with self._pool.acquire() as conn:
-                await conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS messages (
-                        id BIGSERIAL PRIMARY KEY,
-                        user_id TEXT NOT NULL,
-                        role TEXT NOT NULL,
-                        content TEXT NOT NULL,
-                        metadata JSONB,
-                        timestamp TIMESTAMPTZ DEFAULT now(),
-                        created_at TIMESTAMPTZ DEFAULT now()
-                    );
-                    CREATE INDEX IF NOT EXISTS idx_user_timestamp ON messages(user_id, timestamp DESC);
-                    CREATE INDEX IF NOT EXISTS idx_user_created ON messages(user_id, created_at DESC);
-                    """
-                )
             self._initialized = True
-            logger.info(f"initialized memory store pool_size={self.pool_max_size}")
+            logger.info("initialized memory store")
 
     @asynccontextmanager
-    async def get_connection(self) -> AsyncIterator[asyncpg.Connection]:
+    async def get_connection(self) -> AsyncIterator[Any]:
         await self.initialize()
-        assert self._pool is not None
-        conn = await self._pool.acquire()
-        try:
+        async with self.db.connection() as conn:
             yield conn
-        finally:
-            await self._pool.release(conn)
 
     async def store_message(
         self,
@@ -161,9 +141,7 @@ class AsyncMemoryStore:
 
     async def get_message_count(self, user_id: str) -> int:
         async with self.get_connection() as conn:
-            row = await conn.fetchrow(
-                "SELECT COUNT(*) AS c FROM messages WHERE user_id = $1", user_id
-            )
+            row = await conn.fetchrow("SELECT COUNT(*) AS c FROM messages WHERE user_id = $1", user_id)
         return int(row["c"] if row else 0)
 
     async def search_messages(
@@ -185,9 +163,7 @@ class AsyncMemoryStore:
                 query,
                 int(limit),
             )
-        return [
-            {"role": r["role"], "content": r["content"], "timestamp": r["timestamp"]} for r in rows
-        ]
+        return [{"role": r["role"], "content": r["content"], "timestamp": r["timestamp"]} for r in rows]
 
     async def trim_user_memory(
         self,
@@ -227,13 +203,12 @@ class AsyncMemoryStore:
             unique_users = await conn.fetchval("SELECT COUNT(DISTINCT user_id) FROM messages")
             role_rows = await conn.fetch("SELECT role, COUNT(*) FROM messages GROUP BY role")
             role_distribution = {r["role"]: r["count"] for r in role_rows}
-            db_size = None
         return {
             "total_messages": int(total or 0),
             "unique_users": int(unique_users or 0),
             "role_distribution": role_distribution,
-            "database_size_bytes": db_size,
-            "pool_size": self.pool_max_size,
+            "database_size_bytes": None,
+            "pool_size": None,
             "max_memory": self.max_memory,
             "max_total_memory": self.max_total_memory,
         }

@@ -1,17 +1,17 @@
 from __future__ import annotations
 
-import os
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
 
 from app.api.schemas import ReviewRequest, ReviewResponse
 from app.api.services import run_review
+from app.core.config import settings
 from app.core.exceptions import AuthenticationException
 
 router = APIRouter()
 
-IS_DEVELOPMENT = os.getenv("ENVIRONMENT", "development") == "development"
+IS_DEVELOPMENT = settings.environment == "development"
 
 
 async def get_optional_auth(request: Request) -> dict[str, Any] | None:
@@ -25,8 +25,9 @@ async def get_optional_auth(request: Request) -> dict[str, Any] | None:
 
 @router.post("", response_model=ReviewResponse)
 async def review(
-    req: ReviewRequest, auth: dict[str, Any] | None = Depends(get_optional_auth)
-) -> dict:
+    req: ReviewRequest,
+    _auth: Annotated[dict[str, Any] | None, Depends(get_optional_auth)],
+) -> dict[str, Any]:
     text = await run_review(
         req.user_input,
         req.assistant_reply,

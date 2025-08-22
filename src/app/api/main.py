@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, Request, Response
@@ -61,7 +61,7 @@ async def _limiter_cleanup_loop() -> None:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("API starting up", version=settings.app_version, environment=settings.environment)
     app_insights.initialize()
     cleanup_task = asyncio.create_task(_limiter_cleanup_loop())
@@ -114,7 +114,7 @@ async def _rl_mw(request: Request, call_next: Callable[[Request], Awaitable[Resp
 
 @app.get("/_routes")
 def _routes() -> list[str]:
-    return [r.path for r in app.routes if isinstance(r, (APIRoute, Route, Mount, WebSocketRoute))]
+    return [r.path for r in app.routes if isinstance(r, APIRoute | Route | Mount | WebSocketRoute)]
 
 
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])

@@ -120,9 +120,7 @@ class CostManagementSystem:
                 else (
                     row.get("preTaxCost")
                     if row.get("preTaxCost") is not None
-                    else row.get("Cost")
-                    if row.get("Cost") is not None
-                    else row.get("cost")
+                    else row.get("Cost") if row.get("Cost") is not None else row.get("cost")
                 )
             )
             try:
@@ -378,10 +376,10 @@ class CostManagementSystem:
 
         scope = f"/subscriptions/{subscription_id}"
 
-        current_month_usage: (
-            list[dict[str, Any]] | None
-        ) = await self.cost_ingestion.get_usage_details(
-            scope, current_month_start, now, granularity="None"
+        current_month_usage: list[dict[str, Any]] | None = (
+            await self.cost_ingestion.get_usage_details(
+                scope, current_month_start, now, granularity="None"
+            )
         )
         current_month_costs = sum(float(item.get("Cost", 0)) for item in current_month_usage or [])
 
@@ -401,10 +399,10 @@ class CostManagementSystem:
             subscription_id, target_reduction_percentage=10.0
         )
 
-        optimization_opportunities: list[
-            OptimizationRecommendation
-        ] = await self.optimization.analyze_optimization_opportunities(
-            subscription_id, OptimizationStrategy.BALANCED, min_savings_threshold=0
+        optimization_opportunities: list[OptimizationRecommendation] = (
+            await self.optimization.analyze_optimization_opportunities(
+                subscription_id, OptimizationStrategy.BALANCED, min_savings_threshold=0
+            )
         )
 
         quick_wins = [
@@ -418,9 +416,9 @@ class CostManagementSystem:
             if rec.implementation_effort == "low"
         ]
 
-        reservation_recs: (
-            list[Any] | None
-        ) = await self.cost_ingestion.get_reservation_recommendations(scope)
+        reservation_recs: list[Any] | None = (
+            await self.cost_ingestion.get_reservation_recommendations(scope)
+        )
         ri_coverage = len(reservation_recs) * 0.15 if reservation_recs else 0.0
 
         insights: dict[str, Any] = {
@@ -714,9 +712,7 @@ class BudgetManager:
         time_grain = (
             "Monthly"
             if period == "monthly"
-            else "Quarterly"
-            if period == "quarterly"
-            else "Annually"
+            else "Quarterly" if period == "quarterly" else "Annually"
         )
         return await self.cost_ingestion.create_budget(
             scope, budget_name, amount, time_grain=time_grain

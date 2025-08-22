@@ -1,4 +1,3 @@
-# src/app/api/routes/chat.py
 from __future__ import annotations
 
 import asyncio
@@ -21,16 +20,12 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 try:
-    from app.api.routes.auth import User, get_current_active_user
+    from app.api.routes import auth as auth_module
 
     AUTH_AVAILABLE = True
 except ImportError:
+    auth_module = None
     AUTH_AVAILABLE = False
-    type User = Any
-
-    async def get_current_active_user() -> Any:
-        return None
-
 
 IS_DEVELOPMENT = settings.environment == "development"
 if IS_DEVELOPMENT:
@@ -47,41 +42,51 @@ async def get_optional_user(request: Request) -> Any:
                 subscription_id="12345678-1234-1234-1234-123456789012",
                 is_active=True,
             )
-    if AUTH_AVAILABLE:
-        return await get_current_active_user()
+    if AUTH_AVAILABLE and auth_module is not None:
+        token_data = await auth_module.auth_required(request)
+        return SimpleNamespace(
+            email=token_data.email,
+            roles=token_data.roles,
+            subscription_id=token_data.subscription_id,
+            is_active=True,
+        )
     auth_header = request.headers.get("authorization", "")
     if not auth_header:
         raise AuthenticationException("Authentication required")
     return SimpleNamespace(email="token-user", roles=["user"], subscription_id=None, is_active=True)
 
 
-@router.post("", response_model=ChatResponse)
+@router.post("")
 async def chat(
-    request: Request,
     req: ChatRequest,
     stream: Annotated[bool, Query(False)],
     current_user: Annotated[Any, Depends(get_optional_user)],
-) -> dict[str, Any]:
+) -> StreamingResponse | dict[str, Any]:
     if stream and not req.enable_tools:
         return StreamingResponse(
             _stream_plain_chat(req, current_user),
             media_type="text/event-stream",
         )
-    text = await run_chat(
-        req.input,
-        [m.model_dump() for m in req.memory or []],
-        req.provider,
-        req.model,
-        req.enable_tools,
-        req.preferred_tool,
-        req.allowlist,
-    )
-    return ChatResponse(output=text).model_dump()
+    try:
+        text = await run_chat(
+            req.input,
+            [m.model_dump() for m in req.memory or []],
+            req.provider,
+            req.model,
+            req.enable_tools,
+            req.preferred_tool,
+            req.allowlist,
+        )
+        return ChatResponse(output=text).model_dump()
+    except BaseApplicationException as exc:
+        msg = exc.user_message or "Failed to process request."
+        return ChatResponse(output=msg).model_dump()
+    except Exception:
+        return ChatResponse(output="Failed to process request.").model_dump()
 
 
 @router.post("/v2")
 async def chat_v2(
-    request: Request,
     body: ChatRequestV2,
     current_user: Annotated[Any, Depends(get_optional_user)],
 ) -> dict[str, Any]:

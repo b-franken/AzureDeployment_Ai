@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -25,30 +26,31 @@ from app.core.exceptions import (
 from app.tools.azure.clients import AzureOperationError
 
 try:
-    from azure.core.exceptions import (
-        AzureError,
-        ClientAuthenticationError,
-        HttpResponseError,
-        ServiceRequestError,
-        ServiceResponseError,
+    import azure.core.exceptions as azure_exceptions
+except Exception:
+
+    class _AzureError(Exception):
+        pass
+
+    class _ClientAuthenticationError(_AzureError):
+        pass
+
+    class _HttpResponseError(_AzureError):
+        pass
+
+    class _ServiceRequestError(_AzureError):
+        pass
+
+    class _ServiceResponseError(_AzureError):
+        pass
+
+    azure_exceptions = SimpleNamespace(
+        AzureError=_AzureError,
+        ClientAuthenticationError=_ClientAuthenticationError,
+        HttpResponseError=_HttpResponseError,
+        ServiceRequestError=_ServiceRequestError,
+        ServiceResponseError=_ServiceResponseError,
     )
-except ImportError:
-
-    class AzureError(Exception):
-        pass
-
-    class ClientAuthenticationError(AzureError):
-        pass
-
-    class HttpResponseError(AzureError):
-        pass
-
-    class ServiceRequestError(AzureError):
-        pass
-
-    class ServiceResponseError(AzureError):
-        pass
-
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +72,7 @@ def _error_response(
     headers: dict[str, str] = {}
     corr = request.headers.get("x-correlation-id") or request.headers.get("x-request-id")
     if corr:
-        headers["x-correlation-id"] = corr
+        headers["x-correlation-id"] = str(corr)
     if status_code == 429 and retry_after is not None:
         payload["retry_after"] = retry_after
         headers["Retry-After"] = str(int(retry_after))
@@ -206,28 +208,28 @@ def install_error_handlers(app: FastAPI) -> None:
             message="Upstream network error",
             detail={
                 "type": type(exc).__name__,
-                "request": str(exc.request.url) if exc.request else None,
+                "request": str(exc.request.url) if getattr(exc, "request", None) else None,
             },
         )
 
-    @app.exception_handler(AzureError)
-    async def _handle_azure_errors(request: Request, exc: AzureError) -> JSONResponse:
+    @app.exception_handler(azure_exceptions.AzureError)
+    async def _handle_azure_errors(request: Request, exc: Exception) -> JSONResponse:
         status_code = 500
         error_code = "azure_error"
         message = "Azure SDK error"
-        if isinstance(exc, ClientAuthenticationError):
+        if isinstance(exc, azure_exceptions.ClientAuthenticationError):
             status_code = 401
             error_code = "authentication_error"
             message = "Azure authentication failed"
-        elif isinstance(exc, ServiceRequestError):
+        elif isinstance(exc, azure_exceptions.ServiceRequestError):
             status_code = 503
             error_code = "service_unavailable"
             message = "Azure service request error"
-        elif isinstance(exc, ServiceResponseError):
+        elif isinstance(exc, azure_exceptions.ServiceResponseError):
             status_code = 502
             error_code = "bad_gateway"
             message = "Azure service response error"
-        elif isinstance(exc, HttpResponseError):
+        elif isinstance(exc, azure_exceptions.HttpResponseError):
             status_code = 502
             error_code = "bad_gateway"
             message = "Azure upstream error"

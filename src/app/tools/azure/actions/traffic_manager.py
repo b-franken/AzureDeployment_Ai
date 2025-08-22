@@ -1,14 +1,48 @@
 from __future__ import annotations
 
+import asyncio
 import logging
-from typing import Any
+from typing import Any, cast
 
+from azure.core.credentials import AccessToken, TokenCredential
+from azure.core.credentials_async import AsyncTokenCredential
 from azure.core.exceptions import HttpResponseError
 
 from ..clients import Clients
 from ..validators import validate_name
 
 logger = logging.getLogger(__name__)
+
+
+class _AsyncToSyncCredential(TokenCredential):
+    def __init__(self, async_cred: AsyncTokenCredential) -> None:
+        self._async_cred = async_cred
+
+    def get_token(self, *scopes: str, **kwargs: Any) -> AccessToken:
+        loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(loop)
+            return cast(
+                AccessToken, loop.run_until_complete(self._async_cred.get_token(*scopes, **kwargs))
+            )
+        finally:
+            loop.close()
+
+    def close(self) -> None:
+        loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(loop)
+            aclose = getattr(self._async_cred, "aclose", None)
+            if callable(aclose):
+                loop.run_until_complete(aclose())
+        finally:
+            loop.close()
+
+
+def _ensure_sync_credential(cred: TokenCredential | AsyncTokenCredential) -> TokenCredential:
+    if isinstance(cred, AsyncTokenCredential):
+        return _AsyncToSyncCredential(cred)
+    return cred
 
 
 async def create_traffic_manager_profile(
@@ -46,7 +80,8 @@ async def create_traffic_manager_profile(
         Profile,
     )
 
-    tm_client = TrafficManagerManagementClient(clients.cred, clients.subscription_id)
+    sync_cred = _ensure_sync_credential(clients.cred)
+    tm_client = TrafficManagerManagementClient(sync_cred, clients.subscription_id)
 
     try:
         existing = await clients.run(tm_client.profiles.get, resource_group, name)
@@ -97,7 +132,6 @@ async def create_traffic_manager_profile(
                 priority=endpoint_config.get("priority", idx + 1),
                 endpoint_location=endpoint_config.get("location"),
             )
-
             await clients.run(
                 tm_client.endpoints.create_or_update,
                 resource_group,

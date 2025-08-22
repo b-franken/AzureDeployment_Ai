@@ -1,10 +1,12 @@
+# src/app/api/routes/auth.py
 from __future__ import annotations
 
 import logging
 import os
 import secrets
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Any
 
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -20,7 +22,6 @@ try:
 except Exception:
     import base64
     import hashlib
-    import secrets
 
     class SimplePwdContext:
         def hash(self, password: str) -> str:
@@ -67,7 +68,7 @@ REFRESH_TOKEN_EXPIRE_DAYS = 7
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
 
-USERS_DB: dict[str, dict] = {}
+USERS_DB: dict[str, dict[str, Any]] = {}
 
 
 def init_users() -> None:
@@ -98,6 +99,16 @@ class Token(BaseModel):
     refresh_token: str
     token_type: str = "bearer"
     expires_in: int
+
+
+class AccessToken(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+
+
+class Message(BaseModel):
+    message: str
 
 
 class TokenData(BaseModel):
@@ -147,17 +158,14 @@ def authenticate_user(email: str, password: str) -> UserInDB | None:
     return user
 
 
-def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
+def create_access_token(data: dict[str, Any], expires_delta: timedelta | None = None) -> str:
     to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(minutes=15)
+    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=15))
     to_encode.update({"exp": expire, "type": "access"})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 
-def create_refresh_token(data: dict) -> str:
+def create_refresh_token(data: dict[str, Any]) -> str:
     to_encode = data.copy()
     expire = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     to_encode.update({"exp": expire, "type": "refresh"})
@@ -174,15 +182,16 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]) -> Use
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         if payload.get("type") != "access":
             raise credentials_exception
-        email: str | None = payload.get("sub")
+        email_raw = payload.get("sub")
+        email: str | None = email_raw if isinstance(email_raw, str) else None
         if email is None:
             raise credentials_exception
         token_data = TokenData(
             email=email,
-            user_id=payload.get("user_id", email),
-            roles=payload.get("roles", []),
+            user_id=str(payload.get("user_id", email)),
+            roles=list(payload.get("roles", [])),
             subscription_id=payload.get("subscription_id"),
-            expires_at=datetime.fromtimestamp(payload.get("exp", 0)),
+            expires_at=datetime.fromtimestamp(int(payload.get("exp", 0))),
         )
     except jwt.ExpiredSignatureError as exc:
         raise HTTPException(
@@ -203,14 +212,18 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]) -> Use
     )
 
 
-async def get_current_active_user(current_user: Annotated[User, Depends(get_current_user)]) -> User:
+async def get_current_active_user(
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> User:
     if not current_user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
 
 
-def require_role(role: str):
-    async def role_checker(current_user: Annotated[User, Depends(get_current_active_user)]) -> User:
+def require_role(role: str) -> Callable[[User], Awaitable[User]]:
+    async def role_checker(
+        current_user: Annotated[User, Depends(get_current_active_user)],
+    ) -> User:
         if role not in current_user.roles and "admin" not in current_user.roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions"
@@ -221,7 +234,9 @@ def require_role(role: str):
 
 
 @router.post("/token", response_model=Token)
-async def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
+async def login(
+    form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
+) -> Token:
     user = authenticate_user(form_data.username, form_data.password)
     if not user:
         raise HTTPException(
@@ -230,47 +245,48 @@ async def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
             headers={"WWW-Authenticate": "Bearer"},
         )
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    token_data = {
+    token_data: dict[str, Any] = {
         "sub": user.email,
         "user_id": user.email.replace("@", "_").replace(".", "_"),
         "roles": user.roles,
         "subscription_id": user.subscription_id,
     }
     access_token = create_access_token(token_data, expires_delta=access_token_expires)
-    refresh_token = create_refresh_token(token_data)
-    return {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "token_type": "bearer",
-        "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-    }
+    refresh_token_value = create_refresh_token(token_data)
+    return Token(
+        access_token=access_token,
+        refresh_token=refresh_token_value,
+        expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    )
 
 
-@router.post("/refresh")
-async def refresh_token(refresh_token: str):
+@router.post("/refresh", response_model=AccessToken)
+async def refresh_token(refresh_token: str) -> AccessToken:
     try:
         payload = jwt.decode(refresh_token, SECRET_KEY, algorithms=[ALGORITHM])
         if payload.get("type") != "refresh":
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type"
             )
-        email = payload.get("sub")
+        email_raw = payload.get("sub")
+        email = email_raw if isinstance(email_raw, str) else None
+        if not email:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
         user = get_user(email)
         if not user:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
         access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-        token_data = {
+        token_data: dict[str, Any] = {
             "sub": user.email,
             "user_id": user.email.replace("@", "_").replace(".", "_"),
             "roles": user.roles,
             "subscription_id": user.subscription_id,
         }
         new_access_token = create_access_token(token_data, expires_delta=access_token_expires)
-        return {
-            "access_token": new_access_token,
-            "token_type": "bearer",
-            "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-        }
+        return AccessToken(
+            access_token=new_access_token,
+            expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        )
     except jwt.ExpiredSignatureError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token has expired"
@@ -281,21 +297,28 @@ async def refresh_token(refresh_token: str):
         ) from exc
 
 
-@router.get("/me")
-async def read_users_me(current_user: Annotated[User, Depends(get_current_active_user)]):
+@router.get("/me", response_model=User)
+async def read_users_me(
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> User:
     return current_user
 
 
-@router.post("/logout")
-async def logout(current_user: Annotated[User, Depends(get_current_active_user)]):
-    return {"message": "Successfully logged out"}
+@router.post("/logout", response_model=Message)
+async def logout(
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> Message:
+    return Message(message="Successfully logged out")
 
 
 auth_dependency = get_current_active_user
 
 
 async def auth_required(request: Request) -> TokenData:
-    token = await oauth2_scheme(request)
+    token_raw = await oauth2_scheme(request)
+    token: str | None = token_raw if isinstance(token_raw, str) else None
+    if token is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     user = await get_current_user(token)
     return TokenData(
         email=user.email,

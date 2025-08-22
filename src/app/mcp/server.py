@@ -7,22 +7,18 @@ from collections.abc import AsyncIterator
 from datetime import datetime, timedelta
 from typing import Any, Literal, Protocol, cast
 
-from azure.identity import (
-    AzureCliCredential,
-    ChainedTokenCredential,
-    ManagedIdentityCredential,
-)
+from azure.identity import AzureCliCredential, ChainedTokenCredential, ManagedIdentityCredential
 from azure.mgmt.resourcegraph import ResourceGraphClient
 from azure.mgmt.resourcegraph.models import QueryRequest, QueryRequestOptions
 from mcp.server.fastmcp import Context, FastMCP
 
 from app.ai.tools_router import ToolExecutionContext, maybe_call_tool
+from app.core.cache.dependency import get_cache
 from app.mcp.extensions import register_extensions
 from app.mcp.tools.what_if import register as register_what_if
 from app.platform.audit.logger import AuditLogger
 from app.tools.registry import ensure_tools_loaded, list_tools
 
-from .cache import MCPCache
 from .resources import ResourceManager
 from .streaming import StreamingHandler
 
@@ -75,15 +71,25 @@ class MCPServer:
     ):
         self.mcp = FastMCP(name=name)
         self.transport = transport
-        self.cache = MCPCache()
+        self.cache: Any = None
         self.resource_manager = ResourceManager()
         self.streaming_handler = StreamingHandler()
         self.audit_logger = AuditLogger()
+
+    @classmethod
+    async def create(
+        cls,
+        name: str = "DevOps AI Tools",
+        transport: Literal["stdio", "sse", "streamable-http"] = "stdio",
+    ) -> MCPServer:
+        self = cls(name=name, transport=transport)
+        self.cache = await get_cache()
         self._setup_tools()
         self._setup_resources()
         self._setup_prompts()
         register_extensions(self)
         register_what_if(self.mcp)
+        return self
 
     def _setup_tools(self) -> None:
         ensure_tools_loaded()
@@ -236,11 +242,7 @@ class MCPServer:
         async def list_registered_tools(context: Context) -> list[dict[str, Any]]:
             tools = list_tools()
             return [
-                {
-                    "name": t.name,
-                    "description": t.description,
-                    "schema": t.schema,
-                }
+                {"name": t.name, "description": t.description, "schema": t.schema}
                 for t in tools
             ]
 
@@ -308,9 +310,7 @@ Optimization strategies:
             "resource_quotas": await self._check_resource_quotas(request),
             "cost_estimate": await self._estimate_deployment_cost(request),
         }
-
         all_passed = all(v.get("passed", False) for v in validations.values())
-
         return {
             "all_passed": all_passed,
             "validations": validations,
@@ -331,32 +331,20 @@ Optimization strategies:
             ("Running tests", self._run_tests),
             ("Finalizing", self._finalize_deployment),
         ]
-
         results: list[dict[str, Any]] = []
         for step_name, step_func in steps:
             await stream.send(f"Starting: {step_name}")
             try:
                 result = await step_func(request)
                 results.append(
-                    {
-                        "step": step_name,
-                        "status": "success",
-                        "result": result,
-                    }
-                )
+                    {"step": step_name, "status": "success", "result": result})
                 await stream.send(f"Completed: {step_name}")
             except Exception as e:
                 results.append(
-                    {
-                        "step": step_name,
-                        "status": "failed",
-                        "error": str(e),
-                    }
-                )
+                    {"step": step_name, "status": "failed", "error": str(e)})
                 await stream.send(f"Failed: {step_name} - {str(e)}")
                 if not request.continue_on_error:
                     break
-
         return {
             "deployment_id": request.deployment_id,
             "status": "completed" if all(r["status"] == "success" for r in results) else "failed",
@@ -369,23 +357,17 @@ Optimization strategies:
         params: AzureQueryParams,
     ) -> dict[str, Any]:
         rg_client = self._get_resource_graph_client()
-
         request = QueryRequest(
             query=params.kql,
             subscriptions=params.subscriptions or self._get_allowed_subscriptions(),
             options=(
                 QueryRequestOptions(
-                    top=params.top,
-                    skip=params.skip,
-                    skip_token=params.skip_token,
-                )
+                    top=params.top, skip=params.skip, skip_token=params.skip_token)
                 if params.top or params.skip or params.skip_token
                 else None
             ),
         )
-
         result = await asyncio.to_thread(rg_client.resources, request)
-
         return {
             "data": result.data[: params.top] if params.top else result.data,
             "count": result.count,
@@ -398,9 +380,7 @@ Optimization strategies:
     def _get_resource_graph_client(self) -> ResourceGraphClient:
         if not hasattr(self, "_rg_client"):
             cred = ChainedTokenCredential(
-                ManagedIdentityCredential(),
-                AzureCliCredential(),
-            )
+                ManagedIdentityCredential(), AzureCliCredential())
             self._rg_client = ResourceGraphClient(cred)
         return self._rg_client
 
@@ -417,28 +397,25 @@ Optimization strategies:
         pattern = re.compile(r"^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])?$")
         invalid: list[dict[str, str]] = []
         seen: set[str] = set()
-
         rg = getattr(request, "resource_group", "") or ""
         if not rg or len(rg) > 90:
             invalid.append({"scope": "resource_group", "name": rg or ""})
-
         for r in request.resources:
             name = str(r.get("name", "")).strip()
             rtype = str(r.get("type", "")).strip()
             if not name or not rtype:
-                invalid.append({"scope": "resource", "name": name or "", "type": rtype or ""})
+                invalid.append(
+                    {"scope": "resource", "name": name or "", "type": rtype or ""})
                 continue
             if name in seen:
-                invalid.append({"scope": "duplicate", "name": name, "type": rtype})
+                invalid.append(
+                    {"scope": "duplicate", "name": name, "type": rtype})
             seen.add(name)
             if not pattern.match(name):
-                invalid.append({"scope": "format", "name": name, "type": rtype})
-
+                invalid.append(
+                    {"scope": "format", "name": name, "type": rtype})
         passed = len(invalid) == 0
-        return {
-            "passed": passed,
-            "details": {"invalid": invalid, "checked": len(request.resources)},
-        }
+        return {"passed": passed, "details": {"invalid": invalid, "checked": len(request.resources)}}
 
     async def _check_security_policies(
         self,
@@ -451,66 +428,51 @@ Optimization strategies:
         for t in required_tags:
             if t not in tags:
                 missing_tags.append(t)
-
         for r in request.resources:
             rtype = str(r.get("type", "")).lower()
             props = dict(r.get("properties", {}))
             name = str(r.get("name", ""))
-
             if rtype == "web_app":
                 https_only = bool(props.get("https_only", True))
                 tls = str(props.get("minimum_tls_version", "1.2"))
                 if not https_only:
-                    enforced.append({"name": name, "policy": "https_only", "value": True})
+                    enforced.append(
+                        {"name": name, "policy": "https_only", "value": True})
                 if tls not in {"1.2", "1.3"}:
                     enforced.append(
-                        {
-                            "name": name,
-                            "policy": "minimum_tls_version",
-                            "value": "1.2",
-                        }
-                    )
-
+                        {"name": name, "policy": "minimum_tls_version", "value": "1.2"})
             if rtype == "storage_account":
-                allow_public = bool(props.get("allow_blob_public_access", False))
+                allow_public = bool(
+                    props.get("allow_blob_public_access", False))
                 if allow_public:
                     enforced.append(
-                        {
-                            "name": name,
-                            "policy": "allow_blob_public_access",
-                            "value": False,
-                        }
-                    )
-
+                        {"name": name, "policy": "allow_blob_public_access", "value": False})
         passed = not missing_tags and not enforced
-        return {
-            "passed": passed,
-            "details": {"missing_tags": missing_tags, "enforced": enforced},
-        }
+        return {"passed": passed, "details": {"missing_tags": missing_tags, "enforced": enforced}}
 
     async def _check_network_connectivity(
         self,
         request: DeploymentRequest,
     ) -> dict[str, Any]:
         issues: list[dict[str, str]] = []
-
         for r in request.resources:
             name = str(r.get("name", ""))
             props = dict(r.get("properties", {}))
             subnet = str(props.get("subnet_id", "")).strip()
             vnet = str(props.get("vnet_id", "")).strip()
-
             if subnet:
                 if "/subnets/" not in subnet:
-                    issues.append({"name": name, "issue": "invalid_subnet_ref"})
+                    issues.append(
+                        {"name": name, "issue": "invalid_subnet_ref"})
                 if not subnet.startswith("/subscriptions/"):
-                    issues.append({"name": name, "issue": "subnet_not_fully_qualified"})
+                    issues.append(
+                        {"name": name, "issue": "subnet_not_fully_qualified"})
             if vnet:
                 if "/virtualNetworks/" not in vnet:
                     issues.append({"name": name, "issue": "invalid_vnet_ref"})
                 if not vnet.startswith("/subscriptions/"):
-                    issues.append({"name": name, "issue": "vnet_not_fully_qualified"})
-
+                    issues.append(
+                        {"name": name, "issue": "vnet_not_fully_qualified"})
         return {"passed": len(issues) == 0, "details": {"issues": issues}}
 
     async def _check_resource_quotas(
@@ -521,11 +483,7 @@ Optimization strategies:
         limits: dict[str, dict[str, int]] = {
             "dev": {"storage_account": 10, "web_app": 10, "app_service_plan": 10},
             "test": {"storage_account": 20, "web_app": 20, "app_service_plan": 20},
-            "staging": {
-                "storage_account": 30,
-                "web_app": 30,
-                "app_service_plan": 30,
-            },
+            "staging": {"storage_account": 30, "web_app": 30, "app_service_plan": 30},
             "prod": {"storage_account": 100, "web_app": 60, "app_service_plan": 60},
         }
         limit = limits.get(env, limits["dev"])
@@ -533,12 +491,11 @@ Optimization strategies:
         for r in request.resources:
             rtype = str(r.get("type", "")).lower()
             counts[rtype] = counts.get(rtype, 0) + 1
-
         over: list[dict[str, Any]] = []
         for rtype, cnt in counts.items():
             if rtype in limit and cnt > limit[rtype]:
-                over.append({"type": rtype, "count": cnt, "limit": limit[rtype]})
-
+                over.append(
+                    {"type": rtype, "count": cnt, "limit": limit[rtype]})
         return {"passed": len(over) == 0, "details": {"usage": counts, "exceeded": over}}
 
     async def _estimate_deployment_cost(
@@ -555,7 +512,6 @@ Optimization strategies:
         for r in request.resources:
             rtype = str(r.get("type", "")).lower()
             name = str(r.get("name", ""))
-
             if rtype == "app_service_plan":
                 sku = str(r.get("sku", "B1")).upper()
                 cost = float(prices["app_service_plan"].get(sku, 13.0))
@@ -566,10 +522,9 @@ Optimization strategies:
                 cost = float(prices["web_app"]["default"])
             else:
                 cost = 0.0
-
             total += cost
-            breakdown.append({"name": name, "type": rtype, "monthly_cost": cost})
-
+            breakdown.append(
+                {"name": name, "type": rtype, "monthly_cost": cost})
         return {"monthly_cost": total, "currency": "USD", "items": breakdown}
 
     async def _get_deployment_recommendations(
@@ -591,11 +546,11 @@ Optimization strategies:
         self,
         request: DeploymentRequest,
     ) -> dict[str, Any]:
-        required = ["subscription_id", "resource_group", "location", "resources"]
+        required = ["subscription_id",
+                    "resource_group", "location", "resources"]
         for key in required:
             if not getattr(request, key, None):
                 raise ValueError(f"missing_required_field:{key}")
-
         names: set[str] = set()
         for r in request.resources:
             name = str(r.get("name", "")).strip()
@@ -605,7 +560,6 @@ Optimization strategies:
             if name in names:
                 raise ValueError(f"duplicate_resource_name:{name}")
             names.add(name)
-
         return {"initialized": True, "resource_count": len(request.resources)}
 
     async def _create_resources(
@@ -639,7 +593,8 @@ Optimization strategies:
                 if "/subnets/" in subnet and subnet.startswith("/subscriptions/"):
                     configured += 1
                 else:
-                    checks.append({"name": str(r.get("name", "")), "issue": "invalid_subnet"})
+                    checks.append(
+                        {"name": str(r.get("name", "")), "issue": "invalid_subnet"})
         return {"network_configured": configured, "issues": checks}
 
     async def _apply_security(
@@ -651,16 +606,13 @@ Optimization strategies:
             rtype = str(r.get("type", "")).lower()
             name = str(r.get("name", ""))
             if rtype == "web_app":
-                applied.append({"name": name, "setting": "https_only", "value": True})
-                applied.append({"name": name, "setting": "minimum_tls_version", "value": "1.2"})
+                applied.append(
+                    {"name": name, "setting": "https_only", "value": True})
+                applied.append(
+                    {"name": name, "setting": "minimum_tls_version", "value": "1.2"})
             if rtype == "storage_account":
                 applied.append(
-                    {
-                        "name": name,
-                        "setting": "allow_blob_public_access",
-                        "value": False,
-                    }
-                )
+                    {"name": name, "setting": "allow_blob_public_access", "value": False})
         return {"security_applied": True, "changes": applied}
 
     async def _enable_monitoring(
@@ -705,15 +657,17 @@ Optimization strategies:
         self.mcp.run(transport=self.transport)
 
 
-def main() -> None:
+async def amain() -> None:
     import os
 
-    transport = cast(
-        Literal["stdio", "sse", "streamable-http"],
-        os.getenv("MCP_TRANSPORT", "stdio").lower(),
-    )
-    server = MCPServer(transport=transport)
+    transport = cast(Literal["stdio", "sse", "streamable-http"],
+                     os.getenv("MCP_TRANSPORT", "stdio").lower())
+    server = await MCPServer.create(transport=transport)
     server.run()
+
+
+def main() -> None:
+    asyncio.run(amain())
 
 
 if __name__ == "__main__":

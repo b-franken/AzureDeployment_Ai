@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, cast
 
-from app.cache.redis_cache import CacheManager
+from app.core.cache.dependency import get_cache
 
 logger = logging.getLogger(__name__)
 

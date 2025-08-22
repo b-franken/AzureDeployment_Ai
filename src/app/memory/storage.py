@@ -80,7 +80,7 @@ class AsyncMemoryStore:
 
     @asynccontextmanager
     async def get_connection(self) -> AsyncIterator[Any]:
-        await self.initialize()
+        
         async with self.db.connection() as conn:
             yield conn
 
@@ -224,5 +224,5 @@ async def get_async_store() -> AsyncMemoryStore:
             max_memory=MAX_MEMORY,
             max_total_memory=MAX_TOTAL_MEMORY,
         )
-        await _async_store.initialize()
+        
     return _async_store

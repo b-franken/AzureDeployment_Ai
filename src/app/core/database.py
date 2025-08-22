@@ -38,28 +38,28 @@ class DatabaseManager:
 
     @asynccontextmanager
     async def connection(self) -> AsyncIterator[Any]:
-        await self.initialize()
+        
         async with self.pool.acquire() as conn:
             yield conn
 
     async def execute(self, query: str, *args: Any) -> str:
-        await self.initialize()
+        
         return await self.pool.execute(query, *args)
 
     async def executemany(self, query: str, args_iter: list[tuple[Any, ...]]) -> None:
-        await self.initialize()
+        
         await self.pool.executemany(query, args_iter)
 
     async def fetch(self, query: str, *args: Any) -> list[Any]:
-        await self.initialize()
+        
         return await self.pool.fetch(query, *args)
 
     async def fetchrow(self, query: str, *args: Any) -> Any | None:
-        await self.initialize()
+        
         return await self.pool.fetchrow(query, *args)
 
     async def fetchval(self, query: str, *args: Any) -> Any:
-        await self.initialize()
+        
         return await self.pool.fetchval(query, *args)
 
     async def close(self) -> None:

@@ -154,7 +154,7 @@ class DatabasePool:
     async def acquire(self) -> AsyncGenerator[Connection, None]:
         pool = self._pool
         if pool is None:
-            await self.initialize()
+            
             pool = self._pool
         if pool is None:
             raise RuntimeError("Database pool is not initialized")

@@ -151,7 +151,7 @@ class AuditLogger:
         return None
 
     async def log_event(self, event: AuditEvent) -> bool:
-        await self.initialize()
+        
         try:
             await self.db.execute(
                 """
@@ -253,7 +253,7 @@ class AuditLogger:
         return sql, params
 
     async def query_events(self, query: AuditQuery) -> list[AuditEvent]:
-        await self.initialize()
+        
         sql, params = self._build_query(query)
         rows = await self.db.fetch(sql, *params)
         events: list[AuditEvent] = []
@@ -286,7 +286,7 @@ class AuditLogger:
         return events
 
     async def get_statistics(self, start_time: datetime, end_time: datetime) -> dict[str, Any]:
-        await self.initialize()
+        
         total = await self.db.fetchrow(
             """
             SELECT 
@@ -330,7 +330,7 @@ class AuditLogger:
         }
 
     async def verify_integrity(self, event_id: str) -> bool:
-        await self.initialize()
+        
         row = await self.db.fetchrow(
             "SELECT id, timestamp, event_type, severity, user_id, resource_id, action, hash FROM audit_events WHERE id = $1",
             event_id,
@@ -398,7 +398,7 @@ class AuditLogger:
         return {"framework": "sox", "financial_system_events": fin, "change_management_events": chg, "access_control_events": acc}
 
     async def cleanup_old_events(self) -> None:
-        await self.initialize()
+        
         cutoff = datetime.utcnow() - timedelta(days=2555)
         await self.db.execute(
             """

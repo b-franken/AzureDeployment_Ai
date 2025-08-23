@@ -9,7 +9,7 @@ from enum import Enum
 from typing import Any, Literal
 
 from app.core.config import MAX_MEMORY, MAX_TOTAL_MEMORY
-from app.core.database import get_db
+from app.core.data.repository import get_data_layer
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -49,7 +49,7 @@ class AsyncMemoryStore:
     ):
         self.max_memory = int(max_memory)
         self.max_total_memory = int(max_total_memory)
-        self.db = get_db()
+        self.db = get_data_layer()
         self._init_lock = asyncio.Lock()
         self._initialized = False
 

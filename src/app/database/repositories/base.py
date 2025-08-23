@@ -7,7 +7,7 @@ from typing import Any, Protocol, TypeVar
 
 from pydantic import BaseModel
 
-from app.core.database import get_db
+from app.core.data.repository import get_data_layer
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -21,7 +21,7 @@ class Queryable(Protocol):
 
 class BaseRepository[T](ABC):
     def __init__(self, table_name: str, db: Queryable | None = None):
-        self.db: Queryable = db or get_db()
+        self.db: Queryable = db or get_data_layer()
         self.table_name = table_name
 
     @abstractmethod

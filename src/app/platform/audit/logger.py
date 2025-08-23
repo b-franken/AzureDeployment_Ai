@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any
 
-from app.core.database import get_db
+from app.core.data.repository import get_data_layer
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -98,7 +98,7 @@ class AuditQuery:
 
 class AuditLogger:
     def __init__(self, dsn: str | None = None) -> None:
-        self.db = get_db()
+        self.db = get_data_layer()
         self.dsn = dsn or os.getenv("AUDIT_DB_URL") or os.getenv("DATABASE_URL")
         self._ready = False
         self._lock = asyncio.Lock()

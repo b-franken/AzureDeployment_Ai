@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import time
+from datetime import datetime
 from typing import Any, TypedDict, cast
 
 import structlog
 from azure.core.exceptions import AzureError
+from azure.mgmt.monitor import MonitorManagementClient
 from azure.mgmt.resource import ResourceManagementClient
 from azure.mgmt.resourcegraph import ResourceGraphClient
 from azure.mgmt.resourcegraph.models import QueryRequest, QueryRequestOptions
@@ -40,6 +43,26 @@ class ResourceDiscoveryService:
             self._clients["graph"] = ResourceGraphClient(self._credential)
         return cast(ResourceGraphClient, self._clients["graph"])
 
+    def _get_monitor_client(self, subscription_id: str) -> MonitorManagementClient:
+        key = f"monitor_{subscription_id}"
+        if key not in self._clients:
+            self._clients[key] = MonitorManagementClient(self._credential, subscription_id)
+        return cast(MonitorManagementClient, self._clients[key])
+
+    def _normalize_tags(self, tags: Any) -> dict[str, str]:
+        if isinstance(tags, dict):
+            return {str(k): str(v) for k, v in tags.items() if k is not None}
+        return {}
+
+    def _iso_or_now(self, dt: Any) -> str:
+        if isinstance(dt, datetime):
+            return dt.isoformat()
+        try:
+            # type: ignore[redundant-cast]
+            return cast(datetime, dt).isoformat()
+        except Exception:
+            return datetime.utcnow().isoformat()
+
     @retry_on_error(max_retries=3, base_delay=1.0, exceptions=(AzureError,))
     async def discover_resources(
         self,
@@ -48,13 +71,12 @@ class ResourceDiscoveryService:
         resource_type: str | None = None,
         tags: dict[str, str] | None = None,
     ) -> list[dict[str, Any]]:
-        import time
-
         cache_key = f"{subscription_id}:{resource_group}:{resource_type}:{str(tags)}"
-        if cache_key in self._cache:
-            cached_data, cached_time = self._cache[cache_key]
-            if time.time() - cached_time < self._cache_ttl:
-                return cached_data
+        cached = self._cache.get(cache_key)
+        if cached:
+            data, ts = cached
+            if time.time() - ts < self._cache_ttl:
+                return data
         query = self._build_kql_query(subscription_id, resource_group, resource_type, tags)
         with self._tracer.start_as_current_span("resource_discovery.discover_resources") as span:
             span.set_attribute("azure.subscription_id", subscription_id)
@@ -92,13 +114,13 @@ class ResourceDiscoveryService:
                 resource = await asyncio.to_thread(
                     client.resources.get_by_id, resource_id, api_version="2023-07-01"
                 )
-                data = {
+                data: dict[str, Any] = {
                     "id": resource.id,
                     "name": resource.name,
                     "type": resource.type,
                     "location": resource.location,
-                    "tags": resource.tags or {},
-                    "properties": resource.properties or {},
+                    "tags": self._normalize_tags(getattr(resource, "tags", None)),
+                    "properties": getattr(resource, "properties", {}) or {},
                     "sku": getattr(resource, "sku", None),
                     "kind": getattr(resource, "kind", None),
                     "managed_by": getattr(resource, "managed_by", None),
@@ -127,14 +149,12 @@ class ResourceDiscoveryService:
             span.set_attribute("azure.subscription_id", subscription_id)
             try:
                 groups = await asyncio.to_thread(lambda: list(client.resource_groups.list()))
-                result = [
-                    {
-                        "name": rg.name,
-                        "location": rg.location,
-                        "tags": cast(dict[str, str], rg.tags)
-                        if rg.tags is not None
-                        else dict[str, str](),
-                    }
+                result: list[ResourceGroupInfo] = [
+                    ResourceGroupInfo(
+                        name=rg.name,
+                        location=rg.location,
+                        tags=self._normalize_tags(getattr(rg, "tags", None)),
+                    )
                     for rg in groups
                 ]
                 self._log.info(
@@ -157,11 +177,7 @@ class ResourceDiscoveryService:
         metric_names: list[str],
         timespan: str = "PT1H",
     ) -> dict[str, Any]:
-        from azure.mgmt.monitor import MonitorManagementClient
-
-        if "monitor" not in self._clients:
-            self._clients["monitor"] = MonitorManagementClient(self._credential, subscription_id)
-        monitor_client = cast(MonitorManagementClient, self._clients["monitor"])
+        monitor_client = self._get_monitor_client(subscription_id)
         with self._tracer.start_as_current_span("resource_discovery.get_resource_metrics") as span:
             span.set_attribute("azure.subscription_id", subscription_id)
             span.set_attribute("azure.resource_id", resource_id)
@@ -174,21 +190,28 @@ class ResourceDiscoveryService:
                     metricnames=",".join(metric_names),
                 )
                 result: dict[str, list[dict[str, Any]]] = {}
-                for metric in metrics.value:
+                values = getattr(metrics, "value", None) or []
+                for metric in values:
                     metric_data: list[dict[str, Any]] = []
-                    for ts in metric.timeseries:
-                        for data_point in ts.data:
+                    timeseries = getattr(metric, "timeseries", None) or []
+                    for ts in timeseries:
+                        datapoints = getattr(ts, "data", None) or []
+                        for data_point in datapoints:
                             metric_data.append(
                                 {
-                                    "timestamp": data_point.time_stamp.isoformat(),
-                                    "average": data_point.average,
-                                    "minimum": data_point.minimum,
-                                    "maximum": data_point.maximum,
-                                    "total": data_point.total,
-                                    "count": data_point.count,
+                                    "timestamp": self._iso_or_now(
+                                        getattr(data_point, "time_stamp", None)
+                                    ),
+                                    "average": getattr(data_point, "average", None),
+                                    "minimum": getattr(data_point, "minimum", None),
+                                    "maximum": getattr(data_point, "maximum", None),
+                                    "total": getattr(data_point, "total", None),
+                                    "count": getattr(data_point, "count", None),
                                 }
                             )
-                    result[metric.name.value] = metric_data
+                    name_obj = getattr(metric, "name", None)
+                    metric_name = getattr(name_obj, "value", None) or "unknown"
+                    result[metric_name] = metric_data
                 self._log.info(
                     "finops.metrics.fetched",
                     subscription_id=subscription_id,
@@ -240,21 +263,26 @@ class ResourceDiscoveryService:
             span.set_attribute("azure.subscriptions.count", len(subscriptions))
             span.set_attribute("azure.graph.max_results", max_results)
             while True:
+                top = min(max_results - len(all_results), 1000)
+                if top <= 0:
+                    break
                 request = QueryRequest(
                     query=query,
                     subscriptions=subscriptions,
                     options=QueryRequestOptions(
-                        top=min(max_results - len(all_results), 1000),
-                        skip=skip if not skip_token else None,
+                        top=top,
+                        skip=None if skip_token else skip,
                         skip_token=skip_token,
                     ),
                 )
                 try:
                     result = await asyncio.to_thread(client.resources, request)
-                    all_results.extend(result.data)
-                    if not result.skip_token or len(all_results) >= max_results:
+                    data = getattr(result, "data", None) or []
+                    all_results.extend(cast(list[dict[str, Any]], data))
+                    token = getattr(result, "skip_token", None)
+                    if not token or len(all_results) >= max_results:
                         break
-                    skip_token = result.skip_token
+                    skip_token = cast(str | None, token)
                 except AzureError as e:
                     err = ExternalServiceException(f"Failed to execute graph query: {e}")
                     current = trace.get_current_span()

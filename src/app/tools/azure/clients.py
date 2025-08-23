@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 import os
 import time
 from collections import OrderedDict
@@ -10,6 +11,7 @@ from dataclasses import dataclass
 from random import random
 from typing import Any
 
+from azure.core.credentials import TokenCredential
 from azure.core.credentials_async import AsyncTokenCredential
 from azure.core.exceptions import (
     AzureError,
@@ -35,8 +37,10 @@ from azure.mgmt.sql.aio import SqlManagementClient
 from azure.mgmt.storage.aio import StorageManagementClient
 from azure.mgmt.web.aio import WebSiteManagementClient
 
-from app.core.azure_auth import build_async_credential
+from app.core.azure_auth import arm_scopes, build_async_credential, build_credential
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 def _sub_id(explicit: str | None) -> str:
@@ -46,14 +50,19 @@ def _sub_id(explicit: str | None) -> str:
     return sid
 
 
-async def _credential() -> AsyncTokenCredential:
+async def _credential_async() -> AsyncTokenCredential:
     return await build_async_credential()
+
+
+def _credential_sync() -> TokenCredential:
+    return build_credential()
 
 
 @dataclass(frozen=True)
 class Clients:
     subscription_id: str
     cred: AsyncTokenCredential
+    cred_sync: TokenCredential
     res: ResourceManagementClient
     stor: StorageManagementClient
     net: NetworkManagementClient
@@ -110,12 +119,15 @@ class Clients:
         cclose = getattr(self.cred, "close", None)
         if callable(cclose):
             await cclose()
+        sclose = getattr(self.cred_sync, "close", None)
+        if callable(sclose):
+            await asyncio.to_thread(sclose)
 
 
 _CACHE: OrderedDict[str, tuple[Clients, int]] = OrderedDict()
 _CACHE_LOCK = asyncio.Lock()
 _CACHE_MAX_SIZE = 8
-_TOKEN_SCOPE = "https://management.azure.com/.default"
+_TOKEN_SCOPE = arm_scopes()[0]
 _EXPIRY_MARGIN_SECONDS = 5 * 60
 _RETRY_MAX_ATTEMPTS = int(os.getenv("AZURE_POLL_RETRY_MAX", "6"))
 _RETRY_BASE_SECONDS = float(os.getenv("AZURE_POLL_RETRY_BASE", "1.0"))
@@ -134,36 +146,64 @@ class AzureOperationError(Exception):
 
 
 async def _dispose(clients: Clients) -> None:
-    await clients.close()
+    try:
+        await clients.close()
+    except Exception as exc:
+        logger.warning(
+            "azure_clients.dispose_error",
+            extra={"subscription_id": clients.subscription_id, "error": str(exc)},
+            exc_info=True,
+        )
 
 
 async def _build_clients(sid: str) -> tuple[Clients, int]:
-    cred = await _credential()
-    token = await cred.get_token(_TOKEN_SCOPE)
+    logger.debug("azure_clients.build.start", extra={"subscription_id": sid})
+    cred_async = await _credential_async()
+    token = await cred_async.get_token(_TOKEN_SCOPE)
     expiry = int(token.expires_on) - _EXPIRY_MARGIN_SECONDS
-    return (
-        Clients(
+    cred_sync = _credential_sync()
+    try:
+        clients = Clients(
             subscription_id=sid,
-            cred=cred,
-            res=ResourceManagementClient(cred, sid),
-            stor=StorageManagementClient(cred, sid),
-            net=NetworkManagementClient(cred, sid),
-            web=WebSiteManagementClient(cred, sid),
-            acr=ContainerRegistryManagementClient(cred, sid),
-            aks=ContainerServiceClient(cred, sid),
-            cmp=ComputeManagementClient(cred, sid),
-            auth=AuthorizationManagementClient(cred, sid),
-            sql=SqlManagementClient(cred, sid),
-            kv=KeyVaultManagementClient(cred, sid),
-            cosmos=CosmosDBManagementClient(cred, sid),
-            law=LogAnalyticsManagementClient(cred, sid),
-            appi=ApplicationInsightsManagementClient(cred, sid),
-            msi=ManagedServiceIdentityClient(cred, sid),
-            redis=RedisManagementClient(cred, sid),
-            pdns=PrivateDnsManagementClient(cred, sid),
-        ),
-        expiry,
-    )
+            cred=cred_async,
+            cred_sync=cred_sync,
+            res=ResourceManagementClient(cred_sync, sid),
+            stor=StorageManagementClient(cred_async, sid),
+            net=NetworkManagementClient(cred_async, sid),
+            web=WebSiteManagementClient(cred_async, sid),
+            acr=ContainerRegistryManagementClient(cred_async, sid),
+            aks=ContainerServiceClient(cred_async, sid),
+            cmp=ComputeManagementClient(cred_async, sid),
+            auth=AuthorizationManagementClient(cred_async, sid),
+            sql=SqlManagementClient(cred_async, sid),
+            kv=KeyVaultManagementClient(cred_async, sid),
+            cosmos=CosmosDBManagementClient(cred_async, sid),
+            law=LogAnalyticsManagementClient(cred_async, sid),
+            appi=ApplicationInsightsManagementClient(cred_async, sid),
+            msi=ManagedServiceIdentityClient(cred_async, sid),
+            redis=RedisManagementClient(cred_async, sid),
+            pdns=PrivateDnsManagementClient(cred_async, sid),
+        )
+        logger.debug(
+            "azure_clients.build.end",
+            extra={"subscription_id": sid, "expires_in_s": expiry - int(time.time())},
+        )
+        return clients, expiry
+    except Exception as exc:
+        try:
+            close_async = getattr(cred_async, "close", None)
+            if callable(close_async):
+                await close_async()
+        finally:
+            close_sync = getattr(cred_sync, "close", None)
+            if callable(close_sync):
+                await asyncio.to_thread(close_sync)
+        logger.error(
+            "azure_clients.build.error",
+            extra={"subscription_id": sid, "error_type": type(exc).__name__, "error": str(exc)},
+            exc_info=True,
+        )
+        raise
 
 
 async def get_clients(subscription_id: str | None) -> Clients:
@@ -176,8 +216,10 @@ async def get_clients(subscription_id: str | None) -> Clients:
             if expiry <= now:
                 await _dispose(clients)
                 _CACHE.pop(sid, None)
+                logger.debug("azure_clients.cache.expired", extra={"subscription_id": sid})
             else:
                 _CACHE.move_to_end(sid)
+                logger.debug("azure_clients.cache.hit", extra={"subscription_id": sid})
                 return clients
         clients, expiry = await _build_clients(sid)
         _CACHE[sid] = (clients, expiry)
@@ -185,6 +227,7 @@ async def get_clients(subscription_id: str | None) -> Clients:
         while len(_CACHE) > _CACHE_MAX_SIZE:
             _, (old_clients, _) = _CACHE.popitem(last=False)
             await _dispose(old_clients)
+        logger.debug("azure_clients.cache.miss", extra={"subscription_id": sid})
         return clients
 
 
@@ -241,10 +284,31 @@ async def run_poller(
         except BaseException as e:
             retryable, code, sc = _classify(e)
             if not retryable or attempt >= _RETRY_MAX_ATTEMPTS - 1:
+                logger.error(
+                    "azure_clients.poller.error",
+                    extra={
+                        "subscription_id": clients.subscription_id,
+                        "error_type": type(e).__name__,
+                        "error_code": code,
+                        "http_status": sc,
+                        "attempt": attempt + 1,
+                    },
+                    exc_info=True,
+                )
                 raise AzureOperationError(
                     code=code, message=str(e), status_code=sc, retryable=retryable
                 ) from e
             base = min(_RETRY_BASE_SECONDS * (2**attempt), _RETRY_CAP_SECONDS)
             delay = base * (0.5 + random() * 0.5)
             attempt += 1
+            logger.debug(
+                "azure_clients.poller.retry",
+                extra={
+                    "subscription_id": clients.subscription_id,
+                    "attempt": attempt,
+                    "delay_s": delay,
+                    "http_status": sc,
+                    "error_code": code,
+                },
+            )
             await asyncio.sleep(delay)

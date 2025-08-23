@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from app.ai.agents.base import Agent, AgentContext
@@ -17,7 +18,9 @@ class CoordinatorAgent(Agent[dict[str, Any], dict[str, Any]]):
         super().__init__(context)
         self.orchestrator = OrchestrationAgent(context)
         self.reactive = ReactiveAgent(context)
-        self._handlers: dict[EventType, Any] = {}
+        self._handlers: dict[
+            EventType, Callable[[Event], Awaitable[ExecutionResult[dict[str, Any]]]]
+        ] = {}
         self._setup_event_handlers()
 
     async def plan(self, goal: str) -> ExecutionPlan:
@@ -47,13 +50,16 @@ class CoordinatorAgent(Agent[dict[str, Any], dict[str, Any]]):
         - Each step has: type, name, description, optional tool, args, content.
         - Prefer TOOL steps for provisioning or integrations.
         """
+        uid = self.context.user_id if self.context else "system"
+        tid = self.context.thread_id if self.context else None
+        agent_name = self.context.agent_name if self.context else self.__class__.__name__
         analysis = await generate_response(
             prompt.strip(),
             provider="openai",
             model="gpt-4o",
-            user_id=self.context.user_id,
-            thread_id=self.context.thread_id,
-            agent=self.context.agent_name or self.__class__.__name__,
+            user_id=uid,
+            thread_id=tid,
+            agent=agent_name or self.__class__.__name__,
             history_limit=20,
         )
         steps = self._extract_coordination_plan(analysis, goal)
@@ -62,63 +68,69 @@ class CoordinatorAgent(Agent[dict[str, Any], dict[str, Any]]):
     async def _run_step(self, step: PlanStep) -> StepResult:
         if step.type == StepType.TOOL:
             if step.tool == "provision_orchestrator":
-                agent = ProvisioningAgent(self.context)
-                plan = await agent.plan(step.description or step.name)
+                uid = self.context.user_id if self.context else "system"
+                agent = ProvisioningAgent(uid, context=self.context)
+                plan = await agent.plan(step.description or step.name or "provision")
                 result = await agent.execute(plan)
                 if result.success:
                     return StepResult(
-                        name=step.name,
+                        step_name=step.name,
                         success=True,
-                        output=result.result if hasattr(result, "result") else None,
+                        output=getattr(result, "result", None),
                     )
                 return StepResult(
-                    name=step.name,
+                    step_name=step.name,
                     success=False,
                     error=getattr(result, "error", "provisioning failed"),
                 )
             try:
                 output = await maybe_call_tool(step.tool, step.args or {})
-                return StepResult(name=step.name, success=True, output=output)
+                return StepResult(step_name=step.name, success=True, output=output)
             except Exception as e:
-                return StepResult(name=step.name, success=False, error=str(e))
+                return StepResult(step_name=step.name, success=False, error=str(e))
+
         if step.type == StepType.MESSAGE:
-            return StepResult(name=step.name, success=True, output=step.content or "")
+            return StepResult(step_name=step.name, success=True, output=step.content or "")
+
         if step.type == StepType.SEQUENCE:
-            child_results: list[StepResult] = []
+            seq_results: list[StepResult] = []
             for s in step.children or []:
                 r = await self._run_step(s)
-                child_results.append(r)
+                seq_results.append(r)
                 if not r.success:
                     return StepResult(
-                        name=step.name, success=False, children=child_results, error=r.error
+                        step_name=step.name, success=False, children=seq_results, error=r.error
                     )
-            return StepResult(name=step.name, success=True, children=child_results)
+            return StepResult(step_name=step.name, success=True, children=seq_results)
+
         if step.type == StepType.PARALLEL:
             tasks = [self._run_step(s) for s in step.children or []]
             done = await asyncio.gather(*tasks, return_exceptions=True)
-            child_results: list[StepResult] = []
+            par_results: list[StepResult] = []
             ok = True
             for r in done:
                 if isinstance(r, StepResult):
-                    child_results.append(r)
+                    par_results.append(r)
                     ok = ok and r.success
                 else:
-                    child_results.append(StepResult(name=step.name, success=False, error=str(r)))
+                    par_results.append(StepResult(step_name=step.name, success=False, error=str(r)))
                     ok = False
-            return StepResult(name=step.name, success=ok, children=child_results)
+            return StepResult(step_name=step.name, success=ok, children=par_results)
+
         if step.type == StepType.AGENT:
             plan = await self.orchestrator.plan(step.description or step.name)
             result = await self.orchestrator.execute(plan)
             if result.success:
                 return StepResult(
-                    name=step.name,
+                    step_name=step.name,
                     success=True,
-                    output=result.result if hasattr(result, "result") else None,
+                    output=getattr(result, "result", None),
                 )
             return StepResult(
-                name=step.name, success=False, error=getattr(result, "error", "agent failed")
+                step_name=step.name, success=False, error=getattr(result, "error", "agent failed")
             )
-        return StepResult(name=step.name, success=False, error="unsupported step type")
+
+        return StepResult(step_name=step.name, success=False, error="unsupported step type")
 
     def _extract_coordination_plan(self, analysis: str, goal: str) -> list[PlanStep]:
         try:
@@ -130,8 +142,8 @@ class CoordinatorAgent(Agent[dict[str, Any], dict[str, Any]]):
             for i, item in enumerate(raw_steps):
                 if not isinstance(item, dict):
                     continue
-                t = str(item.get("type", "message")).lower()
-                st = StepType(t) if t in StepType.__members__.values() else StepType.MESSAGE
+                t = str(item.get("type", "message"))
+                st = self._parse_step_type(t)
                 steps.append(
                     PlanStep(
                         type=st,
@@ -147,6 +159,7 @@ class CoordinatorAgent(Agent[dict[str, Any], dict[str, Any]]):
                 return steps
         except Exception:
             pass
+
         fallback: list[PlanStep] = []
         text = analysis.lower()
         if "provision" in text:
@@ -178,6 +191,16 @@ class CoordinatorAgent(Agent[dict[str, Any], dict[str, Any]]):
                 )
             )
         return fallback
+
+    def _parse_step_type(self, raw: str) -> StepType:
+        s = raw.strip()
+        try:
+            return StepType(s.lower())
+        except Exception:
+            try:
+                return StepType[s.upper()]
+            except Exception:
+                return StepType.MESSAGE
 
     def _setup_event_handlers(self) -> None:
         self._handlers = {

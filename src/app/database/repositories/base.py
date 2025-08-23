@@ -64,6 +64,8 @@ class BaseRepository[T](ABC):
         placeholders = ", ".join(f"${i + 1}" for i in range(len(data)))
         query = f"INSERT INTO {self.table_name} ({columns}) VALUES ({placeholders}) RETURNING *"
         record = await self.db.fetchrow(query, *data.values())
+        if record is None:
+            raise RuntimeError("INSERT ... RETURNING did not return a row")
         return self._to_model(dict(record))
 
     async def update(self, id: str, updates: dict[str, Any]) -> T | None:

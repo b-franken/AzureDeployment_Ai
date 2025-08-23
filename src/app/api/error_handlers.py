@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Protocol
 
 import httpx
 from fastapi import FastAPI, Request
@@ -25,9 +25,31 @@ from app.core.exceptions import (
 )
 from app.tools.azure.clients import AzureOperationError
 
+
+class _AzureExceptionsProto(Protocol):
+    AzureError: type[Exception]
+    ClientAuthenticationError: type[Exception]
+    HttpResponseError: type[Exception]
+    ServiceRequestError: type[Exception]
+    ServiceResponseError: type[Exception]
+
+
 try:
-    import azure.core.exceptions as azure_exceptions
+    # type: ignore[import-not-found]
+    import azure.core.exceptions as _azure_mod
 except Exception:
+    _azure_mod = None  # type: ignore[assignment]
+
+azure_exceptions: _AzureExceptionsProto
+if _azure_mod is not None:
+    azure_exceptions = SimpleNamespace(
+        AzureError=getattr(_azure_mod, "AzureError", Exception),
+        ClientAuthenticationError=getattr(_azure_mod, "ClientAuthenticationError", Exception),
+        HttpResponseError=getattr(_azure_mod, "HttpResponseError", Exception),
+        ServiceRequestError=getattr(_azure_mod, "ServiceRequestError", Exception),
+        ServiceResponseError=getattr(_azure_mod, "ServiceResponseError", Exception),
+    )
+else:
 
     class _AzureError(Exception):
         pass
@@ -92,6 +114,10 @@ def install_error_handlers(app: FastAPI) -> None:
             }
             for e in exc.errors()
         ]
+        logger.warning(
+            "Request validation error",
+            extra={"error_code": "validation_error", "detail": errors},
+        )
         return _error_response(
             request,
             status_code=400,
@@ -110,6 +136,10 @@ def install_error_handlers(app: FastAPI) -> None:
             }
             for e in exc.errors()
         ]
+        logger.warning(
+            "Pydantic validation error",
+            extra={"error_code": "validation_error", "detail": errors},
+        )
         return _error_response(
             request,
             status_code=400,
@@ -143,12 +173,15 @@ def install_error_handlers(app: FastAPI) -> None:
             retry_after = (
                 int(exc.details.get("retry_after", 0)) if isinstance(exc.details, dict) else None
             )
-        logger.warning(
+        level = logging.INFO if status_code == 404 else logging.WARNING
+        logger.log(
+            level,
             "Application error",
             extra={
                 "error_code": exc.__class__.__name__,
                 "message": str(exc),
                 "detail": exc.details,
+                "http_status": status_code,
             },
         )
         return _error_response(
@@ -177,6 +210,17 @@ def install_error_handlers(app: FastAPI) -> None:
                 retry_after = int(detail_obj["retry_after"])
             except Exception:
                 retry_after = None
+        level = logging.INFO if exc.status_code == 404 else logging.WARNING
+        logger.log(
+            level,
+            "HTTP exception",
+            extra={
+                "error_code": error_code,
+                "message": message,
+                "detail": detail_obj if isinstance(detail_obj, (dict | list | tuple)) else None,
+                "http_status": exc.status_code,
+            },
+        )
         return _error_response(
             request,
             status_code=exc.status_code,
@@ -189,6 +233,10 @@ def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(httpx.ConnectTimeout)
     @app.exception_handler(httpx.ReadTimeout)
     async def _handle_httpx_timeout(request: Request, exc: Exception) -> JSONResponse:
+        logger.error(
+            "HTTPX timeout",
+            extra={"error_code": "network_timeout", "detail": {"type": type(exc).__name__}},
+        )
         return _error_response(
             request,
             status_code=504,
@@ -201,15 +249,20 @@ def install_error_handlers(app: FastAPI) -> None:
     async def _handle_httpx_request_error(
         request: Request, exc: httpx.RequestError
     ) -> JSONResponse:
+        req_url = str(exc.request.url) if getattr(exc, "request", None) else None
+        logger.error(
+            "HTTPX request error",
+            extra={
+                "error_code": "network_error",
+                "detail": {"type": type(exc).__name__, "request": req_url},
+            },
+        )
         return _error_response(
             request,
             status_code=503,
             error_code="network_error",
             message="Upstream network error",
-            detail={
-                "type": type(exc).__name__,
-                "request": str(exc.request.url) if getattr(exc, "request", None) else None,
-            },
+            detail={"type": type(exc).__name__, "request": req_url},
         )
 
     @app.exception_handler(azure_exceptions.AzureError)
@@ -233,6 +286,15 @@ def install_error_handlers(app: FastAPI) -> None:
             status_code = 502
             error_code = "bad_gateway"
             message = "Azure upstream error"
+        logger.error(
+            "Azure SDK exception",
+            extra={
+                "error_code": error_code,
+                "message": message,
+                "detail": {"type": type(exc).__name__, "message": str(exc)},
+                "http_status": status_code,
+            },
+        )
         return _error_response(
             request,
             status_code=status_code,
@@ -249,6 +311,12 @@ def install_error_handlers(app: FastAPI) -> None:
             502 if exc.retryable else (int(exc.status_code) if exc.status_code is not None else 400)
         )
         detail = {"status_code": exc.status_code, "retryable": exc.retryable}
+        level = logging.WARNING if status_code < 500 else logging.ERROR
+        logger.log(
+            level,
+            "Azure operation error",
+            extra={"error_code": str(exc.code or "azure_operation_error"), "detail": detail},
+        )
         return _error_response(
             request,
             status_code=status_code,
@@ -259,7 +327,10 @@ def install_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def _handle_uncaught(request: Request, exc: Exception) -> JSONResponse:
-        logger.exception("Unhandled error", exc_info=exc)
+        logger.exception(
+            "Unhandled error",
+            extra={"error_code": "internal_server_error", "detail": {"type": type(exc).__name__}},
+        )
         return _error_response(
             request,
             status_code=500,

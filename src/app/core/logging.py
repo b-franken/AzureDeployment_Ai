@@ -1,4 +1,3 @@
-# src/app/core/logging.py
 from __future__ import annotations
 
 import logging
@@ -104,11 +103,11 @@ class ContextFilter(logging.Filter):
         return True
 
 
-def _drop_private_keys(_: Any, __: str, event_dict: dict[str, Any]) -> dict[str, Any]:
+def _drop_private_keys(_: Any, __: str, event_dict: MutableMapping[str, Any]) -> Mapping[str, Any]:
     return {k: v for k, v in event_dict.items() if not str(k).startswith("_")}
 
 
-def _otel_enricher(_: Any, __: str, event_dict: dict[str, Any]) -> dict[str, Any]:
+def _otel_enricher(_: Any, __: str, event_dict: MutableMapping[str, Any]) -> Mapping[str, Any]:
     span = trace.get_current_span()
     ctx = span.get_span_context() if span else None
     if ctx and ctx.is_valid:

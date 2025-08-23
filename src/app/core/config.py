@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import logging
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 
 from cryptography.fernet import Fernet
 from pydantic import (
@@ -19,6 +20,8 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+logger = logging.getLogger(__name__)
+
 PostgresUrl = Annotated[
     AnyUrl,
     UrlConstraints(
@@ -30,6 +33,8 @@ PostgresUrl = Annotated[
         ]
     ),
 ]
+
+ProviderLiteral = Literal["openai", "gemini", "ollama", "azure"]
 
 
 class SecurityConfig(BaseModel):
@@ -146,7 +151,7 @@ class AzureConfig(BaseModel):
 
 
 class LLMConfig(BaseModel):
-    default_provider: Literal["openai", "gemini", "ollama", "azure"] = "openai"
+    default_provider: ProviderLiteral = "openai"
     openai_api_key: SecretStr | None = None
     openai_api_base: str = "https://api.openai.com/v1"
     openai_model: str = "gpt-5"
@@ -247,8 +252,25 @@ class Settings(BaseSettings):
         if self.openai_model:
             self.llm.openai_model = self.openai_model
         if self.llm_provider:
-            # type: ignore[assignment]
-            self.llm.default_provider = self.llm_provider
+            val = str(self.llm_provider).strip().lower()
+            aliases: dict[str, ProviderLiteral] = {
+                "openai": "openai",
+                "azure": "azure",
+                "azopenai": "azure",
+                "msopenai": "azure",
+                "gemini": "gemini",
+                "google": "gemini",
+                "ollama": "ollama",
+                "local": "ollama",
+            }
+            resolved = aliases.get(val)
+            if resolved:
+                self.llm.default_provider = cast(ProviderLiteral, resolved)
+            else:
+                logger.warning(
+                    "settings.invalid_llm_provider",
+                    extra={"provided": self.llm_provider},
+                )
         if self.applicationinsights_connection_string:
             self.observability.applicationinsights_connection_string = (
                 self.applicationinsights_connection_string
@@ -293,7 +315,11 @@ class Config:
         return self._cipher.decrypt(encrypted.encode()).decode()
 
     def reload(self) -> None:
-        self.__init__()
+        new_settings = Settings()
+        self._settings = new_settings
+        key = new_settings.security.encryption_key.get_secret_value()
+        key_bytes = key if isinstance(key, bytes) else key.encode()
+        self._cipher = Fernet(key_bytes)
 
     def export_safe_config(self) -> dict[str, Any]:
         cfg = self._settings.model_dump()

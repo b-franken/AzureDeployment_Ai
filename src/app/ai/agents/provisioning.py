@@ -38,11 +38,11 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
         ensure_tools_loaded()
 
     async def plan(self, goal: str) -> ExecutionPlan:
-        """Create a provisioning plan based on the goal."""
-
         parsed = parse_provision_request(goal)
+        env = self.context.environment if self.context else "dev"
+        dry_run = self.context.dry_run if self.context else True
 
-        steps = []
+        steps: list[PlanStep] = []
 
         steps.append(
             PlanStep(
@@ -60,10 +60,7 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
                 name="check_prerequisites",
                 description="Check resource prerequisites",
                 tool="prerequisite_checker",
-                args={
-                    "resource_type": parsed.resource_type,
-                    "environment": self.context.environment if self.context else "dev",
-                },
+                args={"resource_type": parsed.resource_type, "environment": env},
                 dependencies=["validate_request"],
             )
         )
@@ -79,17 +76,14 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
             )
         )
 
-        if not self.context.dry_run:
+        if not dry_run:
             steps.append(
                 PlanStep(
                     type=StepType.TOOL,
                     name="apply_infrastructure",
                     description="Apply infrastructure changes",
                     tool="apply_infrastructure",
-                    args={
-                        "dry_run": False,
-                        "environment": self.context.environment if self.context else "dev",
-                    },
+                    args={"dry_run": False, "environment": env},
                     dependencies=["generate_infrastructure"],
                 )
             )
@@ -102,9 +96,7 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
                 tool="verification_tool",
                 args={"resource_type": parsed.resource_type, "resource_name": parsed.resource_name},
                 dependencies=(
-                    ["apply_infrastructure"]
-                    if not self.context.dry_run
-                    else ["generate_infrastructure"]
+                    ["apply_infrastructure"] if not dry_run else ["generate_infrastructure"]
                 ),
             )
         )
@@ -119,33 +111,33 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
                     "resource_name": parsed.resource_name,
                     "confidence": parsed.confidence,
                 },
-                "dry_run": self.context.dry_run if self.context else True,
+                "dry_run": dry_run,
             },
         )
 
     async def execute(self, plan: ExecutionPlan) -> ExecutionResult[dict[str, Any]]:
-        """Execute the provisioning plan."""
         import time
 
         start_time = time.perf_counter()
-
-        step_results = []
-        accumulated_output = {}
+        step_results: list[StepResult] = []
+        accumulated_output: dict[str, Any] = {}
 
         for step in plan.steps:
             try:
                 result = await self._execute_step(step, accumulated_output)
                 step_results.append(result)
-
                 if result.output:
                     accumulated_output[step.name or step.type.value] = result.output
-
                 if not result.success and step.type != StepType.MESSAGE:
-                    # Stop execution on critical failures
                     break
-
             except Exception as e:
-                logger.error(f"Step {step.name} failed: {e}", exc_info=True)
+                logger.error(
+                    "provisioning.step_exception",
+                    step=step.name or step.type.value,
+                    error_type=type(e).__name__,
+                    error_message=str(e),
+                    exc_info=True,
+                )
                 step_results.append(
                     StepResult(step_name=step.name or step.type.value, success=False, error=str(e))
                 )
@@ -158,42 +150,36 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
             result=accumulated_output,
             duration_ms=(time.perf_counter() - start_time) * 1000,
             step_results=step_results,
-            metadata={**plan.metadata, "execution_time": datetime.utcnow().isoformat()},
+            metadata={
+                **plan.metadata,
+                "execution_time": datetime.datetime.now(datetime.UTC).isoformat(),
+            },
         )
 
     async def _execute_step(self, step: PlanStep, context: dict[str, Any]) -> StepResult:
-        """Execute a single plan step."""
         import time
 
         start_time = time.perf_counter()
-
         try:
             if step.type == StepType.TOOL and step.tool:
                 tool = get_tool(step.tool)
-
                 if tool:
                     args = self._resolve_args(step.args or {}, context)
                     output = await tool.run(**args)
                 else:
                     output = await self._mock_tool_execution(step.tool, step.args or {})
-
             elif step.type == StepType.MESSAGE:
                 output = {"message": step.content or ""}
-
             else:
                 output = {"status": "completed"}
-
             duration = (time.perf_counter() - start_time) * 1000
-
             return StepResult(
                 step_name=step.name or step.type.value,
                 success=True,
                 output=output,
                 duration_ms=duration,
             )
-
         except Exception as e:
-            logger.error(f"Step execution failed: {e}", exc_info=True)
             return StepResult(
                 step_name=step.name or step.type.value,
                 success=False,
@@ -202,8 +188,7 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
             )
 
     def _resolve_args(self, args: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
-        """Resolve arguments by substituting context values."""
-        resolved = {}
+        resolved: dict[str, Any] = {}
         for key, value in args.items():
             if isinstance(value, str) and value.startswith("$"):
                 var_name = value[1:]
@@ -215,34 +200,27 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
         return resolved
 
     async def _mock_tool_execution(self, tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
-        """Mock tool execution for tools that aren't available."""
-        logger.warning(f"Tool {tool_name} not found, using mock execution")
-
+        logger.warning("provisioning.mock_tool_used", tool=tool_name)
         if tool_name == "validation_tool":
             return {
                 "valid": True,
                 "warnings": [],
                 "resource_type": args.get("resource_type", "unknown"),
             }
-        elif tool_name == "prerequisite_checker":
+        if tool_name == "prerequisite_checker":
             return {"prerequisites_met": True, "missing": [], "recommendations": []}
-        elif tool_name == "verification_tool":
+        if tool_name == "verification_tool":
             return {
                 "verified": True,
                 "status": "healthy",
                 "resource_name": args.get("resource_name", "unknown"),
             }
-        else:
-            return {"status": "completed", "tool": tool_name, "args": args}
+        return {"status": "completed", "tool": tool_name, "args": args}
 
     async def run_provisioning(self, deployment_id: str) -> dict[str, Any]:
-        """Run a complete provisioning workflow."""
-        logger.info(f"Starting provisioning for deployment {deployment_id}")
-
+        logger.info("provisioning.start", deployment_id=deployment_id)
         goal = f"Provision resources for deployment {deployment_id}"
-
         result = await self.run(goal)
-
         return {
             "deployment_id": deployment_id,
             "success": result.success,

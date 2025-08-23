@@ -12,12 +12,13 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 from functools import wraps
-from typing import Any, TypeVar
+from typing import Any, ParamSpec, TypeVar, cast
 
 import structlog
 from prometheus_client import Counter, Gauge, Histogram
 
-T = TypeVar("T")
+P = ParamSpec("P")
+R = TypeVar("R")
 ExceptionHandler = Callable[[Exception], Any]
 
 error_counter = Counter(
@@ -231,6 +232,7 @@ class ErrorRecoveryStrategy:
         self,
         error: BaseApplicationException,
         context: ErrorContext,
+        func: Callable[..., Any] | None = None,
         *args: Any,
         **kwargs: Any,
     ) -> Any:
@@ -257,10 +259,12 @@ class RetryStrategy(ErrorRecoveryStrategy):
         self,
         error: BaseApplicationException,
         context: ErrorContext,
-        func: Callable[..., Any],
+        func: Callable[..., Any] | None = None,
         *args: Any,
         **kwargs: Any,
     ) -> Any:
+        if func is None:
+            raise error
         for attempt in range(self.max_retries):
             delay = min(self.base_delay * (self.exponential_base**attempt), self.max_delay)
             await asyncio.sleep(delay)
@@ -392,9 +396,7 @@ class ErrorHandler:
                 if strategy and await strategy.can_recover(error):
                     try:
                         error_context.recovery_attempted = True
-                        result = await strategy.recover(error, error_context)
-                        error_context.recovery_successful = True
-                        return result
+                        raise error
                     except Exception as e:
                         self.logger.error("Recovery failed", error=str(e))
 
@@ -472,37 +474,37 @@ def handle_errors(
     recover: bool = True,
     default_return: Any = None,
     log_level: ErrorSeverity = ErrorSeverity.ERROR,
-) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+) -> Callable[[Callable[P, Any]], Callable[P, Any]]:
+    def decorator(func: Callable[P, Any]) -> Callable[P, Any]:
         @wraps(func)
-        async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+        async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> Any:
             handler = ErrorHandler()
             try:
-                return await func(*args, **kwargs)
+                return await func(*args, **kwargs)  # type: ignore[misc]
             except Exception as e:
                 try:
                     return await handler.handle_error(e, recover=recover)
                 except Exception:
                     if default_return is not None:
-                        logger = structlog.get_logger()
+                        log = structlog.get_logger()
                         if log_level == ErrorSeverity.DEBUG:
-                            logger.debug("Handled error with default return", error=str(e))
+                            log.debug("Handled error with default return", error=str(e))
                         elif log_level == ErrorSeverity.INFO:
-                            logger.info("Handled error with default return", error=str(e))
+                            log.info("Handled error with default return", error=str(e))
                         elif log_level == ErrorSeverity.WARNING:
-                            logger.warning("Handled error with default return", error=str(e))
+                            log.warning("Handled error with default return", error=str(e))
                         elif log_level in (ErrorSeverity.CRITICAL, ErrorSeverity.FATAL):
-                            logger.critical("Handled error with default return", error=str(e))
+                            log.critical("Handled error with default return", error=str(e))
                         else:
-                            logger.error("Handled error with default return", error=str(e))
+                            log.error("Handled error with default return", error=str(e))
                         return default_return
                     raise
 
         @wraps(func)
-        def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+        def sync_wrapper(*args: P.args, **kwargs: P.kwargs) -> Any:
             handler = ErrorHandler()
             try:
-                return func(*args, **kwargs)
+                return func(*args, **kwargs)  # type: ignore[misc]
             except Exception as e:
                 try:
                     try:
@@ -516,49 +518,51 @@ def handle_errors(
                                 return await handler.handle_error(exc, recover=recover)
                             except Exception:
                                 if default_return is not None:
-                                    logger = structlog.get_logger()
+                                    log = structlog.get_logger()
                                     if log_level == ErrorSeverity.DEBUG:
-                                        logger.debug(
+                                        log.debug(
                                             "Handled error with default return", error=str(exc)
                                         )
                                     elif log_level == ErrorSeverity.INFO:
-                                        logger.info(
+                                        log.info(
                                             "Handled error with default return", error=str(exc)
                                         )
                                     elif log_level == ErrorSeverity.WARNING:
-                                        logger.warning(
+                                        log.warning(
                                             "Handled error with default return", error=str(exc)
                                         )
                                     elif log_level in (ErrorSeverity.CRITICAL, ErrorSeverity.FATAL):
-                                        logger.critical(
+                                        log.critical(
                                             "Handled error with default return", error=str(exc)
                                         )
                                     else:
-                                        logger.error(
+                                        log.error(
                                             "Handled error with default return", error=str(exc)
                                         )
                                     return default_return
                                 raise
 
                         return loop.create_task(run_handler())
-                    return asyncio.run(handler.handle_error(e, recover=recover))
+                    return asyncio.run(ErrorHandler().handle_error(e, recover=recover))
                 except Exception:
                     if default_return is not None:
-                        logger = structlog.get_logger()
+                        log = structlog.get_logger()
                         if log_level == ErrorSeverity.DEBUG:
-                            logger.debug("Handled error with default return", error=str(e))
+                            log.debug("Handled error with default return", error=str(e))
                         elif log_level == ErrorSeverity.INFO:
-                            logger.info("Handled error with default return", error=str(e))
+                            log.info("Handled error with default return", error=str(e))
                         elif log_level == ErrorSeverity.WARNING:
-                            logger.warning("Handled error with default return", error=str(e))
+                            log.warning("Handled error with default return", error=str(e))
                         elif log_level in (ErrorSeverity.CRITICAL, ErrorSeverity.FATAL):
-                            logger.critical("Handled error with default return", error=str(e))
+                            log.critical("Handled error with default return", error=str(e))
                         else:
-                            logger.error("Handled error with default return", error=str(e))
+                            log.error("Handled error with default return", error=str(e))
                         return default_return
                     raise
 
-        return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
+        if asyncio.iscoroutinefunction(func):
+            return cast(Callable[P, Any], async_wrapper)
+        return cast(Callable[P, Any], sync_wrapper)
 
     return decorator
 
@@ -570,7 +574,7 @@ def retry_on_error(
     exceptions: tuple[type[BaseException], ...] = (Exception,),
     predicate: Callable[[BaseException], bool] | None = None,
     delay: float | None = None,
-) -> Callable[[Callable[..., T]], Callable[..., T]]:
+) -> Callable[[Callable[P, Any]], Callable[P, Any]]:
     if delay is not None:
         warnings.warn(
             "retry_on_error(delay=...) is deprecated. Use base_delay=...",
@@ -584,9 +588,9 @@ def retry_on_error(
     def backoff(attempt: int) -> float:
         return min(max_delay, base * (2**attempt)) * random.uniform(0.5, 1.5)
 
-    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+    def decorator(func: Callable[P, Any]) -> Callable[P, Any]:
         @wraps(func)
-        async def async_wrapper(*args: Any, **kwargs: Any) -> T:
+        async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> Any:
             last: BaseException | None = None
             for attempt in range(max_retries):
                 try:
@@ -601,13 +605,13 @@ def retry_on_error(
             raise last
 
         @wraps(func)
-        def sync_wrapper(*args: Any, **kwargs: Any) -> T:
+        def sync_wrapper(*args: P.args, **kwargs: P.kwargs) -> Any:
             import time
 
             last: BaseException | None = None
             for attempt in range(max_retries):
                 try:
-                    return func(*args, **kwargs)
+                    return func(*args, **kwargs)  # type: ignore[misc]
                 except exceptions as e:
                     if predicate and not predicate(e):
                         raise
@@ -617,7 +621,9 @@ def retry_on_error(
             assert last is not None
             raise last
 
-        return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
+        if asyncio.iscoroutinefunction(func):
+            return cast(Callable[P, Any], async_wrapper)
+        return cast(Callable[P, Any], sync_wrapper)
 
     return decorator
 

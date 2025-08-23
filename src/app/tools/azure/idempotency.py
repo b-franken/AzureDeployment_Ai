@@ -1,27 +1,48 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
-from collections.abc import Callable
-from typing import Any
-
-try:  # pragma: no cover - safety net if Azure SDK is absent
-    from azure.core.exceptions import AzureError
-except Exception:  # pragma: no cover - Azure not installed
-    AzureError = Exception
+from collections.abc import Awaitable, Callable
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
 
-async def safe_get(callable_obj: Callable[..., Any], *args: Any, **kwargs: Any) -> tuple[bool, Any]:
+def _is_azure_error(exc: BaseException) -> bool:
+    mod = getattr(exc.__class__, "__module__", "")
+    return mod.startswith("azure.")
+
+
+async def safe_get(
+    callable_obj: Callable[..., Any] | Awaitable[Any],
+    *args: Any,
+    **kwargs: Any,
+) -> tuple[bool, Any]:
     try:
-        res = await asyncio.to_thread(callable_obj, *args, **kwargs)
+        if callable(callable_obj):
+            func = cast(Callable[..., Any], callable_obj)
+            result = func(*args, **kwargs)
+            if inspect.isawaitable(result):
+                res = await cast(Awaitable[Any], result)
+            else:
+                res = await asyncio.to_thread(func, *args, **kwargs)
+        elif inspect.isawaitable(callable_obj):
+            res = await cast(Awaitable[Any], callable_obj)
+        else:
+            raise TypeError("safe_get expects a callable or awaitable")
         return True, res
-    except AzureError as exc:
-        logger.warning(
-            "Azure SDK error calling %s: %s",
-            getattr(callable_obj, "__name__", callable_obj),
-            exc,
+    except Exception as exc:
+        level = logger.warning if _is_azure_error(exc) else logger.error
+        level(
+            "azure_idempotency.safe_get.error",
+            extra={
+                "callable": getattr(callable_obj, "__name__", type(callable_obj).__name__),
+                "error_type": type(exc).__name__,
+                "error_message": str(exc),
+                "azure_error": _is_azure_error(exc),
+            },
+            exc_info=True,
         )
         return False, None
 

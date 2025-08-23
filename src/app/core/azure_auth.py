@@ -48,9 +48,9 @@ class _SyncToAsyncCredential(AsyncTokenCredential):
 
     async def __aexit__(
         self,
-        exc_type: type[BaseException] | None,
-        exc_value: BaseException | None,
-        traceback: TracebackType | None,
+        exc_type: type[BaseException] | None = None,
+        exc_value: BaseException | None = None,
+        traceback: TracebackType | None = None,
     ) -> None:
         await self.aclose()
 

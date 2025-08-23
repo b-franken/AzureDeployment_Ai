@@ -63,9 +63,7 @@ class SecurityConfig(BaseModel):
             Fernet(
                 raw
                 if isinstance(raw, bytes)
-                else raw.encode()
-                if isinstance(raw, str)
-                else str(raw).encode()
+                else raw.encode() if isinstance(raw, str) else str(raw).encode()
             )
         except Exception as err:
             raise ValueError("Invalid encryption key") from err

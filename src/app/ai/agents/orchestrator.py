@@ -22,6 +22,7 @@ class OrchestrationAgent(Agent[dict[str, Any], dict[str, Any]]):
         self.agents[name] = agent
 
     async def plan(self, goal: str) -> ExecutionPlan:
+        logger.debug("planning execution for goal %s", goal)
         prompt = f"""
         Create an execution plan for: {goal}
 
@@ -44,6 +45,7 @@ class OrchestrationAgent(Agent[dict[str, Any], dict[str, Any]]):
         return ExecutionPlan(steps=steps, metadata={"goal": goal, "context": self.context.metadata})
 
     async def execute(self, plan: ExecutionPlan) -> ExecutionResult[dict[str, Any]]:
+        logger.debug("executing plan with %d steps", len(plan.steps))
         results: list[StepResult] = []
         for step in plan.steps:
             res = await self._run_step(step)
@@ -53,22 +55,23 @@ class OrchestrationAgent(Agent[dict[str, Any], dict[str, Any]]):
         return ExecutionResult(success=True, result={"steps": results})
 
     async def _run_step(self, step: PlanStep) -> StepResult:
+        logger.debug("running step %s of type %s", step.name, step.type)
         if step.type == StepType.TOOL:
             try:
                 output = await maybe_call_tool(step.tool, step.args or {})
-                return StepResult(name=step.name, success=True, output=output)
+                return StepResult(step_name=step.name, success=True, output=output)
             except Exception as e:
-                return StepResult(name=step.name, success=False, error=str(e))
+                return StepResult(step_name=step.name, success=False, error=str(e))
         if step.type == StepType.MESSAGE:
-            return StepResult(name=step.name, success=True, output=step.content or "")
+            return StepResult(step_name=step.name, success=True, output=step.content or "")
         if step.type == StepType.SEQUENCE:
             sequence_results: list[StepResult] = []
             for s in step.children or []:
                 r = await self._run_step(s)
                 sequence_results.append(r)
                 if not r.success:
-                    return StepResult(name=step.name, success=False, children=sequence_results)
-            return StepResult(name=step.name, success=True, children=sequence_results)
+                    return StepResult(step_name=step.name, success=False, children=sequence_results)
+            return StepResult(step_name=step.name, success=True, children=sequence_results)
         if step.type == StepType.PARALLEL:
             tasks = [self._run_step(s) for s in step.children or []]
             done = await asyncio.gather(*tasks, return_exceptions=True)
@@ -79,25 +82,27 @@ class OrchestrationAgent(Agent[dict[str, Any], dict[str, Any]]):
                     child_results.append(r)
                     ok = ok and r.success
                 else:
-                    child_results.append(StepResult(name=step.name, success=False, error=str(r)))
+                    child_results.append(
+                        StepResult(step_name=step.name, success=False, error=str(r))
+                    )
                     ok = False
-            return StepResult(name=step.name, success=ok, children=child_results)
+            return StepResult(step_name=step.name, success=ok, children=child_results)
         if step.type == StepType.AGENT:
             agent = self.agents.get(step.agent or "")
             if not agent:
-                return StepResult(name=step.name, success=False, error="agent not found")
+                return StepResult(step_name=step.name, success=False, error="agent not found")
             plan = await agent.plan(step.description or step.name)
             result = await agent.execute(plan)
             if result.success:
                 return StepResult(
-                    name=step.name,
+                    step_name=step.name,
                     success=True,
                     output=result.result if hasattr(result, "result") else None,
                 )
             return StepResult(
-                name=step.name, success=False, error=getattr(result, "error", "agent failed")
+                step_name=step.name, success=False, error=getattr(result, "error", "agent failed")
             )
-        return StepResult(name=step.name, success=False, error="unsupported step type")
+        return StepResult(step_name=step.name, success=False, error="unsupported step type")
 
     def _parse_plan_response(self, text: str, goal: str) -> list[PlanStep]:
         try:

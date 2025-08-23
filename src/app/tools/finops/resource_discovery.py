@@ -3,10 +3,12 @@ from __future__ import annotations
 import asyncio
 from typing import Any, TypedDict, cast
 
+import structlog
 from azure.core.exceptions import AzureError
 from azure.mgmt.resource import ResourceManagementClient
 from azure.mgmt.resourcegraph import ResourceGraphClient
 from azure.mgmt.resourcegraph.models import QueryRequest, QueryRequestOptions
+from opentelemetry import trace
 
 from app.core.azure_auth import build_credential
 from app.core.exceptions import ExternalServiceException, retry_on_error
@@ -24,19 +26,21 @@ class ResourceDiscoveryService:
         self._clients: dict[str, Any] = {}
         self._cache: dict[str, tuple[list[dict[str, Any]], float]] = {}
         self._cache_ttl = 300.0
+        self._tracer = trace.get_tracer("finops.resource_discovery")
+        self._log = structlog.get_logger()
 
     def _get_resource_client(self, subscription_id: str) -> ResourceManagementClient:
         key = f"resource_{subscription_id}"
         if key not in self._clients:
             self._clients[key] = ResourceManagementClient(self._credential, subscription_id)
-        return self._clients[key]
+        return cast(ResourceManagementClient, self._clients[key])
 
     def _get_graph_client(self) -> ResourceGraphClient:
         if "graph" not in self._clients:
             self._clients["graph"] = ResourceGraphClient(self._credential)
-        return self._clients["graph"]
+        return cast(ResourceGraphClient, self._clients["graph"])
 
-    @retry_on_error(max_retries=3, delay=1.0, exceptions=(AzureError,))
+    @retry_on_error(max_retries=3, base_delay=1.0, exceptions=(AzureError,))
     async def discover_resources(
         self,
         subscription_id: str,
@@ -52,9 +56,28 @@ class ResourceDiscoveryService:
             if time.time() - cached_time < self._cache_ttl:
                 return cached_data
         query = self._build_kql_query(subscription_id, resource_group, resource_type, tags)
-        resources = await self._execute_graph_query(query, [subscription_id])
-        self._cache[cache_key] = (resources, time.time())
-        return resources
+        with self._tracer.start_as_current_span("resource_discovery.discover_resources") as span:
+            span.set_attribute("azure.subscription_id", subscription_id)
+            if resource_group:
+                span.set_attribute("azure.resource_group", resource_group)
+            if resource_type:
+                span.set_attribute("azure.resource_type", resource_type)
+            try:
+                resources = await self._execute_graph_query(query, [subscription_id])
+                self._cache[cache_key] = (resources, time.time())
+                self._log.info(
+                    "finops.resources.discovered",
+                    subscription_id=subscription_id,
+                    count=len(resources),
+                    resource_group=resource_group,
+                    resource_type=resource_type,
+                )
+                return resources
+            except ExternalServiceException as err:
+                current = trace.get_current_span()
+                if current:
+                    current.record_exception(err)
+                raise
 
     async def get_resource_details(
         self,
@@ -62,43 +85,70 @@ class ResourceDiscoveryService:
         resource_id: str,
     ) -> dict[str, Any]:
         client = self._get_resource_client(subscription_id)
-        try:
-            resource = await asyncio.to_thread(
-                client.resources.get_by_id, resource_id, api_version="2023-07-01"
-            )
-            return {
-                "id": resource.id,
-                "name": resource.name,
-                "type": resource.type,
-                "location": resource.location,
-                "tags": resource.tags or {},
-                "properties": resource.properties or {},
-                "sku": getattr(resource, "sku", None),
-                "kind": getattr(resource, "kind", None),
-                "managed_by": getattr(resource, "managed_by", None),
-            }
-        except AzureError as e:
-            raise ExternalServiceException(f"Failed to get resource details: {e}") from e
+        with self._tracer.start_as_current_span("resource_discovery.get_resource_details") as span:
+            span.set_attribute("azure.subscription_id", subscription_id)
+            span.set_attribute("azure.resource_id", resource_id)
+            try:
+                resource = await asyncio.to_thread(
+                    client.resources.get_by_id, resource_id, api_version="2023-07-01"
+                )
+                data = {
+                    "id": resource.id,
+                    "name": resource.name,
+                    "type": resource.type,
+                    "location": resource.location,
+                    "tags": resource.tags or {},
+                    "properties": resource.properties or {},
+                    "sku": getattr(resource, "sku", None),
+                    "kind": getattr(resource, "kind", None),
+                    "managed_by": getattr(resource, "managed_by", None),
+                }
+                self._log.info(
+                    "finops.resource.details",
+                    subscription_id=subscription_id,
+                    resource_id=resource_id,
+                    resource_type=data.get("type", ""),
+                    location=data.get("location", ""),
+                )
+                return data
+            except AzureError as e:
+                err = ExternalServiceException(f"Failed to get resource details: {e}")
+                current = trace.get_current_span()
+                if current:
+                    current.record_exception(err)
+                raise err from e
 
     async def list_resource_groups(
         self,
         subscription_id: str,
     ) -> list[ResourceGroupInfo]:
         client = self._get_resource_client(subscription_id)
-        try:
-            groups = await asyncio.to_thread(lambda: list(client.resource_groups.list()))
-            return [
-                {
-                    "name": rg.name,
-                    "location": rg.location,
-                    "tags": (
-                        cast(dict[str, str], rg.tags) if rg.tags is not None else dict[str, str]()
-                    ),
-                }
-                for rg in groups
-            ]
-        except AzureError as e:
-            raise ExternalServiceException(f"Failed to list resource groups: {e}") from e
+        with self._tracer.start_as_current_span("resource_discovery.list_resource_groups") as span:
+            span.set_attribute("azure.subscription_id", subscription_id)
+            try:
+                groups = await asyncio.to_thread(lambda: list(client.resource_groups.list()))
+                result = [
+                    {
+                        "name": rg.name,
+                        "location": rg.location,
+                        "tags": cast(dict[str, str], rg.tags)
+                        if rg.tags is not None
+                        else dict[str, str](),
+                    }
+                    for rg in groups
+                ]
+                self._log.info(
+                    "finops.resource_groups.listed",
+                    subscription_id=subscription_id,
+                    count=len(result),
+                )
+                return result
+            except AzureError as e:
+                err = ExternalServiceException(f"Failed to list resource groups: {e}")
+                current = trace.get_current_span()
+                if current:
+                    current.record_exception(err)
+                raise err from e
 
     async def get_resource_metrics(
         self,
@@ -111,33 +161,47 @@ class ResourceDiscoveryService:
 
         if "monitor" not in self._clients:
             self._clients["monitor"] = MonitorManagementClient(self._credential, subscription_id)
-        monitor_client = self._clients["monitor"]
-        try:
-            metrics = await asyncio.to_thread(
-                monitor_client.metrics.list,
-                resource_id,
-                timespan=timespan,
-                metricnames=",".join(metric_names),
-            )
-            result: dict[str, list[dict[str, Any]]] = {}
-            for metric in metrics.value:
-                metric_data: list[dict[str, Any]] = []
-                for ts in metric.timeseries:
-                    for data_point in ts.data:
-                        metric_data.append(
-                            {
-                                "timestamp": data_point.time_stamp.isoformat(),
-                                "average": data_point.average,
-                                "minimum": data_point.minimum,
-                                "maximum": data_point.maximum,
-                                "total": data_point.total,
-                                "count": data_point.count,
-                            }
-                        )
-                result[metric.name.value] = metric_data
-            return result
-        except AzureError as e:
-            raise ExternalServiceException(f"Failed to get resource metrics: {e}") from e
+        monitor_client = cast(MonitorManagementClient, self._clients["monitor"])
+        with self._tracer.start_as_current_span("resource_discovery.get_resource_metrics") as span:
+            span.set_attribute("azure.subscription_id", subscription_id)
+            span.set_attribute("azure.resource_id", resource_id)
+            span.set_attribute("azure.metrics.count", len(metric_names))
+            try:
+                metrics = await asyncio.to_thread(
+                    monitor_client.metrics.list,
+                    resource_id,
+                    timespan=timespan,
+                    metricnames=",".join(metric_names),
+                )
+                result: dict[str, list[dict[str, Any]]] = {}
+                for metric in metrics.value:
+                    metric_data: list[dict[str, Any]] = []
+                    for ts in metric.timeseries:
+                        for data_point in ts.data:
+                            metric_data.append(
+                                {
+                                    "timestamp": data_point.time_stamp.isoformat(),
+                                    "average": data_point.average,
+                                    "minimum": data_point.minimum,
+                                    "maximum": data_point.maximum,
+                                    "total": data_point.total,
+                                    "count": data_point.count,
+                                }
+                            )
+                    result[metric.name.value] = metric_data
+                self._log.info(
+                    "finops.metrics.fetched",
+                    subscription_id=subscription_id,
+                    resource_id=resource_id,
+                    metrics=list(result.keys()),
+                )
+                return result
+            except AzureError as e:
+                err = ExternalServiceException(f"Failed to get resource metrics: {e}")
+                current = trace.get_current_span()
+                if current:
+                    current.record_exception(err)
+                raise err from e
 
     def _build_kql_query(
         self,
@@ -172,24 +236,36 @@ class ResourceDiscoveryService:
         client = self._get_graph_client()
         all_results: list[dict[str, Any]] = []
         skip_token: str | None = None
-        while True:
-            request = QueryRequest(
-                query=query,
-                subscriptions=subscriptions,
-                options=QueryRequestOptions(
-                    top=min(max_results - len(all_results), 1000),
-                    skip=skip if not skip_token else None,
-                    skip_token=skip_token,
-                ),
-            )
-            try:
-                result = await asyncio.to_thread(client.resources, request)
-                all_results.extend(result.data)
-                if not result.skip_token or len(all_results) >= max_results:
-                    break
-                skip_token = result.skip_token
-            except AzureError as e:
-                raise ExternalServiceException(f"Failed to execute graph query: {e}") from e
+        with self._tracer.start_as_current_span("resource_discovery._execute_graph_query") as span:
+            span.set_attribute("azure.subscriptions.count", len(subscriptions))
+            span.set_attribute("azure.graph.max_results", max_results)
+            while True:
+                request = QueryRequest(
+                    query=query,
+                    subscriptions=subscriptions,
+                    options=QueryRequestOptions(
+                        top=min(max_results - len(all_results), 1000),
+                        skip=skip if not skip_token else None,
+                        skip_token=skip_token,
+                    ),
+                )
+                try:
+                    result = await asyncio.to_thread(client.resources, request)
+                    all_results.extend(result.data)
+                    if not result.skip_token or len(all_results) >= max_results:
+                        break
+                    skip_token = result.skip_token
+                except AzureError as e:
+                    err = ExternalServiceException(f"Failed to execute graph query: {e}")
+                    current = trace.get_current_span()
+                    if current:
+                        current.record_exception(err)
+                    raise err from e
+        self._log.info(
+            "finops.graph.query.executed",
+            subscriptions=subscriptions,
+            returned=len(all_results),
+        )
         return all_results
 
     async def get_resource_dependencies(
@@ -204,19 +280,33 @@ class ResourceDiscoveryService:
         | mvexpand dependencies
         | project dependency = tostring(dependencies)
         """
-        results = await self._execute_graph_query(query, [subscription_id])
-        dependencies = [r.get("dependency", "") for r in results if r.get("dependency")]
-        query_dependents = f"""
-        Resources
-        | where properties contains '{resource_id}'
-        | project id
-        """
-        dependent_results = await self._execute_graph_query(query_dependents, [subscription_id])
-        dependents = [r.get("id", "") for r in dependent_results if r.get("id")]
-        return {
-            "dependencies": dependencies,
-            "dependents": dependents,
-        }
+        with self._tracer.start_as_current_span(
+            "resource_discovery.get_resource_dependencies"
+        ) as span:
+            span.set_attribute("azure.subscription_id", subscription_id)
+            span.set_attribute("azure.resource_id", resource_id)
+            deps_results = await self._execute_graph_query(query, [subscription_id])
+            dependencies = [r.get("dependency", "") for r in deps_results if r.get("dependency")]
+            query_dependents = f"""
+            Resources
+            | where properties contains '{resource_id}'
+            | project id
+            """
+            dependents_results = await self._execute_graph_query(
+                query_dependents, [subscription_id]
+            )
+            dependents = [r.get("id", "") for r in dependents_results if r.get("id")]
+            self._log.info(
+                "finops.resource.dependencies",
+                subscription_id=subscription_id,
+                resource_id=resource_id,
+                dependencies=len(dependencies),
+                dependents=len(dependents),
+            )
+            return {
+                "dependencies": dependencies,
+                "dependents": dependents,
+            }
 
     async def batch_get_resources(
         self,
@@ -225,16 +315,25 @@ class ResourceDiscoveryService:
         batch_size: int = 50,
     ) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []
-        for i in range(0, len(resource_ids), batch_size):
-            batch = resource_ids[i : i + batch_size]
-            batch_query = " or ".join([f"id =~ '{rid}'" for rid in batch])
-            query = f"""
-            Resources
-            | where {batch_query}
-            | project id, name, type, location, resourceGroup, tags, properties, sku, kind
-            """
-            batch_results = await self._execute_graph_query(query, [subscription_id])
-            results.extend(batch_results)
-            if i + batch_size < len(resource_ids):
-                await asyncio.sleep(0.1)
-        return results
+        with self._tracer.start_as_current_span("resource_discovery.batch_get_resources") as span:
+            span.set_attribute("azure.subscription_id", subscription_id)
+            span.set_attribute("azure.batch.size", batch_size)
+            for i in range(0, len(resource_ids), batch_size):
+                batch = resource_ids[i : i + batch_size]
+                batch_query = " or ".join([f"id =~ '{rid}'" for rid in batch])
+                query = f"""
+                Resources
+                | where {batch_query}
+                | project id, name, type, location, resourceGroup, tags, properties, sku, kind
+                """
+                batch_results = await self._execute_graph_query(query, [subscription_id])
+                results.extend(batch_results)
+                if i + batch_size < len(resource_ids):
+                    await asyncio.sleep(0.1)
+            self._log.info(
+                "finops.resources.batch_fetched",
+                subscription_id=subscription_id,
+                requested=len(resource_ids),
+                returned=len(results),
+            )
+            return results

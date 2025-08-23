@@ -9,8 +9,9 @@ import LLMSelector from "@/components/chat/LLMSelector"
 import { ReviewButton } from "@/components/chat/ReviewButton"
 import { DeployButton } from "@/components/chat/DeployButton"
 import { chat as call_chat } from "@/lib/api"
+import { chatStream } from "@/lib/stream"
 
-interface Message {
+interface ChatMsg {
     id: string
     role: "user" | "assistant"
     content: string
@@ -29,7 +30,7 @@ function splitModel(id: string): { provider: string | null; model: string | null
 }
 
 export default function ChatInterface({ onBack }: ChatInterfaceProps) {
-    const [messages, setMessages] = useState<Message[]>([])
+    const [messages, setMessages] = useState<ChatMsg[]>([])
     const [input, setInput] = useState("")
     const [isLoading, setIsLoading] = useState(false)
     const [copiedId, setCopiedId] = useState<string | null>(null)
@@ -39,7 +40,6 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
     const [deployToolsEnabled, setDeployToolsEnabled] = useState(false)
     const scrollRef = useRef<HTMLDivElement>(null)
     const inputRef = useRef<HTMLTextAreaElement>(null)
-    const resizeRef = useRef<HTMLDivElement>(null)
 
     useEffect(() => {
         scrollRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -48,19 +48,14 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
     useEffect(() => {
         const handleMouseMove = (e: MouseEvent) => {
             if (!isResizing) return
-            const newHeight = Math.min(Math.max(300, chatHeight + e.movementY), 800)
-            setChatHeight(newHeight)
+            const next = Math.min(Math.max(300, chatHeight + e.movementY), 800)
+            setChatHeight(next)
         }
-
-        const handleMouseUp = () => {
-            setIsResizing(false)
-        }
-
+        const handleMouseUp = () => setIsResizing(false)
         if (isResizing) {
             document.addEventListener("mousemove", handleMouseMove)
             document.addEventListener("mouseup", handleMouseUp)
         }
-
         return () => {
             document.removeEventListener("mousemove", handleMouseMove)
             document.removeEventListener("mouseup", handleMouseUp)
@@ -69,11 +64,12 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
 
     const handleSend = async () => {
         if (!input.trim() || isLoading) return
-        const userMessage: Message = {
+        const now = new Date()
+        const userMessage: ChatMsg = {
             id: crypto.randomUUID(),
             role: "user",
             content: input,
-            timestamp: new Date(),
+            timestamp: now,
         }
         setMessages((prev) => [...prev, userMessage])
         setInput("")
@@ -81,16 +77,46 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
         try {
             const history = [...messages, userMessage].map((m) => ({ role: m.role, content: m.content }))
             const { provider, model } = splitModel(modelId)
-            const reply = await call_chat(userMessage.content, history, provider, model, deployToolsEnabled)
-            const assistantMessage: Message = {
-                id: crypto.randomUUID(),
-                role: "assistant",
-                content: reply,
-                timestamp: new Date(),
+            if (!deployToolsEnabled) {
+                const assistantId = crypto.randomUUID()
+                const assistantMsg: ChatMsg = {
+                    id: assistantId,
+                    role: "assistant",
+                    content: "",
+                    timestamp: new Date(),
+                }
+                setMessages((prev) => [...prev, assistantMsg])
+                const full = await chatStream(
+                    "",
+                    {
+                        input: userMessage.content,
+                        memory: history,
+                        provider,
+                        model,
+                        enable_tools: false,
+                    },
+                    (delta) => {
+                        setMessages((prev) =>
+                            prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + delta } : m)),
+                        )
+                    },
+                )
+                setMessages((prev) =>
+                    prev.map((m) => (m.id === assistantId ? { ...m, content: full, timestamp: new Date() } : m)),
+                )
+            } else {
+                const reply = await call_chat(userMessage.content, history, provider, model, true)
+                const assistantMessage: ChatMsg = {
+                    id: crypto.randomUUID(),
+                    role: "assistant",
+                    content: reply,
+                    timestamp: new Date(),
+                }
+                setMessages((prev) => [...prev, assistantMessage])
             }
-            setMessages((prev) => [...prev, assistantMessage])
         } finally {
             setIsLoading(false)
+            inputRef.current?.focus()
         }
     }
 
@@ -110,7 +136,7 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
     const lastUserMsg = messages.filter((m) => m.role === "user").slice(-1)[0]?.content ?? ""
 
     const handleReviewComplete = (text: string) => {
-        const reviewMessage: Message = {
+        const reviewMessage: ChatMsg = {
             id: crypto.randomUUID(),
             role: "assistant",
             content: `Review:\n${text}`,
@@ -203,7 +229,6 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
                 </ScrollArea>
 
                 <div
-                    ref={resizeRef}
                     className="flex h-2 cursor-row-resize items-center justify-center border-y border-white/10 hover:bg-white/5"
                     onMouseDown={() => setIsResizing(true)}
                 >

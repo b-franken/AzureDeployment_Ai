@@ -16,6 +16,27 @@ services:
       timeout: 3s
       retries: 20
     restart: unless-stopped
+    networks:
+      - devops-ai-net
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: devops-ai-ollama
+    env_file: .env
+    volumes:
+      - ollama:/root/.ollama
+    expose:
+      - "11434"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:11434/api/tags"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+    restart: unless-stopped
+    networks:
+      devops-ai-net:
+        aliases:
+          - ollama
 
   api:
     build:
@@ -28,18 +49,22 @@ services:
       AZURE_LOG_LEVEL: warning
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       APPLICATIONINSIGHTS_CONNECTION_STRING: ${APPLICATIONINSIGHTS_CONNECTION_STRING}
+      OLLAMA_BASE_URL: http://devops-ai-ollama:11434
+      LLM__OLLAMA__BASE_URL: http://devops-ai-ollama:11434
     ports:
       - "${API_PORT}:${API_PORT}"
     depends_on:
       db:
         condition: service_healthy
       ollama:
-        condition: service_started
+        condition: service_healthy
     command: >
       sh -c "uvicorn app.api.main:app --host ${API_HOST} --port ${API_PORT} --workers 2"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:${API_PORT}${API_PREFIX}/health || exit 1"]
     restart: unless-stopped
+    networks:
+      - devops-ai-net
 
   mcp:
     build:
@@ -53,20 +78,12 @@ services:
     command: >
       sh -c "python -m app.mcp.server"
     restart: unless-stopped
-
-  ollama:
-    image: ollama/ollama:latest
-    container_name: devops-ai-ollama
-    env_file: .env
-    volumes:
-      - ollama:/root/.ollama
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://127.0.0.1:11434/api/tags"]
-      interval: 5s
-      timeout: 3s
-      retries: 40
-    restart: unless-stopped
+    networks:
+      - devops-ai-net
 
 volumes:
   dbdata: {}
   ollama: {}
+
+networks:
+  devops-ai-net: {}

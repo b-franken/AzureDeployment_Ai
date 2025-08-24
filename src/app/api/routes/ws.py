@@ -45,12 +45,10 @@ async def chat_ws(ws: WebSocket) -> None:
                 span.set_attribute("llm.model", model or "auto")
                 span.set_attribute("chat.memory.count", len(init.memory))
                 span.set_attribute("chat.input.length", len(init.input_ or ""))
-                logger.info("ws_chat_request",
-                            provider=provider or "auto", model=model or "auto")
+                logger.info("ws_chat_request", provider=provider or "auto", model=model or "auto")
                 try:
                     llm, selected = await get_provider_and_model(provider or None, model or None)
-                    messages = list(init.memory) + \
-                        [{"role": "user", "content": init.input_}]
+                    messages = list(init.memory) + [{"role": "user", "content": init.input_}]
                     async for piece in llm.chat_stream(selected, messages):
                         await ws.send_json({"type": "delta", "data": piece})
                     await ws.send_json({"type": "done"})
@@ -97,16 +95,13 @@ async def deployment_stream(ws: WebSocket, deployment_id: str) -> None:
             )
             await ws.send_text(complete.model_dump_json())
             await ws.close(code=status.WS_1000_NORMAL_CLOSURE)
-            logger.info("ws_deploy_stream_complete",
-                        deployment_id=deployment_id)
+            logger.info("ws_deploy_stream_complete", deployment_id=deployment_id)
         except WebSocketDisconnect:
-            logger.info("ws_deploy_stream_disconnected",
-                        deployment_id=deployment_id)
+            logger.info("ws_deploy_stream_disconnected", deployment_id=deployment_id)
         except Exception as e:
             span.record_exception(e)
             span.set_status(Status(StatusCode.ERROR, str(e)))
-            logger.error("ws_deploy_stream_failed",
-                         deployment_id=deployment_id, exc_info=True)
+            logger.error("ws_deploy_stream_failed", deployment_id=deployment_id, exc_info=True)
             try:
                 await ws.send_json({"type": "error", "message": "stream_failed"})
             finally:

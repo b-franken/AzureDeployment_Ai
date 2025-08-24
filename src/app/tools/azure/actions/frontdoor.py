@@ -1,48 +1,15 @@
 from __future__ import annotations
 
-import asyncio
 import logging
-from typing import Any, cast
+from typing import Any
 
-from azure.core.credentials import AccessToken, TokenCredential
-from azure.core.credentials_async import AsyncTokenCredential
 from azure.core.exceptions import HttpResponseError
 
 from ..clients import Clients
+from ..utils.credentials import ensure_sync_credential
 from ..validators import validate_name
 
 logger = logging.getLogger(__name__)
-
-
-class _AsyncToSyncCredential(TokenCredential):
-    def __init__(self, async_cred: AsyncTokenCredential) -> None:
-        self._async_cred = async_cred
-
-    def get_token(self, *scopes: str, **kwargs: Any) -> AccessToken:
-        loop = asyncio.new_event_loop()
-        try:
-            asyncio.set_event_loop(loop)
-            return cast(
-                AccessToken, loop.run_until_complete(self._async_cred.get_token(*scopes, **kwargs))
-            )
-        finally:
-            loop.close()
-
-    def close(self) -> None:
-        loop = asyncio.new_event_loop()
-        try:
-            asyncio.set_event_loop(loop)
-            aclose = getattr(self._async_cred, "aclose", None)
-            if callable(aclose):
-                loop.run_until_complete(aclose())
-        finally:
-            loop.close()
-
-
-def _ensure_sync_credential(cred: TokenCredential | AsyncTokenCredential) -> TokenCredential:
-    if isinstance(cred, AsyncTokenCredential):
-        return _AsyncToSyncCredential(cred)
-    return cred
 
 
 async def create_front_door(
@@ -86,118 +53,133 @@ async def create_front_door(
         SubResource,
     )
 
-    sync_cred = _ensure_sync_credential(clients.cred)
+    sync_cred = ensure_sync_credential(clients.cred)
     fd_client = FrontDoorManagementClient(sync_cred, clients.subscription_id)
 
     try:
-        existing = await clients.run(fd_client.front_doors.get, resource_group, name)
-        if existing and not force:
-            return "exists", existing.as_dict()
-    except HttpResponseError as exc:
-        if exc.status_code != 404:
-            logger.error("Front Door retrieval failed: %s", exc.message)
-            return "error", {"code": exc.status_code, "message": exc.message}
+        try:
+            existing = await clients.run(fd_client.front_doors.get, resource_group, name)
+            if existing and not force:
+                return "exists", existing.as_dict()
+        except HttpResponseError as exc:
+            if exc.status_code != 404:
+                logger.error("Front Door retrieval failed: %s", exc.message)
+                return "error", {"code": exc.status_code, "message": exc.message}
 
-    frontend_endpoint_name = f"{name}-frontend"
-    backend_pool_name = f"{name}-backend-pool"
-    routing_rule_name = f"{name}-routing-rule"
-    health_probe_name = f"{name}-health-probe"
-    load_balancing_name = f"{name}-load-balancing"
+        frontend_endpoint_name = f"{name}-frontend"
+        backend_pool_name = f"{name}-backend-pool"
+        routing_rule_name = f"{name}-routing-rule"
+        health_probe_name = f"{name}-health-probe"
+        load_balancing_name = f"{name}-load-balancing"
 
-    health_probe = HealthProbeSettingsModel(
-        name=health_probe_name,
-        path=health_probe_settings.get("path", "/") if health_probe_settings else "/",
-        protocol=(
-            health_probe_settings.get("protocol", "Https") if health_probe_settings else "Https"
-        ),
-        interval_in_seconds=(
-            health_probe_settings.get("interval", 30) if health_probe_settings else 30
-        ),
-    )
+        health_probe = HealthProbeSettingsModel(
+            name=health_probe_name,
+            path=health_probe_settings.get("path", "/") if health_probe_settings else "/",
+            protocol=health_probe_settings.get("protocol", "Https")
+            if health_probe_settings
+            else "Https",
+            interval_in_seconds=health_probe_settings.get("interval", 30)
+            if health_probe_settings
+            else 30,
+        )
 
-    load_balancing = LoadBalancingSettingsModel(
-        name=load_balancing_name,
-        sample_size=load_balancing_settings.get("sample_size", 4) if load_balancing_settings else 4,
-        successful_samples_required=(
-            load_balancing_settings.get("successful_samples_required", 2)
+        load_balancing = LoadBalancingSettingsModel(
+            name=load_balancing_name,
+            sample_size=load_balancing_settings.get("sample_size", 4)
             if load_balancing_settings
-            else 2
-        ),
-        additional_latency_milliseconds=(
-            load_balancing_settings.get("additional_latency", 0) if load_balancing_settings else 0
-        ),
-    )
-
-    backend = Backend(
-        address=backend_address,
-        backend_host_header=backend_host_header or backend_address,
-        http_port=80,
-        https_port=443,
-        priority=1,
-        weight=50,
-        enabled_state="Enabled",
-    )
-
-    backend_pool = BackendPool(
-        name=backend_pool_name,
-        backends=[backend],
-        health_probe_settings=SubResource(
-            id=f"/subscriptions/{clients.subscription_id}/resourceGroups/{resource_group}/providers/Microsoft.Network/frontDoors/{name}/healthProbeSettings/{health_probe_name}"
-        ),
-        load_balancing_settings=SubResource(
-            id=f"/subscriptions/{clients.subscription_id}/resourceGroups/{resource_group}/providers/Microsoft.Network/frontDoors/{name}/loadBalancingSettings/{load_balancing_name}"
-        ),
-    )
-
-    frontend_endpoint = FrontendEndpoint(
-        name=frontend_endpoint_name,
-        host_name=f"{name}.azurefd.net",
-        session_affinity_enabled_state="Disabled",
-        web_application_firewall_policy_link=(
-            FrontendEndpointUpdateParametersWebApplicationFirewallPolicyLink(id=waf_policy_id)
-            if waf_policy_id
-            else None
-        ),
-    )
-
-    routing_rule = RoutingRule(
-        name=routing_rule_name,
-        frontend_endpoints=[
-            SubResource(
-                id=f"/subscriptions/{clients.subscription_id}/resourceGroups/{resource_group}/providers/Microsoft.Network/frontDoors/{name}/frontendEndpoints/{frontend_endpoint_name}"
+            else 4,
+            successful_samples_required=load_balancing_settings.get(
+                "successful_samples_required", 2
             )
-        ],
-        accepted_protocols=["Http", "Https"],
-        patterns_to_match=["/*"],
-        route_configuration=ForwardingConfiguration(
-            forwarding_protocol="HttpsOnly",
-            backend_pool=SubResource(
-                id=f"/subscriptions/{clients.subscription_id}/resourceGroups/{resource_group}/providers/Microsoft.Network/frontDoors/{name}/backendPools/{backend_pool_name}"
+            if load_balancing_settings
+            else 2,
+            additional_latency_milliseconds=load_balancing_settings.get("additional_latency", 0)
+            if load_balancing_settings
+            else 0,
+        )
+
+        backend = Backend(
+            address=backend_address,
+            backend_host_header=backend_host_header or backend_address,
+            http_port=80,
+            https_port=443,
+            priority=1,
+            weight=50,
+            enabled_state="Enabled",
+        )
+
+        backend_pool = BackendPool(
+            name=backend_pool_name,
+            backends=[backend],
+            health_probe_settings=SubResource(
+                id=f"/subscriptions/{clients.subscription_id}/resourceGroups/{resource_group}/providers/Microsoft.Network/frontDoors/{name}/healthProbeSettings/{health_probe_name}"
             ),
-        ),
-        enabled_state="Enabled",
-    )
+            load_balancing_settings=SubResource(
+                id=f"/subscriptions/{clients.subscription_id}/resourceGroups/{resource_group}/providers/Microsoft.Network/frontDoors/{name}/loadBalancingSettings/{load_balancing_name}"
+            ),
+        )
 
-    front_door = FrontDoor(
-        location="global",
-        frontend_endpoints=[frontend_endpoint],
-        backend_pools=[backend_pool],
-        health_probe_settings=[health_probe],
-        load_balancing_settings=[load_balancing],
-        routing_rules=[routing_rule],
-        enabled_state="Enabled",
-        tags=tags or {},
-    )
+        frontend_endpoint = FrontendEndpoint(
+            name=frontend_endpoint_name,
+            host_name=f"{name}.azurefd.net",
+            session_affinity_enabled_state="Disabled",
+            web_application_firewall_policy_link=(
+                FrontendEndpointUpdateParametersWebApplicationFirewallPolicyLink(id=waf_policy_id)
+                if waf_policy_id
+                else None
+            ),
+        )
 
-    poller = await clients.run(
-        fd_client.front_doors.begin_create_or_update,
-        resource_group,
-        name,
-        front_door,
-    )
+        routing_rule = RoutingRule(
+            name=routing_rule_name,
+            frontend_endpoints=[
+                SubResource(
+                    id=f"/subscriptions/{clients.subscription_id}/resourceGroups/{resource_group}/providers/Microsoft.Network/frontDoors/{name}/frontendEndpoints/{frontend_endpoint_name}"
+                )
+            ],
+            accepted_protocols=["Http", "Https"],
+            patterns_to_match=["/*"],
+            route_configuration=ForwardingConfiguration(
+                forwarding_protocol="HttpsOnly",
+                backend_pool=SubResource(
+                    id=f"/subscriptions/{clients.subscription_id}/resourceGroups/{resource_group}/providers/Microsoft.Network/frontDoors/{name}/backendPools/{backend_pool_name}"
+                ),
+            ),
+            enabled_state="Enabled",
+        )
 
-    result = await clients.run(poller.result)
-    return "created", result.as_dict()
+        front_door = FrontDoor(
+            location="global",
+            frontend_endpoints=[frontend_endpoint],
+            backend_pools=[backend_pool],
+            health_probe_settings=[health_probe],
+            load_balancing_settings=[load_balancing],
+            routing_rules=[routing_rule],
+            enabled_state="Enabled",
+            tags=tags or {},
+        )
+
+        poller = await clients.run(
+            fd_client.front_doors.begin_create_or_update,
+            resource_group,
+            name,
+            front_door,
+        )
+        result = await clients.run(poller.result)
+        return "created", result.as_dict()
+    except HttpResponseError as exc:
+        logger.error("Front Door create_or_update failed: %s", exc.message)
+        return "error", {"code": exc.status_code, "message": exc.message}
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Unexpected error while creating Front Door")
+        return "error", {"message": str(exc)}
+    finally:
+        close = getattr(sync_cred, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:  # noqa: BLE001
+                logger.debug("Credential close raised but was ignored")
 
 
 async def create_waf_policy(
@@ -235,61 +217,76 @@ async def create_waf_policy(
         WebApplicationFirewallPolicy,
     )
 
-    sync_cred = _ensure_sync_credential(clients.cred)
+    sync_cred = ensure_sync_credential(clients.cred)
     fd_client = FrontDoorManagementClient(sync_cred, clients.subscription_id)
 
     try:
-        existing = await clients.run(fd_client.policies.get, resource_group, name)
-        if existing and not force:
-            return "exists", existing.as_dict()
-    except HttpResponseError as exc:
-        if exc.status_code != 404:
-            logger.error("WAF policy retrieval failed: %s", exc.message)
-            return "error", {"code": exc.status_code, "message": exc.message}
+        try:
+            existing = await clients.run(fd_client.policies.get, resource_group, name)
+            if existing and not force:
+                return "exists", existing.as_dict()
+        except HttpResponseError as exc:
+            if exc.status_code != 404:
+                logger.error("WAF policy retrieval failed: %s", exc.message)
+                return "error", {"code": exc.status_code, "message": exc.message}
 
-    policy_settings = PolicySettings(
-        enabled_state="Enabled",
-        mode=mode,
-        custom_block_response_status_code=403,
-        custom_block_response_body="You are blocked by WAF",
-    )
-
-    managed_rule_sets: list[ManagedRuleSet] = []
-    if not managed_rules:
-        managed_rule_sets.append(
-            ManagedRuleSet(
-                rule_set_type="DefaultRuleSet",
-                rule_set_version="1.0",
-            )
+        policy_settings = PolicySettings(
+            enabled_state="Enabled",
+            mode=mode,
+            custom_block_response_status_code=403,
+            custom_block_response_body="You are blocked by WAF",
         )
-    else:
-        for rule in managed_rules:
+
+        managed_rule_sets: list[ManagedRuleSet] = []
+        if not managed_rules:
             managed_rule_sets.append(
                 ManagedRuleSet(
-                    rule_set_type=rule.get("type", "DefaultRuleSet"),
-                    rule_set_version=rule.get("version", "1.0"),
-                    rule_group_overrides=rule.get("overrides"),
+                    rule_set_type="DefaultRuleSet",
+                    rule_set_version="1.0",
                 )
             )
+        else:
+            for rule in managed_rules:
+                managed_rule_sets.append(
+                    ManagedRuleSet(
+                        rule_set_type=rule.get("type", "DefaultRuleSet"),
+                        rule_set_version=rule.get("version", "1.0"),
+                        rule_group_overrides=rule.get("overrides"),
+                    )
+                )
 
-    prepared_custom_rules: list[CustomRule] | None = None
-    if custom_rules:
-        prepared_custom_rules = [CustomRule(**r) for r in custom_rules]
+        prepared_custom_rules: list[CustomRule] | None = None
+        if custom_rules:
+            prepared_custom_rules = [CustomRule(**r) for r in custom_rules]
 
-    waf_policy = WebApplicationFirewallPolicy(
-        location="global",
-        policy_settings=policy_settings,
-        custom_rules=CustomRuleList(rules=prepared_custom_rules) if prepared_custom_rules else None,
-        managed_rules=ManagedRuleSetList(managed_rule_sets=managed_rule_sets),
-        tags=tags or {},
-    )
+        waf_policy = WebApplicationFirewallPolicy(
+            location="global",
+            policy_settings=policy_settings,
+            custom_rules=CustomRuleList(rules=prepared_custom_rules)
+            if prepared_custom_rules
+            else None,
+            managed_rules=ManagedRuleSetList(managed_rule_sets=managed_rule_sets),
+            tags=tags or {},
+        )
 
-    poller = await clients.run(
-        fd_client.policies.begin_create_or_update,
-        resource_group,
-        name,
-        waf_policy,
-    )
-    result = await clients.run(poller.result)
-
-    return "created", result.as_dict()
+        poller = await clients.run(
+            fd_client.policies.begin_create_or_update,
+            resource_group,
+            name,
+            waf_policy,
+        )
+        result = await clients.run(poller.result)
+        return "created", result.as_dict()
+    except HttpResponseError as exc:
+        logger.error("WAF policy create_or_update failed: %s", exc.message)
+        return "error", {"code": exc.status_code, "message": exc.message}
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Unexpected error while creating WAF policy")
+        return "error", {"message": str(exc)}
+    finally:
+        close = getattr(sync_cred, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:  # noqa: BLE001
+                logger.debug("Credential close raised but was ignored")

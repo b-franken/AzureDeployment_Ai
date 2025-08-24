@@ -1,52 +1,18 @@
 from __future__ import annotations
 
-import asyncio
 import logging
-from typing import Any, cast
+from typing import Any
 
-from azure.core.credentials import AccessToken, TokenCredential
-from azure.core.credentials_async import AsyncTokenCredential
 from azure.core.exceptions import HttpResponseError, ResourceExistsError
 from azure.storage.blob import BlobServiceClient
 from azure.storage.fileshare import ShareServiceClient
 
 from ..clients import Clients
 from ..idempotency import safe_get
+from ..utils.credentials import ensure_sync_credential
 from ..validators import validate_name
 
 logger = logging.getLogger(__name__)
-
-
-class _AsyncToSyncCredential(TokenCredential):
-    def __init__(self, async_cred: AsyncTokenCredential) -> None:
-        self._async_cred = async_cred
-
-    def get_token(self, *scopes: str, **kwargs: Any) -> AccessToken:
-        loop = asyncio.new_event_loop()
-        try:
-            asyncio.set_event_loop(loop)
-            return cast(
-                AccessToken, loop.run_until_complete(
-                    self._async_cred.get_token(*scopes, **kwargs))
-            )
-        finally:
-            loop.close()
-
-    def close(self) -> None:
-        loop = asyncio.new_event_loop()
-        try:
-            asyncio.set_event_loop(loop)
-            aclose = getattr(self._async_cred, "aclose", None)
-            if callable(aclose):
-                loop.run_until_complete(aclose())
-        finally:
-            loop.close()
-
-
-def _ensure_sync_credential(cred: TokenCredential | AsyncTokenCredential) -> TokenCredential:
-    if isinstance(cred, AsyncTokenCredential):
-        return _AsyncToSyncCredential(cred)
-    return cred
 
 
 async def create_storage_account(
@@ -60,7 +26,7 @@ async def create_storage_account(
     sku: str | None = None,
     access_tier: str | None = None,
     force: bool = False,
-    **kwargs: Any,
+    **_: Any,
 ) -> tuple[str, Any]:
     if not validate_name("storage", name):
         return "error", "Invalid storage account name (3-24 lowercase letters/numbers)"
@@ -124,7 +90,7 @@ async def create_blob_container(
     resource_group: str,
     name: str,
     container_name: str,
-    **kwargs: Any,
+    **_: Any,
 ) -> tuple[str, Any]:
     if not validate_name("generic", container_name):
         return "error", "Invalid container name"
@@ -133,7 +99,7 @@ async def create_blob_container(
         return "plan", {"account": name, "container": container_name}
 
     account_url = f"https://{name}.blob.core.windows.net"
-    sync_cred = _ensure_sync_credential(clients.cred)
+    sync_cred = ensure_sync_credential(clients.cred)
     svc = BlobServiceClient(account_url=account_url, credential=sync_cred)
 
     try:
@@ -154,7 +120,7 @@ async def create_file_share(
     resource_group: str,
     name: str,
     share_name: str,
-    **kwargs: Any,
+    **_: Any,
 ) -> tuple[str, Any]:
     if not validate_name("generic", share_name):
         return "error", "Invalid share name"
@@ -163,7 +129,7 @@ async def create_file_share(
         return "plan", {"account": name, "share": share_name}
 
     account_url = f"https://{name}.file.core.windows.net"
-    sync_cred = _ensure_sync_credential(clients.cred)
+    sync_cred = ensure_sync_credential(clients.cred)
     svc = ShareServiceClient(account_url=account_url, credential=sync_cred)
 
     try:

@@ -40,6 +40,7 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
     const [deployToolsEnabled, setDeployToolsEnabled] = useState(false)
     const scrollRef = useRef<HTMLDivElement>(null)
     const inputRef = useRef<HTMLTextAreaElement>(null)
+    const abortControllerRef = useRef<AbortController | null>(null)
 
     useEffect(() => {
         scrollRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -64,6 +65,11 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
 
     const handleSend = async () => {
         if (!input.trim() || isLoading) return
+
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort()
+        }
+
         const now = new Date()
         const userMessage: ChatMsg = {
             id: crypto.randomUUID(),
@@ -74,45 +80,87 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
         setMessages((prev) => [...prev, userMessage])
         setInput("")
         setIsLoading(true)
+
         try {
             const history = [...messages, userMessage].map((m) => ({ role: m.role, content: m.content }))
             const { provider, model } = splitModel(modelId)
-            if (!deployToolsEnabled) {
-                const assistantId = crypto.randomUUID()
-                const assistantMsg: ChatMsg = {
-                    id: assistantId,
-                    role: "assistant",
-                    content: "",
-                    timestamp: new Date(),
-                }
-                setMessages((prev) => [...prev, assistantMsg])
-                const full = await chatStream(
-                    API_BASE_URL,
-                    {
-                        input: userMessage.content,
-                        memory: history,
-                        provider,
-                        model,
-                        enable_tools: false,
-                    },
-                    (delta) => {
-                        setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + delta } : m)))
-                    },
-                )
-                setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: full, timestamp: new Date() } : m)))
-            } else {
-                const reply = await call_chat(userMessage.content, history, provider, model, true)
-                const assistantMessage: ChatMsg = {
-                    id: crypto.randomUUID(),
-                    role: "assistant",
-                    content: reply,
-                    timestamp: new Date(),
-                }
-                setMessages((prev) => [...prev, assistantMessage])
+
+            const assistantId = crypto.randomUUID()
+            const assistantMsg: ChatMsg = {
+                id: assistantId,
+                role: "assistant",
+                content: "",
+                timestamp: new Date(),
             }
+            setMessages((prev) => [...prev, assistantMsg])
+
+            if (!deployToolsEnabled) {
+                try {
+                    abortControllerRef.current = new AbortController()
+
+                    const fullContent = await chatStream(
+                        API_BASE_URL,
+                        {
+                            input: userMessage.content,
+                            memory: history.slice(0, -1),
+                            provider,
+                            model,
+                            enable_tools: false,
+                        },
+                        (delta) => {
+                            setMessages((prev) =>
+                                prev.map((m) =>
+                                    m.id === assistantId
+                                        ? { ...m, content: m.content + delta }
+                                        : m
+                                )
+                            )
+                        },
+                        abortControllerRef.current.signal
+                    )
+
+                    setMessages((prev) =>
+                        prev.map((m) =>
+                            m.id === assistantId
+                                ? { ...m, content: fullContent, timestamp: new Date() }
+                                : m
+                        )
+                    )
+                } catch (error: any) {
+                    if (error.name === 'AbortError') {
+                        console.log('Stream aborted')
+                    } else {
+                        console.error('Streaming error:', error)
+                        // Fallback to non-streaming if streaming fails
+                        const reply = await call_chat(userMessage.content, history.slice(0, -1), provider, model, false)
+                        setMessages((prev) =>
+                            prev.map((m) =>
+                                m.id === assistantId
+                                    ? { ...m, content: reply, timestamp: new Date() }
+                                    : m
+                            )
+                        )
+                    }
+                }
+            } else {
+                // Use regular chat for tool-enabled conversations
+                const reply = await call_chat(userMessage.content, history.slice(0, -1), provider, model, true)
+                setMessages((prev) =>
+                    prev.map((m) =>
+                        m.id === assistantId
+                            ? { ...m, content: reply, timestamp: new Date() }
+                            : m
+                    )
+                )
+            }
+        } catch (error) {
+            console.error('Chat error:', error)
+            // Remove the empty assistant message if there was an error
+            setMessages((prev) => prev.slice(0, -1))
         } finally {
             setIsLoading(false)
             inputRef.current?.focus()
+            abortControllerRef.current = null
         }
     }
 
@@ -203,7 +251,7 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
                                 )}
                             </div>
                         ))}
-                        {isLoading && (
+                        {isLoading && messages[messages.length - 1]?.content === "" && (
                             <div className="flex gap-3">
                                 <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500">
                                     <Bot className="h-4 w-4 text-white" />

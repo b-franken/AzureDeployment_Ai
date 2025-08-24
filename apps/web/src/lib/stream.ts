@@ -1,22 +1,34 @@
 import { API_BASE_URL } from "@/lib/api"
 
+type ChatRole = "user" | "assistant" | "system"
+
+interface ChatMemoryMessage {
+    role: ChatRole
+    content: string
+}
+
+interface ChatStreamBody {
+    input: string
+    memory?: ChatMemoryMessage[]
+    provider?: string | null
+    model?: string | null
+    enable_tools?: boolean
+}
+
 export async function chatStream(
     baseURL: string | null | undefined,
-    body: {
-        input: string
-        memory?: { role: "user" | "assistant" | "system"; content: string }[]
-        provider?: string | null
-        model?: string | null
-        enable_tools?: boolean
-    },
-    onDelta: (text: string) => void
+    body: ChatStreamBody,
+    onDelta: (text: string) => void,
+    signal?: AbortSignal
 ): Promise<string> {
     const base = (baseURL && baseURL.trim() ? baseURL : API_BASE_URL).replace(/\/+$/, "")
     const url = `${base}/api/chat?stream=true`
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError")
     const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
+        signal,
     })
     if (!res.ok || !res.body) {
         const msg = await res.text().catch(() => "stream failed")

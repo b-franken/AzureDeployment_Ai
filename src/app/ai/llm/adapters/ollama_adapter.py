@@ -13,7 +13,7 @@ from app.core.config import get_settings
 class OllamaAdapter:
     def __init__(self) -> None:
         s = get_settings()
-        self._base = s.llm.ollama_api_base.rstrip("/")
+        self._base = s.llm.ollama_base_url.rstrip("/")
 
     def name(self) -> str:
         return "ollama"

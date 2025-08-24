@@ -1,14 +1,10 @@
-# filename: docker-compose.yml
 name: devops-ai
 
 services:
   db:
     image: postgres:16
     container_name: devops-ai-db
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    env_file: .env
     volumes:
       - dbdata:/var/lib/postgresql/data
       - ./docker/db/init:/docker-entrypoint-initdb.d:ro
@@ -26,18 +22,12 @@ services:
       context: .
       dockerfile: src/app/api/Dockerfile
     container_name: devops-ai-api
+    env_file: .env
     environment:
-      ENVIRONMENT: ${ENVIRONMENT}
-      API_HOST: ${API_HOST}
-      API_PORT: ${API_PORT}
-      API_PREFIX: ${API_PREFIX}
-      LLM_PROVIDER: ${LLM_PROVIDER}
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      OPENAI_MODEL: ${OPENAI_MODEL}
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL}
-      DATABASE_URL: ${DATABASE_URL}
-      DATABASE__POSTGRES_DSN: ${DATABASE__POSTGRES_DSN}
-      AUDIT_DB_URL: ${AUDIT_DB_URL}
+      PYTHONWARNINGS: ignore::SyntaxWarning
+      AZURE_LOG_LEVEL: warning
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      APPLICATIONINSIGHTS_CONNECTION_STRING: ${APPLICATIONINSIGHTS_CONNECTION_STRING}
     ports:
       - "${API_PORT}:${API_PORT}"
     depends_on:
@@ -56,12 +46,7 @@ services:
       context: .
       dockerfile: src/app/api/Dockerfile
     container_name: devops-ai-mcp
-    environment:
-      MCP_TRANSPORT: ${MCP_TRANSPORT}
-      DATABASE_URL: ${DATABASE_URL}
-      AUDIT_DB_URL: ${AUDIT_DB_URL}
-      MEMORY_DB_URL: ${MEMORY_DB_URL}
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL}
+    env_file: .env
     depends_on:
       db:
         condition: service_healthy
@@ -72,6 +57,7 @@ services:
   ollama:
     image: ollama/ollama:latest
     container_name: devops-ai-ollama
+    env_file: .env
     volumes:
       - ollama:/root/.ollama
     healthcheck:

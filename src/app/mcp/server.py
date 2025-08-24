@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import os
 import re
 from datetime import datetime, timedelta
 from typing import Any, Literal, cast
@@ -23,6 +25,9 @@ from app.tools.registry import ensure_tools_loaded, list_tools
 from .resources import ResourceManager
 
 
+logger = logging.getLogger("app.mcp.server")
+
+
 class MCPServer:
     def __init__(
         self,
@@ -42,6 +47,11 @@ class MCPServer:
         name: str = "DevOps AI Tools",
         transport: Literal["stdio", "sse", "streamable-http"] = "stdio",
     ) -> MCPServer:
+        logger.info(
+            "Creating MCP server",
+            extra={"event": "mcp_create", "transport": transport,
+                   "environment": os.getenv("ENVIRONMENT", "development")},
+        )
         self = cls(name=name, transport=transport)
         self.cache = await get_cache()
         self._setup_tools()
@@ -49,6 +59,7 @@ class MCPServer:
         self._setup_prompts()
         register_extensions(self)
         register_what_if(self.mcp)
+        logger.info("MCP server created", extra={"event": "mcp_created"})
         return self
 
     def _setup_tools(self) -> None:
@@ -64,6 +75,15 @@ class MCPServer:
         ) -> dict[str, Any]:
             meta = getattr(context, "meta", None)
             user_id = (meta or {}).get("user_id", "mcp_user")
+            logger.info(
+                "Executing tool",
+                extra={
+                    "event": "execute_tool",
+                    "tool_name": request.tool_name,
+                    "correlation_id": request.correlation_id,
+                    "user_id": user_id,
+                },
+            )
             execution_context = ToolExecutionContext(
                 user_id=user_id,
                 subscription_id=request.subscription_id,
@@ -76,10 +96,19 @@ class MCPServer:
                 audit_logger=self.audit_logger if request.audit_enabled else None,
             )
             cache_key = f"tool:{request.tool_name}:{request.get_cache_key()}"
-            cached_result = await self.cache.get(cache_key)
-            if cached_result and not request.force_refresh:
-                return cast(dict[str, Any], cached_result)
             try:
+                if not request.force_refresh:
+                    cached_result = await self.cache.get(cache_key)
+                    if cached_result:
+                        logger.info(
+                            "Tool cache hit",
+                            extra={
+                                "event": "execute_tool_cache_hit",
+                                "tool_name": request.tool_name,
+                                "correlation_id": request.correlation_id,
+                            },
+                        )
+                        return cast(dict[str, Any], cached_result)
                 result = await maybe_call_tool(
                     user_input=request.input_text,
                     memory=request.memory,
@@ -98,8 +127,24 @@ class MCPServer:
                 }
                 if request.cache_ttl > 0:
                     await self.cache.set(cache_key, response, ttl=request.cache_ttl)
+                logger.info(
+                    "Tool executed",
+                    extra={
+                        "event": "execute_tool_success",
+                        "tool_name": request.tool_name,
+                        "correlation_id": request.correlation_id,
+                    },
+                )
                 return response
             except Exception as e:
+                logger.exception(
+                    "Tool execution failed",
+                    extra={
+                        "event": "execute_tool_error",
+                        "tool_name": request.tool_name,
+                        "correlation_id": request.correlation_id,
+                    },
+                )
                 return {
                     "success": False,
                     "error": str(e),
@@ -115,23 +160,48 @@ class MCPServer:
             request: DeploymentRequest,
             context: Context,
         ) -> dict[str, Any]:
-            if request.validate_only:
-                validation_results = await self._validate_deployment(request)
+            logger.info(
+                "Deploy infrastructure",
+                extra={"event": "deploy_start",
+                       "deployment_id": request.deployment_id},
+            )
+            try:
+                if request.validate_only:
+                    validation_results = await self._validate_deployment(request)
+                    return {
+                        "status": "validation_complete",
+                        "validation_results": validation_results,
+                        "deployment_id": request.deployment_id,
+                    }
+                if request.require_approval and not request.approval_token:
+                    approval_token = await self._request_approval(request)
+                    return {
+                        "status": "approval_required",
+                        "approval_token": approval_token,
+                        "deployment_id": request.deployment_id,
+                    }
+                async with self.streaming_handler.stream_deployment(request.deployment_id) as stream:
+                    result = await self._execute_deployment(request, stream)
+                    logger.info(
+                        "Deploy infrastructure completed",
+                        extra={
+                            "event": "deploy_complete",
+                            "deployment_id": request.deployment_id,
+                            "status": result.get("status"),
+                        },
+                    )
+                    return result
+            except Exception as e:
+                logger.exception(
+                    "Deploy infrastructure failed",
+                    extra={"event": "deploy_error",
+                           "deployment_id": request.deployment_id},
+                )
                 return {
-                    "status": "validation_complete",
-                    "validation_results": validation_results,
+                    "status": "failed",
+                    "error": str(e),
                     "deployment_id": request.deployment_id,
                 }
-            if request.require_approval and not request.approval_token:
-                approval_token = await self._request_approval(request)
-                return {
-                    "status": "approval_required",
-                    "approval_token": approval_token,
-                    "deployment_id": request.deployment_id,
-                }
-            async with self.streaming_handler.stream_deployment(request.deployment_id) as stream:
-                result = await self._execute_deployment(request, stream)
-                return result
 
         @self.mcp.tool(
             name="query_azure_resources",
@@ -142,14 +212,25 @@ class MCPServer:
             context: Context,
         ) -> dict[str, Any]:
             cache_key = f"azure_query:{params.get_cache_key()}"
-            if not params.force_refresh:
-                cached = await self.cache.get(cache_key)
-                if cached:
-                    return cast(dict[str, Any], cached)
-            result = await self._execute_azure_query(params)
-            if params.cache_ttl > 0:
-                await self.cache.set(cache_key, result, ttl=params.cache_ttl)
-            return result
+            try:
+                if not params.force_refresh:
+                    cached = await self.cache.get(cache_key)
+                    if cached:
+                        logger.info(
+                            "Azure query cache hit",
+                            extra={"event": "azure_query_cache_hit"},
+                        )
+                        return cast(dict[str, Any], cached)
+                result = await self._execute_azure_query(params)
+                if params.cache_ttl > 0:
+                    await self.cache.set(cache_key, result, ttl=params.cache_ttl)
+                logger.info("Azure query executed", extra={
+                            "event": "azure_query_success"})
+                return result
+            except Exception as e:
+                logger.exception("Azure query failed", extra={
+                                 "event": "azure_query_error"})
+                return {"error": str(e), "data": [], "count": 0, "total_records": 0}
 
         @self.mcp.tool(
             name="stream_logs",
@@ -159,42 +240,93 @@ class MCPServer:
             deployment_id: str,
             context: Context,
         ) -> Any:
-            async for log_line in self.streaming_handler.stream_logs(deployment_id):
-                yield log_line
+            try:
+                async for log_line in self.streaming_handler.stream_logs(deployment_id):
+                    yield log_line
+            except Exception:
+                logger.exception(
+                    "Stream logs failed",
+                    extra={"event": "stream_logs_error",
+                           "deployment_id": deployment_id},
+                )
+                yield json.dumps({"level": "error", "message": "stream_failed"})
 
     def _setup_resources(self) -> None:
-        @self.mcp.resource("azure://subscriptions")
-        async def list_subscriptions(context: Context) -> list[dict[str, Any]]:
-            return await self.resource_manager.list_subscriptions()
+        @self.mcp.resource("azure://subscriptions/{scope}")
+        async def list_subscriptions(context: Context, scope: str) -> list[dict[str, Any]]:
+            try:
+                return await self.resource_manager.list_subscriptions()
+            except Exception:
+                logger.exception("List subscriptions failed", extra={
+                                 "event": "subscriptions_error"})
+                return []
 
         @self.mcp.resource("azure://resources/{subscription_id}")
         async def get_resources(
             context: Context,
             subscription_id: str,
         ) -> dict[str, Any]:
-            return await self.resource_manager.get_subscription_resources(subscription_id)
+            try:
+                return await self.resource_manager.get_subscription_resources(subscription_id)
+            except Exception:
+                logger.exception(
+                    "Get resources failed",
+                    extra={"event": "resources_error",
+                           "subscription_id": subscription_id},
+                )
+                return {"subscription_id": subscription_id, "total_resources": 0, "resources_by_type": {}}
 
         @self.mcp.resource("azure://costs/{subscription_id}")
         async def get_costs(
             context: Context,
             subscription_id: str,
         ) -> dict[str, Any]:
-            return await self.resource_manager.get_subscription_costs(
-                subscription_id,
-                datetime.utcnow() - timedelta(days=30),
-                datetime.utcnow(),
-            )
+            try:
+                return await self.resource_manager.get_subscription_costs(
+                    subscription_id,
+                    datetime.utcnow() - timedelta(days=30),
+                    datetime.utcnow(),
+                )
+            except Exception:
+                logger.exception(
+                    "Get costs failed",
+                    extra={"event": "costs_error",
+                           "subscription_id": subscription_id},
+                )
+                return {
+                    "subscription_id": subscription_id,
+                    "period": {"start": None, "end": None},
+                    "total_cost": 0,
+                    "breakdown_by_category": {},
+                    "top_resources": [],
+                    "optimization_potential": 0,
+                }
 
-        @self.mcp.resource("tools://registered")
-        async def list_registered_tools(context: Context) -> list[dict[str, Any]]:
-            tools = list_tools()
-            return [
-                {"name": t.name, "description": t.description, "schema": t.schema} for t in tools
-            ]
+        @self.mcp.resource("tools://{scope}")
+        async def list_registered_tools(context: Context, scope: str) -> list[dict[str, Any]]:
+            try:
+                if scope not in {"registered", "all"}:
+                    return []
+                tools = list_tools()
+                return [{"name": t.name, "description": t.description, "schema": t.schema} for t in tools]
+            except Exception:
+                logger.exception("List tools failed", extra={
+                                 "event": "tools_error"})
+                return []
 
-        @self.mcp.resource("deployments://active")
-        async def get_active_deployments(context: Context) -> list[dict[str, Any]]:
-            return await self.resource_manager.get_active_deployments()
+        @self.mcp.resource("deployments://{state}")
+        async def get_active_deployments(context: Context, state: str) -> list[dict[str, Any]]:
+            try:
+                if state != "active":
+                    return []
+                return await self.resource_manager.get_active_deployments()
+            except Exception:
+                logger.exception("List deployments failed", extra={
+                                 "event": "deployments_error"})
+                return []
+
+        logger.info("Resources registered", extra={
+                    "event": "resources_registered"})
 
     def _setup_prompts(self) -> None:
         @self.mcp.prompt("infrastructure_deployment")
@@ -239,6 +371,9 @@ class MCPServer:
                 "5. Propose auto-shutdown schedules\n"
             )
 
+        logger.info("Prompts registered", extra={
+                    "event": "prompts_registered"})
+
     async def _validate_deployment(self, request: DeploymentRequest) -> dict[str, Any]:
         validations = {
             "naming_conventions": await self._check_naming_conventions(request),
@@ -269,16 +404,20 @@ class MCPServer:
             await stream.send(f"Starting: {step_name}")
             try:
                 result = await step_func(request)
-                results.append({"step": step_name, "status": "success", "result": result})
+                results.append(
+                    {"step": step_name, "status": "success", "result": result})
                 await stream.send(f"Completed: {step_name}")
             except Exception as e:
-                results.append({"step": step_name, "status": "failed", "error": str(e)})
+                results.append(
+                    {"step": step_name, "status": "failed", "error": str(e)})
                 await stream.send(f"Failed: {step_name} - {str(e)}")
                 if not request.continue_on_error:
                     break
+        status = "completed" if all(
+            r["status"] == "success" for r in results) else "failed"
         return {
             "deployment_id": request.deployment_id,
-            "status": "completed" if all(r["status"] == "success" for r in results) else "failed",
+            "status": status,
             "steps": results,
             "summary": await self._generate_deployment_summary(request, results),
         }
@@ -288,15 +427,15 @@ class MCPServer:
         request = QueryRequest(
             query=params.kql,
             subscriptions=params.subscriptions or self._get_allowed_subscriptions(),
-            options=(
-                QueryRequestOptions(top=params.top, skip=params.skip, skip_token=params.skip_token)
-                if params.top or params.skip or params.skip_token
-                else None
-            ),
+            options=QueryRequestOptions(
+                top=params.top, skip=params.skip, skip_token=params.skip_token)
+            if params.top or params.skip or params.skip_token
+            else None,
         )
         result = await asyncio.to_thread(rg_client.resources, request)
+        data = result.data[: params.top] if params.top else result.data
         return {
-            "data": result.data[: params.top] if params.top else result.data,
+            "data": data,
             "count": result.count,
             "total_records": result.total_records,
             "skip_token": result.skip_token,
@@ -306,13 +445,12 @@ class MCPServer:
 
     def _get_resource_graph_client(self) -> ResourceGraphClient:
         if not hasattr(self, "_rg_client"):
-            cred = ChainedTokenCredential(ManagedIdentityCredential(), AzureCliCredential())
+            cred = ChainedTokenCredential(
+                ManagedIdentityCredential(), AzureCliCredential())
             self._rg_client = ResourceGraphClient(cred)
         return self._rg_client
 
     def _get_allowed_subscriptions(self) -> list[str]:
-        import os
-
         raw = os.getenv("AZURE_SUBSCRIPTIONS", "")
         return [s.strip() for s in raw.split(",") if s.strip()]
 
@@ -327,13 +465,16 @@ class MCPServer:
             name = str(r.get("name", "")).strip()
             rtype = str(r.get("type", "")).strip()
             if not name or not rtype:
-                invalid.append({"scope": "resource", "name": name or "", "type": rtype or ""})
+                invalid.append(
+                    {"scope": "resource", "name": name or "", "type": rtype or ""})
                 continue
             if name in seen:
-                invalid.append({"scope": "duplicate", "name": name, "type": rtype})
+                invalid.append(
+                    {"scope": "duplicate", "name": name, "type": rtype})
             seen.add(name)
             if not pattern.match(name):
-                invalid.append({"scope": "format", "name": name, "type": rtype})
+                invalid.append(
+                    {"scope": "format", "name": name, "type": rtype})
         passed = len(invalid) == 0
         return {
             "passed": passed,
@@ -356,15 +497,17 @@ class MCPServer:
                 https_only = bool(props.get("https_only", True))
                 tls = str(props.get("minimum_tls_version", "1.2"))
                 if not https_only:
-                    enforced.append({"name": name, "policy": "https_only", "value": True})
+                    enforced.append(
+                        {"name": name, "policy": "https_only", "value": True})
                 if tls not in {"1.2", "1.3"}:
-                    enforced.append({"name": name, "policy": "minimum_tls_version", "value": "1.2"})
+                    enforced.append(
+                        {"name": name, "policy": "minimum_tls_version", "value": "1.2"})
             if rtype == "storage_account":
-                allow_public = bool(props.get("allow_blob_public_access", False))
+                allow_public = bool(
+                    props.get("allow_blob_public_access", False))
                 if allow_public:
                     enforced.append(
-                        {"name": name, "policy": "allow_blob_public_access", "value": False}
-                    )
+                        {"name": name, "policy": "allow_blob_public_access", "value": False})
         passed = not missing_tags and not enforced
         return {"passed": passed, "details": {"missing_tags": missing_tags, "enforced": enforced}}
 
@@ -377,14 +520,17 @@ class MCPServer:
             vnet = str(props.get("vnet_id", "")).strip()
             if subnet:
                 if "/subnets/" not in subnet:
-                    issues.append({"name": name, "issue": "invalid_subnet_ref"})
+                    issues.append(
+                        {"name": name, "issue": "invalid_subnet_ref"})
                 if not subnet.startswith("/subscriptions/"):
-                    issues.append({"name": name, "issue": "subnet_not_fully_qualified"})
+                    issues.append(
+                        {"name": name, "issue": "subnet_not_fully_qualified"})
             if vnet:
                 if "/virtualNetworks/" not in vnet:
                     issues.append({"name": name, "issue": "invalid_vnet_ref"})
                 if not vnet.startswith("/subscriptions/"):
-                    issues.append({"name": name, "issue": "vnet_not_fully_qualified"})
+                    issues.append(
+                        {"name": name, "issue": "vnet_not_fully_qualified"})
         return {"passed": len(issues) == 0, "details": {"issues": issues}}
 
     async def _check_resource_quotas(self, request: DeploymentRequest) -> dict[str, Any]:
@@ -403,7 +549,8 @@ class MCPServer:
         over: list[dict[str, Any]] = []
         for rtype, cnt in counts.items():
             if rtype in limit and cnt > limit[rtype]:
-                over.append({"type": rtype, "count": cnt, "limit": limit[rtype]})
+                over.append(
+                    {"type": rtype, "count": cnt, "limit": limit[rtype]})
         return {"passed": len(over) == 0, "details": {"usage": counts, "exceeded": over}}
 
     async def _estimate_deployment_cost(self, request: DeploymentRequest) -> dict[str, Any]:
@@ -428,7 +575,8 @@ class MCPServer:
             else:
                 cost = 0.0
             total += cost
-            breakdown.append({"name": name, "type": rtype, "monthly_cost": cost})
+            breakdown.append(
+                {"name": name, "type": rtype, "monthly_cost": cost})
         return {"monthly_cost": total, "currency": "USD", "items": breakdown}
 
     async def _get_deployment_recommendations(self, request: DeploymentRequest) -> list[str]:
@@ -444,7 +592,8 @@ class MCPServer:
         return str(uuid.uuid4())
 
     async def _init_deployment(self, request: DeploymentRequest) -> dict[str, Any]:
-        required = ["subscription_id", "resource_group", "location", "resources"]
+        required = ["subscription_id",
+                    "resource_group", "location", "resources"]
         for key in required:
             if not getattr(request, key, None):
                 raise ValueError(f"missing_required_field:{key}")
@@ -484,7 +633,8 @@ class MCPServer:
                 if "/subnets/" in subnet and subnet.startswith("/subscriptions/"):
                     configured += 1
                 else:
-                    checks.append({"name": str(r.get("name", "")), "issue": "invalid_subnet"})
+                    checks.append(
+                        {"name": str(r.get("name", "")), "issue": "invalid_subnet"})
         return {"network_configured": configured, "issues": checks}
 
     async def _apply_security(self, request: DeploymentRequest) -> dict[str, Any]:
@@ -493,12 +643,13 @@ class MCPServer:
             rtype = str(r.get("type", "")).lower()
             name = str(r.get("name", ""))
             if rtype == "web_app":
-                applied.append({"name": name, "setting": "https_only", "value": True})
-                applied.append({"name": name, "setting": "minimum_tls_version", "value": "1.2"})
+                applied.append(
+                    {"name": name, "setting": "https_only", "value": True})
+                applied.append(
+                    {"name": name, "setting": "minimum_tls_version", "value": "1.2"})
             if rtype == "storage_account":
                 applied.append(
-                    {"name": name, "setting": "allow_blob_public_access", "value": False}
-                )
+                    {"name": name, "setting": "allow_blob_public_access", "value": False})
         return {"security_applied": True, "changes": applied}
 
     async def _enable_monitoring(self, request: DeploymentRequest) -> dict[str, Any]:
@@ -531,18 +682,28 @@ class MCPServer:
         }
 
     def run(self) -> None:
-        self.mcp.run(transport=self.transport)
+        logger.info("Starting MCP server", extra={
+                    "event": "mcp_run", "transport": self.transport})
+        try:
+            self.mcp.run(transport=self.transport)
+        except Exception:
+            logger.exception("MCP server crashed", extra={
+                             "event": "mcp_crash"})
+            raise
 
 
 async def amain() -> None:
-    import os
-
     transport = cast(
         Literal["stdio", "sse", "streamable-http"],
         os.getenv("MCP_TRANSPORT", "stdio").lower(),
     )
-    server = await MCPServer.create(transport=transport)
-    server.run()
+    try:
+        server = await MCPServer.create(transport=transport)
+        server.run()
+    except Exception:
+        logger.exception("MCP server failed to start",
+                         extra={"event": "mcp_start_error"})
+        raise
 
 
 def main() -> None:

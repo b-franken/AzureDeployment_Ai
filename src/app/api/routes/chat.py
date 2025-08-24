@@ -7,8 +7,8 @@ from collections.abc import AsyncGenerator
 from types import SimpleNamespace
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi.responses import JSONResponse, StreamingResponse
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
@@ -59,12 +59,12 @@ async def get_optional_user(request: Request) -> Any:
     return SimpleNamespace(email="token-user", roles=["user"], subscription_id=None, is_active=True)
 
 
-@router.post("")
+@router.post("", response_model=None)
 async def chat(
     req: ChatRequest,
     stream: Annotated[bool, Query(True)],
     current_user: Annotated[Any, Depends(get_optional_user)],
-) -> StreamingResponse | dict[str, Any]:
+) -> Response:
     with tracer.start_as_current_span("api.chat") as span:
         span.set_attribute("auth.user", getattr(current_user, "email", "anonymous"))
         span.set_attribute("llm.provider.requested", req.provider or "")
@@ -104,18 +104,20 @@ async def chat(
                 getattr(current_user, "email", "anonymous"),
                 len(text or ""),
             )
-            return ChatResponse(output=text).model_dump()
+            return JSONResponse(content=ChatResponse(output=text).model_dump())
         except BaseApplicationException as exc:
             msg = exc.user_message or "Failed to process request."
             span.set_status(Status(StatusCode.ERROR, msg))
             logger.exception(
                 "chat failed user=%s msg=%s", getattr(current_user, "email", "anonymous"), msg
             )
-            return ChatResponse(output=msg).model_dump()
+            return JSONResponse(content=ChatResponse(output=msg).model_dump())
         except Exception as exc:
             span.set_status(Status(StatusCode.ERROR, str(exc)))
             logger.exception("chat failed user=%s", getattr(current_user, "email", "anonymous"))
-            return ChatResponse(output="Failed to process request.").model_dump()
+            return JSONResponse(
+                content=ChatResponse(output="Failed to process request.").model_dump()
+            )
 
 
 @router.post("/v2")

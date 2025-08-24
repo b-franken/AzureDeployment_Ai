@@ -4,8 +4,8 @@ import asyncio
 import logging
 from typing import Any
 
-from fastmcp import Context
 from azure.core.exceptions import AzureError
+from fastmcp import Context
 
 # These clients are optional; we guard imports/usages so the server still boots
 try:
@@ -32,14 +32,14 @@ def _safe_usage_record(item: Any) -> dict[str, Any]:
         # Azure models differ slightly between services; try common attrs
         return {
             "name": name or getattr(item, "name", None),
-            "current_value": getattr(item, "current_value", None)
-            or getattr(item, "current", None),
+            "current_value": getattr(item, "current_value", None) or getattr(item, "current", None),
             "limit": getattr(item, "limit", None) or getattr(item, "max_value", None),
             "unit": getattr(item, "unit", None),
         }
     except Exception:  # extremely defensive – never crash quota endpoint
-        logger.exception("Failed to normalize quota usage item", extra={
-                         "event": "quota_item_normalize_error"})
+        logger.exception(
+            "Failed to normalize quota usage item", extra={"event": "quota_item_normalize_error"}
+        )
         return {"name": None, "current_value": None, "limit": None, "unit": None}
 
 
@@ -85,8 +85,9 @@ def register_extensions(server: Any) -> None:
         try:
             cred = build_credential()
         except Exception as e:
-            logger.exception("Failed to build Azure credential",
-                             extra={"event": "azure_cred_error"})
+            logger.exception(
+                "Failed to build Azure credential", extra={"event": "azure_cred_error"}
+            )
             return {
                 "subscription_id": subscription_id,
                 "location": location,
@@ -112,8 +113,7 @@ def register_extensions(server: Any) -> None:
         except AzureError as e:
             logger.error(
                 "Azure error while fetching compute quotas",
-                extra={"event": "compute_quotas_azure_error",
-                       "details": str(e)},
+                extra={"event": "compute_quotas_azure_error", "details": str(e)},
             )
             services["compute"] = []
         except Exception as e:  # pragma: no cover
@@ -142,8 +142,7 @@ def register_extensions(server: Any) -> None:
         except AzureError as e:
             logger.error(
                 "Azure error while fetching network quotas",
-                extra={"event": "network_quotas_azure_error",
-                       "details": str(e)},
+                extra={"event": "network_quotas_azure_error", "details": str(e)},
             )
             services["network"] = []
         except Exception as e:  # pragma: no cover

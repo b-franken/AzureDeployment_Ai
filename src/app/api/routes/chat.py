@@ -62,8 +62,8 @@ async def get_optional_user(request: Request) -> Any:
 @router.post("", response_model=None)
 async def chat(
     req: ChatRequest,
-    stream: Annotated[bool, Query(True)],
     current_user: Annotated[Any, Depends(get_optional_user)],
+    stream: bool = Query(True),
 ) -> Response:
     with tracer.start_as_current_span("api.chat") as span:
         span.set_attribute("auth.user", getattr(current_user, "email", "anonymous"))

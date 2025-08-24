@@ -1,4 +1,4 @@
-version: "3.9"
+# filename: docker-compose.yml
 name: devops-ai
 
 services:
@@ -19,6 +19,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+    restart: unless-stopped
 
   api:
     build:
@@ -29,9 +30,11 @@ services:
       ENVIRONMENT: ${ENVIRONMENT}
       API_HOST: ${API_HOST}
       API_PORT: ${API_PORT}
+      API_PREFIX: ${API_PREFIX}
       LLM_PROVIDER: ${LLM_PROVIDER}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_MODEL: ${OPENAI_MODEL}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL}
-      OLLAMA_MODEL: ${OLLAMA_MODEL}
       DATABASE_URL: ${DATABASE_URL}
       DATABASE__POSTGRES_DSN: ${DATABASE__POSTGRES_DSN}
       AUDIT_DB_URL: ${AUDIT_DB_URL}
@@ -40,13 +43,13 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      ollama:
+        condition: service_started
     command: >
-      sh -c "uvicorn app.api.main:app --host ${API_HOST} --port ${API_PORT}"
+      sh -c "uvicorn app.api.main:app --host ${API_HOST} --port ${API_PORT} --workers 2"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:${API_PORT}/api/health || exit 1"]
-      interval: 5s
-      timeout: 3s
-      retries: 40
+      test: ["CMD-SHELL", "wget -qO- http://localhost:${API_PORT}${API_PREFIX}/health || exit 1"]
+    restart: unless-stopped
 
   mcp:
     build:
@@ -64,14 +67,19 @@ services:
         condition: service_healthy
     command: >
       sh -c "python -m app.mcp.server"
+    restart: unless-stopped
 
   ollama:
     image: ollama/ollama:latest
     container_name: devops-ai-ollama
-    ports:
-      - "${OLLAMA_PORT}:11434"
     volumes:
       - ollama:/root/.ollama
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:11434/api/tags"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+    restart: unless-stopped
 
 volumes:
   dbdata: {}

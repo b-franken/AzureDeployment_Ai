@@ -74,6 +74,8 @@ dependencies = [
   "azure-mgmt-costmanagement",
   "azure-monitor-opentelemetry",
   "azure.mgmt.consumption",
+  "azure.mgmt.monitor",
+  "azure.mgmt.network",
   "opentelemetry-instrumentation-fastapi",
   "opentelemetry-instrumentation-asgi",
   "opentelemetry-instrumentation-httpx",

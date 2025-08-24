@@ -3,6 +3,7 @@
 .env.local
 .env.development
 .env.docker
+.env.*
 
 # Databases
 *.db

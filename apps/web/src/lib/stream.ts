@@ -1,5 +1,7 @@
+import { API_BASE_URL } from "@/lib/api"
+
 export async function chatStream(
-    baseURL: string,
+    baseURL: string | null | undefined,
     body: {
         input: string
         memory?: { role: "user" | "assistant" | "system"; content: string }[]
@@ -9,7 +11,8 @@ export async function chatStream(
     },
     onDelta: (text: string) => void
 ): Promise<string> {
-    const url = `${baseURL.replace(/\/+$/, "")}/api/chat?stream=true`
+    const base = (baseURL && baseURL.trim() ? baseURL : API_BASE_URL).replace(/\/+$/, "")
+    const url = `${base}/api/chat?stream=true`
     const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -22,23 +25,25 @@ export async function chatStream(
     const reader = res.body.getReader()
     const decoder = new TextDecoder()
     let full = ""
+    let buf = ""
     while (true) {
         const { done, value } = await reader.read()
         if (done) break
-        const chunk = decoder.decode(value, { stream: true })
-        const lines = chunk.split(/\r?\n/)
-        for (const line of lines) {
-            if (!line.startsWith("data:")) continue
-            const data = line.slice(5).trim()
-            if (!data) continue
+        buf += decoder.decode(value, { stream: true })
+        let nl: number
+        while ((nl = buf.indexOf("\n")) !== -1) {
+            const raw = buf.slice(0, nl)
+            buf = buf.slice(nl + 1)
+            if (!raw.startsWith("data:")) continue
+            let data = raw.slice(5)
+            if (data.startsWith(" ")) data = data.slice(1)
+            if (!data || data === "[DONE]") continue
             try {
                 const obj = JSON.parse(data)
-                if (typeof obj === "string") {
-                    full += obj
-                    onDelta(obj)
-                } else if (typeof obj.data === "string") {
-                    full += obj.data
-                    onDelta(obj.data)
+                const text = typeof obj === "string" ? obj : typeof obj.data === "string" ? obj.data : ""
+                if (text) {
+                    full += text
+                    onDelta(text)
                 }
             } catch {
                 full += data

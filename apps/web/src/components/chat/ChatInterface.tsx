@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils"
 import LLMSelector from "@/components/chat/LLMSelector"
 import { ReviewButton } from "@/components/chat/ReviewButton"
 import { DeployButton } from "@/components/chat/DeployButton"
-import { chat as call_chat } from "@/lib/api"
+import { chat as call_chat, API_BASE_URL } from "@/lib/api"
 import { chatStream } from "@/lib/stream"
 
 interface ChatMsg {
@@ -87,7 +87,7 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
                 }
                 setMessages((prev) => [...prev, assistantMsg])
                 const full = await chatStream(
-                    "",
+                    API_BASE_URL,
                     {
                         input: userMessage.content,
                         memory: history,
@@ -96,14 +96,10 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
                         enable_tools: false,
                     },
                     (delta) => {
-                        setMessages((prev) =>
-                            prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + delta } : m)),
-                        )
+                        setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + delta } : m)))
                     },
                 )
-                setMessages((prev) =>
-                    prev.map((m) => (m.id === assistantId ? { ...m, content: full, timestamp: new Date() } : m)),
-                )
+                setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: full, timestamp: new Date() } : m)))
             } else {
                 const reply = await call_chat(userMessage.content, history, provider, model, true)
                 const assistantMessage: ChatMsg = {
@@ -173,10 +169,7 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
                 <ScrollArea className="p-4" style={{ height: `${chatHeight}px` }}>
                     <div className="space-y-4">
                         {messages.map((message) => (
-                            <div
-                                key={message.id}
-                                className={cn("flex gap-3", message.role === "user" ? "justify-end" : "justify-start")}
-                            >
+                            <div key={message.id} className={cn("flex gap-3", message.role === "user" ? "justify-end" : "justify-start")}>
                                 {message.role === "assistant" && (
                                     <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500">
                                         <Bot className="h-4 w-4 text-white" />

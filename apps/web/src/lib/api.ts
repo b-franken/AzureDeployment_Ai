@@ -1,4 +1,4 @@
-const base = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000"
+export const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000").replace(/\/+$/, "")
 export const REQUEST_TIMEOUT_MS = 30000
 
 export class ApiError extends Error {
@@ -134,7 +134,7 @@ class APIClient {
   }
 }
 
-export const apiClient = new APIClient(base)
+export const apiClient = new APIClient(API_BASE_URL)
 
 export type AuthResult = {
   access_token: string
@@ -205,7 +205,7 @@ export async function chat(
   const pref = isOpts ? providerOrOpts.preferred_tool ?? null : preferred_tool ?? null
   const allow = isOpts ? providerOrOpts.allowlist ?? [] : allowlist ?? []
   const data = await apiClient.post<{ output: string }>(
-    "/api/chat",
+    "/api/chat?stream=false",
     {
       input,
       memory: memory ?? [],

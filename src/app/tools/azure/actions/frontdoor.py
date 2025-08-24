@@ -75,27 +75,29 @@ async def create_front_door(
         health_probe = HealthProbeSettingsModel(
             name=health_probe_name,
             path=health_probe_settings.get("path", "/") if health_probe_settings else "/",
-            protocol=health_probe_settings.get("protocol", "Https")
-            if health_probe_settings
-            else "Https",
-            interval_in_seconds=health_probe_settings.get("interval", 30)
-            if health_probe_settings
-            else 30,
+            protocol=(
+                health_probe_settings.get("protocol", "Https") if health_probe_settings else "Https"
+            ),
+            interval_in_seconds=(
+                health_probe_settings.get("interval", 30) if health_probe_settings else 30
+            ),
         )
 
         load_balancing = LoadBalancingSettingsModel(
             name=load_balancing_name,
-            sample_size=load_balancing_settings.get("sample_size", 4)
-            if load_balancing_settings
-            else 4,
-            successful_samples_required=load_balancing_settings.get(
-                "successful_samples_required", 2
-            )
-            if load_balancing_settings
-            else 2,
-            additional_latency_milliseconds=load_balancing_settings.get("additional_latency", 0)
-            if load_balancing_settings
-            else 0,
+            sample_size=(
+                load_balancing_settings.get("sample_size", 4) if load_balancing_settings else 4
+            ),
+            successful_samples_required=(
+                load_balancing_settings.get("successful_samples_required", 2)
+                if load_balancing_settings
+                else 2
+            ),
+            additional_latency_milliseconds=(
+                load_balancing_settings.get("additional_latency", 0)
+                if load_balancing_settings
+                else 0
+            ),
         )
 
         backend = Backend(
@@ -262,9 +264,9 @@ async def create_waf_policy(
         waf_policy = WebApplicationFirewallPolicy(
             location="global",
             policy_settings=policy_settings,
-            custom_rules=CustomRuleList(rules=prepared_custom_rules)
-            if prepared_custom_rules
-            else None,
+            custom_rules=(
+                CustomRuleList(rules=prepared_custom_rules) if prepared_custom_rules else None
+            ),
             managed_rules=ManagedRuleSetList(managed_rule_sets=managed_rule_sets),
             tags=tags or {},
         )

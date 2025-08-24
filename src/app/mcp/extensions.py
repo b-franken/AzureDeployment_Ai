@@ -1,107 +1,175 @@
 from __future__ import annotations
 
-import json
+import asyncio
 import logging
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import Any
 
-from mcp.server.fastmcp import Context
+from fastmcp import Context
+from azure.core.exceptions import AzureError
 
-if TYPE_CHECKING:
-    from app.mcp.server import MCPServer
+# These clients are optional; we guard imports/usages so the server still boots
+try:
+    from azure.mgmt.compute import ComputeManagementClient
+except Exception:  # pragma: no cover - best effort import
+    ComputeManagementClient = None  # type: ignore[assignment]
 
-from app.tools.azure.clients import get_clients
-from app.tools.provision.orchestrator import ProvisionOrchestrator
+try:
+    from azure.mgmt.network import NetworkManagementClient
+except Exception:  # pragma: no cover - best effort import
+    NetworkManagementClient = None  # type: ignore[assignment]
 
-logger = logging.getLogger(__name__)
+from app.core.azure_auth import build_credential
 
-
-class PlanPreviewArgs(TypedDict, total=False):
-    request: str
-    env: str
-    subscription_id: str
-    resource_group: str
-    location: str
-    include_cost_estimate: bool
+logger = logging.getLogger("app.mcp.extensions")
 
 
-def register_extensions(server: MCPServer) -> None:
+def _safe_usage_record(item: Any) -> dict[str, Any]:
+    """Normalize Azure usage/quota items to a consistent dict."""
+    try:
+        name = getattr(getattr(item, "name", None), "value", None) or getattr(
+            getattr(item, "name", None), "localized_value", None
+        )
+        # Azure models differ slightly between services; try common attrs
+        return {
+            "name": name or getattr(item, "name", None),
+            "current_value": getattr(item, "current_value", None)
+            or getattr(item, "current", None),
+            "limit": getattr(item, "limit", None) or getattr(item, "max_value", None),
+            "unit": getattr(item, "unit", None),
+        }
+    except Exception:  # extremely defensive – never crash quota endpoint
+        logger.exception("Failed to normalize quota usage item", extra={
+                         "event": "quota_item_normalize_error"})
+        return {"name": None, "current_value": None, "limit": None, "unit": None}
+
+
+def register_extensions(server: Any) -> None:
+    """
+    Register extra MCP resources that aren't part of the core server.
+
+    NOTE: For FastMCP resources, `context` MUST be the first parameter. If it's
+    not first, FastMCP will treat it as a required URI parameter and raise:
+    "Required function arguments {..., 'context'} must be a subset of the URI parameters {...}".
+    """
     mcp = server.mcp
 
-    @mcp.tool(
-        name="plan_preview",
-        description=(
-            "Create a safe plan from plain English. Returns AVM Bicep, What-If preview, "
-            "and optional cost estimate. Does not apply changes."
-        ),
-    )
-    async def plan_preview(args: PlanPreviewArgs, context: Context) -> dict[str, Any]:
-        req = cast(dict[str, Any], dict(args or {}))
-        orch = ProvisionOrchestrator()
-        res = await orch.run(
-            request=req.get("request"),
-            backend="avm",
-            env=str(req.get("env") or "dev"),
-            plan_only=True,
-            subscription_id=req.get("subscription_id"),
-            resource_group=req.get("resource_group"),
-            location=req.get("location"),
-            include_cost_estimate=bool(req.get("include_cost_estimate", True)),
+    @mcp.resource("azure://quotas/{subscription_id}/{location}")
+    async def get_quotas(context: Context, subscription_id: str, location: str) -> dict[str, Any]:
+        """
+        Return compute/network quota information for a subscription/location.
+
+        URI params:
+          - subscription_id
+          - location
+
+        Returns a payload shaped like:
+        {
+          "subscription_id": "...",
+          "location": "westeurope",
+          "services": {
+            "compute": [ {name, current_value, limit, unit}, ... ],
+            "network": [ {name, current_value, limit, unit}, ... ]
+          }
+        }
+        """
+        logger.info(
+            "Fetching Azure quotas",
+            extra={
+                "event": "azure_quotas_fetch",
+                "subscription_id": subscription_id,
+                "location": location,
+            },
         )
 
-        if isinstance(res.get("output"), str):
-            try:
-                res["output"] = json.loads(res["output"])
-            except json.JSONDecodeError as exc:
-                logger.debug("Failed to parse output JSON: %s", exc)
-        return cast(dict[str, Any], res)
-
-    @mcp.resource("azure://quotas/{subscription_id}/{location}")
-    async def quotas(context: Context, subscription_id: str, location: str) -> dict[str, Any]:
-        clients = await get_clients(subscription_id)
-        usages = await clients.run(clients.cmp.usage.list, location)
-        items: list[dict[str, Any]] = []
-        for u in usages:
-            key = getattr(getattr(u, "name", None), "value", None) or "unknown"
-            current = int(getattr(u, "current_value", 0))
-            limit = int(getattr(u, "limit", 0))
-            items.append(
-                {
-                    "name": key,
-                    "current": current,
-                    "limit": limit,
-                    "available": max(limit - current, 0),
-                }
-            )
-        return {"region": location, "items": items}
-
-    @mcp.prompt("explain_plan")
-    async def explain_plan_prompt(
-        context: Context,
-        plan_json: str,
-        audience: str = "engineering team",
-    ) -> str:
+        cred = None
         try:
-            obj = json.loads(plan_json)
-        except json.JSONDecodeError as exc:
-            logger.debug("Failed to parse plan JSON: %s", exc)
-            obj = {"raw": plan_json}
-        title = f"Plan preview for {audience}"
-        bullets = [
-            "What will be created or changed",
-            "Dependencies and sequencing",
-            "Quota or naming risks",
-            "Estimated monthly cost if provided",
-            "Rollback posture and safe retry if apply fails",
-        ]
-        return f"""{title}
+            cred = build_credential()
+        except Exception as e:
+            logger.exception("Failed to build Azure credential",
+                             extra={"event": "azure_cred_error"})
+            return {
+                "subscription_id": subscription_id,
+                "location": location,
+                "services": {},
+                "error": f"credential_error:{e}",
+            }
 
-Key points to cover:
-- {bullets[0]}
-- {bullets[1]}
-- {bullets[2]}
-- {bullets[3]}
-- {bullets[4]}
+        services: dict[str, list[dict[str, Any]]] = {}
 
-Raw plan object:
-{json.dumps(obj, indent=2)}
-"""
+        # ---- Compute quotas ----
+        try:
+            compute_items: list[dict[str, Any]] = []
+            if ComputeManagementClient is not None:
+                comp_client = ComputeManagementClient(cred, subscription_id)
+                usages = await asyncio.to_thread(lambda: list(comp_client.usage.list(location)))
+                compute_items = [_safe_usage_record(u) for u in usages]
+            else:
+                logger.warning(
+                    "ComputeManagementClient unavailable; skipping compute quotas",
+                    extra={"event": "compute_client_missing"},
+                )
+            services["compute"] = compute_items
+        except AzureError as e:
+            logger.error(
+                "Azure error while fetching compute quotas",
+                extra={"event": "compute_quotas_azure_error",
+                       "details": str(e)},
+            )
+            services["compute"] = []
+        except Exception as e:  # pragma: no cover
+            logger.exception(
+                "Unexpected error while fetching compute quotas",
+                extra={"event": "compute_quotas_unexpected_error"},
+            )
+            services["compute"] = []
+            # Keep response resilient – don't fail the whole resource
+            # but surface a hint to callers.
+            services.setdefault("_errors", []).append(f"compute:{e}")
+
+        # ---- Network quotas ----
+        try:
+            network_items: list[dict[str, Any]] = []
+            if NetworkManagementClient is not None:
+                net_client = NetworkManagementClient(cred, subscription_id)
+                usages = await asyncio.to_thread(lambda: list(net_client.usages.list(location)))
+                network_items = [_safe_usage_record(u) for u in usages]
+            else:
+                logger.warning(
+                    "NetworkManagementClient unavailable; skipping network quotas",
+                    extra={"event": "network_client_missing"},
+                )
+            services["network"] = network_items
+        except AzureError as e:
+            logger.error(
+                "Azure error while fetching network quotas",
+                extra={"event": "network_quotas_azure_error",
+                       "details": str(e)},
+            )
+            services["network"] = []
+        except Exception as e:  # pragma: no cover
+            logger.exception(
+                "Unexpected error while fetching network quotas",
+                extra={"event": "network_quotas_unexpected_error"},
+            )
+            services["network"] = []
+            services.setdefault("_errors", []).append(f"network:{e}")
+
+        payload = {
+            "subscription_id": subscription_id,
+            "location": location,
+            "services": services,
+        }
+        logger.info(
+            "Azure quotas fetched",
+            extra={
+                "event": "azure_quotas_success",
+                "subscription_id": subscription_id,
+                "location": location,
+                "compute_items": len(services.get("compute", [])),
+                "network_items": len(services.get("network", [])),
+            },
+        )
+        return payload
+
+
+__all__ = ["register_extensions"]

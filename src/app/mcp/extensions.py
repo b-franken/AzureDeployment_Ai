@@ -1,171 +1,232 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import logging
-from typing import Any
+import time
+from typing import Any, TypedDict
 
 from azure.core.exceptions import AzureError
 from fastmcp import Context
 
-# These clients are optional; we guard imports/usages so the server still boots
-try:
-    from azure.mgmt.compute import ComputeManagementClient
-except Exception:  # pragma: no cover - best effort import
-    ComputeManagementClient = None  # type: ignore[assignment]
-
-try:
-    from azure.mgmt.network import NetworkManagementClient
-except Exception:  # pragma: no cover - best effort import
-    NetworkManagementClient = None  # type: ignore[assignment]
-
 from app.core.azure_auth import build_credential
 
-logger = logging.getLogger("app.mcp.extensions")
+logger = logging.getLogger(__name__)
 
 
-def _safe_usage_record(item: Any) -> dict[str, Any]:
-    """Normalize Azure usage/quota items to a consistent dict."""
+class UsageRecord(TypedDict, total=False):
+    name: str | None
+    current_value: int | None
+    limit: int | None
+    unit: str | None
+
+
+def _coerce_int(value: Any) -> int | None:
     try:
-        name = getattr(getattr(item, "name", None), "value", None) or getattr(
-            getattr(item, "name", None), "localized_value", None
-        )
-        # Azure models differ slightly between services; try common attrs
+        if value is None:
+            return None
+        return int(value)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _safe_usage_record(item: Any) -> UsageRecord:
+    try:
+        name_obj = getattr(item, "name", None)
+        name_val = getattr(name_obj, "value", None) if name_obj is not None else None
+        if not name_val and name_obj is not None:
+            name_val = getattr(name_obj, "localized_value", None)
+        current_value = getattr(item, "current_value", None)
+        if current_value is None:
+            current_value = getattr(item, "current", None)
+        limit_val = getattr(item, "limit", None)
+        if limit_val is None:
+            limit_val = getattr(item, "max_value", None)
+        unit_val = getattr(item, "unit", None)
         return {
-            "name": name or getattr(item, "name", None),
-            "current_value": getattr(item, "current_value", None) or getattr(item, "current", None),
-            "limit": getattr(item, "limit", None) or getattr(item, "max_value", None),
-            "unit": getattr(item, "unit", None),
+            "name": name_val or getattr(item, "name", None),
+            "current_value": _coerce_int(current_value),
+            "limit": _coerce_int(limit_val),
+            "unit": str(unit_val) if unit_val is not None else None,
         }
-    except Exception:  # extremely defensive – never crash quota endpoint
+    except Exception:  # noqa: BLE001
         logger.exception(
-            "Failed to normalize quota usage item", extra={"event": "quota_item_normalize_error"}
+            "quota_item.normalize_error", extra={"event": "azure_quotas.normalize_error"}
         )
         return {"name": None, "current_value": None, "limit": None, "unit": None}
 
 
-def register_extensions(server: Any) -> None:
-    """
-    Register extra MCP resources that aren't part of the core server.
+def _get_sync_client(
+    module_name: str, class_name: str, cred: Any, subscription_id: str
+) -> Any | None:
+    try:
+        mod = importlib.import_module(module_name)
+        cls = getattr(mod, class_name)
+        return cls(cred, subscription_id)
+    except ModuleNotFoundError:
+        logger.warning(
+            "azure_sdk.module_missing",
+            extra={
+                "event": "azure_quotas.module_missing",
+                "module": module_name,
+                "class": class_name,
+            },
+        )
+        return None
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            "azure_sdk.client_init_error",
+            extra={
+                "event": "azure_quotas.client_init_error",
+                "module": module_name,
+                "class": class_name,
+                "error_type": type(exc).__name__,
+                "error_message": str(exc),
+            },
+        )
+        return None
 
-    NOTE: For FastMCP resources, `context` MUST be the first parameter. If it's
-    not first, FastMCP will treat it as a required URI parameter and raise:
-    "Required function arguments {..., 'context'} must be a subset of the URI parameters {...}".
-    """
+
+async def _fetch_compute_usages(
+    cred: Any, subscription_id: str, location: str
+) -> list[UsageRecord]:
+    t0 = time.perf_counter()
+    try:
+        client = _get_sync_client(
+            "azure.mgmt.compute", "ComputeManagementClient", cred, subscription_id
+        )
+        if client is None:
+            return []
+        usages = await asyncio.to_thread(lambda: list(client.usage.list(location)))
+        items = [_safe_usage_record(u) for u in usages]
+        logger.debug(
+            "azure_quotas.compute.done",
+            extra={
+                "event": "azure_quotas.compute_success",
+                "count": len(items),
+                "duration_ms": (time.perf_counter() - t0) * 1000.0,
+            },
+        )
+        return items
+    except AzureError as exc:
+        logger.error(
+            "azure_quotas.compute.azure_error",
+            extra={
+                "event": "azure_quotas.compute_error",
+                "error_type": type(exc).__name__,
+                "error_message": str(exc),
+            },
+            exc_info=True,
+        )
+        return []
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            "azure_quotas.compute.unexpected_error",
+            extra={
+                "event": "azure_quotas.compute_unexpected_error",
+                "error_type": type(exc).__name__,
+                "error_message": str(exc),
+            },
+        )
+        return []
+
+
+async def _fetch_network_usages(
+    cred: Any, subscription_id: str, location: str
+) -> list[UsageRecord]:
+    t0 = time.perf_counter()
+    try:
+        client = _get_sync_client(
+            "azure.mgmt.network", "NetworkManagementClient", cred, subscription_id
+        )
+        if client is None:
+            return []
+        usages = await asyncio.to_thread(lambda: list(client.usages.list(location)))
+        items = [_safe_usage_record(u) for u in usages]
+        logger.debug(
+            "azure_quotas.network.done",
+            extra={
+                "event": "azure_quotas.network_success",
+                "count": len(items),
+                "duration_ms": (time.perf_counter() - t0) * 1000.0,
+            },
+        )
+        return items
+    except AzureError as exc:
+        logger.error(
+            "azure_quotas.network.azure_error",
+            extra={
+                "event": "azure_quotas.network_error",
+                "error_type": type(exc).__name__,
+                "error_message": str(exc),
+            },
+            exc_info=True,
+        )
+        return []
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            "azure_quotas.network.unexpected_error",
+            extra={
+                "event": "azure_quotas.network_unexpected_error",
+                "error_type": type(exc).__name__,
+                "error_message": str(exc),
+            },
+        )
+        return []
+
+
+def register_extensions(server: Any) -> None:
     mcp = server.mcp
 
     @mcp.resource("azure://quotas/{subscription_id}/{location}")
     async def get_quotas(context: Context, subscription_id: str, location: str) -> dict[str, Any]:
-        """
-        Return compute/network quota information for a subscription/location.
-
-        URI params:
-          - subscription_id
-          - location
-
-        Returns a payload shaped like:
-        {
-          "subscription_id": "...",
-          "location": "westeurope",
-          "services": {
-            "compute": [ {name, current_value, limit, unit}, ... ],
-            "network": [ {name, current_value, limit, unit}, ... ]
-          }
-        }
-        """
+        start = time.perf_counter()
         logger.info(
-            "Fetching Azure quotas",
+            "azure_quotas.fetch.start",
             extra={
-                "event": "azure_quotas_fetch",
+                "event": "azure_quotas.fetch_start",
                 "subscription_id": subscription_id,
                 "location": location,
             },
         )
-
-        cred = None
+        errors: list[str] = []
         try:
             cred = build_credential()
-        except Exception as e:
+        except Exception as exc:  # noqa: BLE001
             logger.exception(
-                "Failed to build Azure credential", extra={"event": "azure_cred_error"}
+                "azure_quotas.credential_error",
+                extra={
+                    "event": "azure_quotas.credential_error",
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc),
+                },
             )
             return {
                 "subscription_id": subscription_id,
                 "location": location,
-                "services": {},
-                "error": f"credential_error:{e}",
+                "services": {"compute": [], "network": []},
+                "errors": [f"credential_error:{exc}"],
             }
 
-        services: dict[str, list[dict[str, Any]]] = {}
+        compute_items = await _fetch_compute_usages(cred, subscription_id, location)
+        network_items = await _fetch_network_usages(cred, subscription_id, location)
 
-        # ---- Compute quotas ----
-        try:
-            compute_items: list[dict[str, Any]] = []
-            if ComputeManagementClient is not None:
-                comp_client = ComputeManagementClient(cred, subscription_id)
-                usages = await asyncio.to_thread(lambda: list(comp_client.usage.list(location)))
-                compute_items = [_safe_usage_record(u) for u in usages]
-            else:
-                logger.warning(
-                    "ComputeManagementClient unavailable; skipping compute quotas",
-                    extra={"event": "compute_client_missing"},
-                )
-            services["compute"] = compute_items
-        except AzureError as e:
-            logger.error(
-                "Azure error while fetching compute quotas",
-                extra={"event": "compute_quotas_azure_error", "details": str(e)},
-            )
-            services["compute"] = []
-        except Exception as e:  # pragma: no cover
-            logger.exception(
-                "Unexpected error while fetching compute quotas",
-                extra={"event": "compute_quotas_unexpected_error"},
-            )
-            services["compute"] = []
-            # Keep response resilient – don't fail the whole resource
-            # but surface a hint to callers.
-            services.setdefault("_errors", []).append(f"compute:{e}")
-
-        # ---- Network quotas ----
-        try:
-            network_items: list[dict[str, Any]] = []
-            if NetworkManagementClient is not None:
-                net_client = NetworkManagementClient(cred, subscription_id)
-                usages = await asyncio.to_thread(lambda: list(net_client.usages.list(location)))
-                network_items = [_safe_usage_record(u) for u in usages]
-            else:
-                logger.warning(
-                    "NetworkManagementClient unavailable; skipping network quotas",
-                    extra={"event": "network_client_missing"},
-                )
-            services["network"] = network_items
-        except AzureError as e:
-            logger.error(
-                "Azure error while fetching network quotas",
-                extra={"event": "network_quotas_azure_error", "details": str(e)},
-            )
-            services["network"] = []
-        except Exception as e:  # pragma: no cover
-            logger.exception(
-                "Unexpected error while fetching network quotas",
-                extra={"event": "network_quotas_unexpected_error"},
-            )
-            services["network"] = []
-            services.setdefault("_errors", []).append(f"network:{e}")
-
-        payload = {
+        payload: dict[str, Any] = {
             "subscription_id": subscription_id,
             "location": location,
-            "services": services,
+            "services": {"compute": compute_items, "network": network_items},
+            "errors": errors,
         }
+
         logger.info(
-            "Azure quotas fetched",
+            "azure_quotas.fetch.end",
             extra={
-                "event": "azure_quotas_success",
+                "event": "azure_quotas.fetch_success",
                 "subscription_id": subscription_id,
                 "location": location,
-                "compute_items": len(services.get("compute", [])),
-                "network_items": len(services.get("network", [])),
+                "compute_items": len(compute_items),
+                "network_items": len(network_items),
+                "duration_ms": (time.perf_counter() - start) * 1000.0,
             },
         )
         return payload

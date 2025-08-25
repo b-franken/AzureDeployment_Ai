@@ -59,8 +59,25 @@ class OllamaAdapter:
 
     async def chat_raw(
         self, client: httpx.AsyncClient, model: str, messages: list[dict[str, Any]], **kwargs: Any
-    ) -> dict[str, Any]:
-        payload = {"model": model, "messages": messages, **kwargs}
-        resp = await client.post(self.endpoint(), json=payload, headers=self.headers())
-        resp.raise_for_status()
-        return resp.json()
+    ) -> dict[str, Any] | list[dict[str, Any]]:
+        stream_mode = kwargs.pop("stream", False)
+
+        if not stream_mode:
+            payload = {"model": model, "messages": messages, **kwargs}
+            resp = await client.post(self.endpoint(), json=payload, headers=self.headers())
+            resp.raise_for_status()
+            return resp.json()
+
+        payload = {"model": model, "messages": messages, "stream": True, **kwargs}
+        async with client.stream(
+            "POST", self.endpoint(), json=payload, headers=self.headers()
+        ) as r:
+            r.raise_for_status()
+            chunks: list[dict[str, Any]] = []
+            async for line in r.aiter_lines():
+                if line:
+                    try:
+                        chunks.append(json.loads(line))
+                    except Exception:
+                        continue
+            return chunks

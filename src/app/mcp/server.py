@@ -1,4 +1,3 @@
-# app/mcp/server.py
 from __future__ import annotations
 
 import asyncio
@@ -32,7 +31,7 @@ class MCPServer:
     def __init__(
         self,
         name: str = "DevOps AI Tools",
-        transport: Literal["stdio", "sse", "streamable-http"] = "stdio",
+        transport: Literal["stdio", "sse", "streamable-http"] = "sse",
     ):
         self.mcp = FastMCP(name=name)
         self.transport = transport
@@ -45,7 +44,7 @@ class MCPServer:
     async def create(
         cls,
         name: str = "DevOps AI Tools",
-        transport: Literal["stdio", "sse", "streamable-http"] = "stdio",
+        transport: Literal["stdio", "sse", "streamable-http"] = "sse",
     ) -> MCPServer:
         logger.info(
             "Creating MCP server",
@@ -671,6 +670,10 @@ class MCPServer:
         logger.info("Starting MCP server", extra={"event": "mcp_run", "transport": self.transport})
         try:
             self.mcp.run(transport=self.transport)
+        except EOFError:
+            logger.info("MCP server stopped: stdio closed", extra={"event": "mcp_stdio_closed"})
+        except KeyboardInterrupt:
+            logger.info("MCP server interrupted", extra={"event": "mcp_interrupted"})
         except Exception:
             logger.exception("MCP server crashed", extra={"event": "mcp_crash"})
             raise
@@ -679,7 +682,7 @@ class MCPServer:
 async def amain() -> MCPServer:
     transport = cast(
         Literal["stdio", "sse", "streamable-http"],
-        os.getenv("MCP_TRANSPORT", "stdio").lower(),
+        os.getenv("MCP_TRANSPORT", "sse").lower(),
     )
     try:
         server = await MCPServer.create(transport=transport)

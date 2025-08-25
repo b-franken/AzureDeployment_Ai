@@ -28,7 +28,7 @@ services:
     expose:
       - "11434"
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://127.0.0.1:11434/api/tags"]
+      test: ["CMD", "ollama", "list"]
       interval: 5s
       timeout: 3s
       retries: 40
@@ -37,6 +37,7 @@ services:
       devops-ai-net:
         aliases:
           - ollama
+          - devops-ai-ollama
 
   api:
     build:
@@ -49,8 +50,8 @@ services:
       AZURE_LOG_LEVEL: warning
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       APPLICATIONINSIGHTS_CONNECTION_STRING: ${APPLICATIONINSIGHTS_CONNECTION_STRING}
-      OLLAMA_BASE_URL: http://devops-ai-ollama:11434
-      LLM__OLLAMA__BASE_URL: http://devops-ai-ollama:11434
+      LLM_PROVIDER: ollama
+      LLM__OLLAMA_BASE_URL: http://ollama:11434
     ports:
       - "${API_PORT}:${API_PORT}"
     depends_on:

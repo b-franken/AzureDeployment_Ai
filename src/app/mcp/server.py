@@ -1,3 +1,4 @@
+# app/mcp/server.py
 from __future__ import annotations
 
 import asyncio
@@ -675,21 +676,22 @@ class MCPServer:
             raise
 
 
-async def amain() -> None:
+async def amain() -> MCPServer:
     transport = cast(
         Literal["stdio", "sse", "streamable-http"],
         os.getenv("MCP_TRANSPORT", "stdio").lower(),
     )
     try:
         server = await MCPServer.create(transport=transport)
-        server.run()
+        return server
     except Exception:
         logger.exception("MCP server failed to start", extra={"event": "mcp_start_error"})
         raise
 
 
 def main() -> None:
-    asyncio.run(amain())
+    server = asyncio.run(amain())
+    server.run()
 
 
 if __name__ == "__main__":

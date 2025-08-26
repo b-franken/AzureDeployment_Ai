@@ -1,8 +1,3 @@
-"""
-OpenTelemetry patch to fix _FixedFindCallerLogger attribute validation errors.
-This module patches the OpenTelemetry attribute validation to properly handle logger objects.
-"""
-
 import logging
 from typing import Any
 
@@ -17,107 +12,92 @@ def patch_opentelemetry_attributes() -> None:
     OpenTelemetry reject logger objects before they cause warnings.
     """
     try:
-        # Patch the actual OpenTelemetry attributes module
         try:
             import opentelemetry.attributes as otel_attrs
 
-            # Patch the main cleaning functions
-            if hasattr(otel_attrs, "_clean_attribute_value"):
+            if hasattr(otel_attrs, '_clean_attribute_value'):
                 original_clean = otel_attrs._clean_attribute_value
 
                 def patched_clean_attribute_value(value, limit):
                     if is_logger_object(value):
                         return f"<{value.__class__.__name__}>"
                     return original_clean(value, limit)
-
                 otel_attrs._clean_attribute_value = patched_clean_attribute_value
                 logger.info("Patched _clean_attribute_value")
 
-            if hasattr(otel_attrs, "_clean_extended_attribute_value"):
+            if hasattr(otel_attrs, '_clean_extended_attribute_value'):
                 original_extended_clean = otel_attrs._clean_extended_attribute_value
 
                 def patched_clean_extended_attribute_value(value, max_len=None):
                     if is_logger_object(value):
                         return f"<{value.__class__.__name__}>"
                     return original_extended_clean(value, max_len)
-
                 otel_attrs._clean_extended_attribute_value = patched_clean_extended_attribute_value
                 logger.info("Patched _clean_extended_attribute_value")
 
         except Exception as e:
-            logger.debug(f"Could not patch opentelemetry.attributes cleaning functions: {e}")
+            logger.debug(
+                f"Could not patch opentelemetry.attributes cleaning functions: {e}")
 
-        # Also try the traditional modules that might have validation functions
         modules_to_patch = [
-            "opentelemetry.util.attributes",
-            "opentelemetry.sdk.util.attributes",
-            "opentelemetry.sdk.trace.attributes",
-            "opentelemetry.trace.attributes",
+            'opentelemetry.util.attributes',
+            'opentelemetry.sdk.util.attributes',
+            'opentelemetry.sdk.trace.attributes',
+            'opentelemetry.trace.attributes'
         ]
 
         def is_logger_object(value: Any) -> bool:
             """Check if a value is a logger object that should be filtered."""
-            if not hasattr(value, "__class__"):
+            if not hasattr(value, '__class__'):
                 return False
 
             class_name = value.__class__.__name__
-            module_name = getattr(value.__class__, "__module__", "")
+            module_name = getattr(value.__class__, '__module__', '')
 
-            # Check for various logger patterns
             logger_patterns = [
-                "Logger",
-                "FindCaller",
-                "BoundLogger",
-                "FilteringBoundLogger",
-                "_FixedFindCallerLogger",
-                "StreamLogger",
-                "FileLogger",
-                "RotatingFileLogger",
-                "TimedRotatingFileLogger",
+                'Logger', 'FindCaller', 'BoundLogger', 'FilteringBoundLogger',
+                '_FixedFindCallerLogger', 'StreamLogger', 'FileLogger',
+                'RotatingFileLogger', 'TimedRotatingFileLogger'
             ]
 
             return (
-                any(pattern in class_name for pattern in logger_patterns)
-                or "logging" in module_name.lower()
-                or "structlog" in module_name.lower()
+                any(pattern in class_name for pattern in logger_patterns) or
+                'logging' in module_name.lower() or
+                'structlog' in module_name.lower()
             )
 
         for module_name in modules_to_patch:
             try:
                 import importlib
-
                 module = importlib.import_module(module_name)
 
-                original_is_valid = getattr(module, "is_valid_attribute_value", None)
+                original_is_valid = getattr(
+                    module, 'is_valid_attribute_value', None)
                 if original_is_valid is None:
                     continue
 
                 def create_patched_validator(orig_func):
                     def patched_is_valid_attribute_value(value: Any) -> bool:
-                        # Reject any logger objects immediately
                         if is_logger_object(value):
                             return False
 
-                        # Check for private attributes that shouldn't be included
                         if isinstance(value, dict):
                             for key, val in value.items():
-                                if isinstance(key, str) and key.startswith("_"):
+                                if isinstance(key, str) and key.startswith('_'):
                                     return False
                                 if is_logger_object(val):
                                     return False
 
-                        # Check sequences for logger objects
                         if isinstance(value, (list, tuple)) and not isinstance(value, (str, bytes)):
                             for item in value:
                                 if is_logger_object(item):
                                     return False
 
                         return orig_func(value)
-
                     return patched_is_valid_attribute_value
 
-                # Replace the validation function
-                module.is_valid_attribute_value = create_patched_validator(original_is_valid)
+                setattr(module, 'is_valid_attribute_value',
+                        create_patched_validator(original_is_valid))
                 logger.info(f"Patched {module_name} attribute validation")
 
             except ImportError:
@@ -125,37 +105,34 @@ def patch_opentelemetry_attributes() -> None:
             except Exception as e:
                 logger.debug(f"Could not patch {module_name}: {e}")
 
-        # Also try to patch the direct validation calls
         try:
             import opentelemetry.attributes as otel_attrs
-
-            if hasattr(otel_attrs, "_is_valid_attribute_value"):
+            if hasattr(otel_attrs, '_is_valid_attribute_value'):
                 original = otel_attrs._is_valid_attribute_value
 
                 def patched_private_validator(value: Any) -> bool:
                     if is_logger_object(value):
                         return False
                     return original(value)
-
                 otel_attrs._is_valid_attribute_value = patched_private_validator
                 logger.info("Patched private attribute validator")
         except Exception as e:
             logger.debug(f"Could not patch private validator: {e}")
 
-        # Patch the warning generation itself as a fallback
         try:
             import warnings
+            import opentelemetry.attributes
 
             original_warn = warnings.warn
 
             def filtered_warn(message, category=None, stacklevel=1, source=None):
                 if isinstance(message, str) and "_FixedFindCallerLogger" in message:
-                    # Suppress this specific warning
                     return
                 return original_warn(message, category, stacklevel, source)
 
             warnings.warn = filtered_warn
-            logger.info("Patched warnings.warn to suppress _FixedFindCallerLogger warnings")
+            logger.info(
+                "Patched warnings.warn to suppress _FixedFindCallerLogger warnings")
         except Exception as e:
             logger.debug(f"Could not patch warnings: {e}")
 
@@ -168,34 +145,28 @@ def patch_logging_handlers() -> None:
     Patch logging handlers to prevent logger objects from reaching OpenTelemetry.
     """
     try:
-        # Get the OpenTelemetry logging handler if it exists
+        import opentelemetry.instrumentation.logging
+
         root_logger = logging.getLogger()
 
         def is_logger_object(value: Any) -> bool:
             """Check if a value is a logger object that should be filtered."""
-            if not hasattr(value, "__class__"):
+            if not hasattr(value, '__class__'):
                 return False
 
             class_name = value.__class__.__name__
-            module_name = getattr(value.__class__, "__module__", "")
+            module_name = getattr(value.__class__, '__module__', '')
 
-            # Check for various logger patterns
             logger_patterns = [
-                "Logger",
-                "FindCaller",
-                "BoundLogger",
-                "FilteringBoundLogger",
-                "_FixedFindCallerLogger",
-                "StreamLogger",
-                "FileLogger",
-                "RotatingFileLogger",
-                "TimedRotatingFileLogger",
+                'Logger', 'FindCaller', 'BoundLogger', 'FilteringBoundLogger',
+                '_FixedFindCallerLogger', 'StreamLogger', 'FileLogger',
+                'RotatingFileLogger', 'TimedRotatingFileLogger'
             ]
 
             return (
-                any(pattern in class_name for pattern in logger_patterns)
-                or "logging" in module_name.lower()
-                or "structlog" in module_name.lower()
+                any(pattern in class_name for pattern in logger_patterns) or
+                'logging' in module_name.lower() or
+                'structlog' in module_name.lower()
             )
 
         def clean_value(value: Any) -> Any:
@@ -204,40 +175,36 @@ def patch_logging_handlers() -> None:
                 return f"<{value.__class__.__name__}>"
 
             if isinstance(value, dict):
-                return {
-                    k: clean_value(v)
-                    for k, v in value.items()
-                    if not str(k).startswith("_") and not is_logger_object(v)
-                }
+                return {k: clean_value(v) for k, v in value.items()
+                        if not str(k).startswith('_') and not is_logger_object(v)}
 
             if isinstance(value, (list, tuple)) and not isinstance(value, (str, bytes)):
-                cleaned = [clean_value(item) for item in value if not is_logger_object(item)]
+                cleaned = [clean_value(item)
+                           for item in value if not is_logger_object(item)]
                 return type(value)(cleaned) if cleaned else []
 
             return value
 
         for handler in root_logger.handlers:
-            if (
-                "opentelemetry" in handler.__class__.__module__.lower()
-                or "azure.monitor" in handler.__class__.__module__.lower()
-            ):
-                original_emit = getattr(handler, "_original_emit", None) or handler.emit
+            if ('opentelemetry' in handler.__class__.__module__.lower() or
+                    'azure.monitor' in handler.__class__.__module__.lower()):
+
+                original_emit = getattr(
+                    handler, '_original_emit', None) or handler.emit
 
                 def create_safe_emit(orig_emit):
                     def safe_emit(record):
-                        # Clean the record before emitting
-                        if hasattr(record, "__dict__"):
-                            # Remove problematic attributes
+                        if hasattr(record, '__dict__'):
+
                             clean_dict = {}
                             for key, value in record.__dict__.items():
-                                if key.startswith("_"):
+                                if key.startswith('_'):
                                     continue
 
                                 cleaned_value = clean_value(value)
                                 if cleaned_value is not None:
                                     clean_dict[key] = cleaned_value
 
-                            # Preserve the original dict structure but with cleaned values
                             original_dict = record.__dict__.copy()
                             record.__dict__.clear()
                             record.__dict__.update(clean_dict)
@@ -245,8 +212,7 @@ def patch_logging_handlers() -> None:
                         try:
                             return orig_emit(record)
                         finally:
-                            # Restore original dict if needed
-                            if hasattr(record, "__dict__") and "original_dict" in locals():
+                            if hasattr(record, '__dict__') and 'original_dict' in locals():
                                 record.__dict__.clear()
                                 record.__dict__.update(original_dict)
 

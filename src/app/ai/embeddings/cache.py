@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from typing import Iterable
 
 try:
     from redis.asyncio import Redis
@@ -29,7 +28,7 @@ class RedisCache:
         async with self._lock:
             vals = await self._r.mget(keys)
         out: dict[str, list[float]] = {}
-        for k, v in zip(keys, vals):
+        for k, v in zip(keys, vals, strict=False):
             if v is None:
                 continue
             out[k] = json.loads(v)

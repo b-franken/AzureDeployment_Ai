@@ -16,7 +16,8 @@ class EmbeddingsBudgetMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         if self._cfg.enable:
             budget = EmbeddingsBudget(
-                token_limit=self._cfg.req_token_budget, call_limit=self._cfg.req_call_budget)
+                token_limit=self._cfg.req_token_budget, call_limit=self._cfg.req_call_budget
+            )
             token = budget_var.set(budget)
             cache_token = req_cache_var.set({})
             try:

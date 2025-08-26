@@ -73,6 +73,7 @@ def get_user_email(user: dict[str, Any] | Any) -> str:
 @router.post("", response_model=None)
 async def chat(
     req: ChatRequest,
+    request: Request,
     current_user: Annotated[dict[str, Any], Depends(get_optional_user)],
     stream: bool = Query(True),
 ) -> Response:
@@ -105,6 +106,9 @@ async def chat(
                 req.model,
             )
 
+            # Get correlation ID from middleware or create new one
+            correlation_id = getattr(request.state, "correlation_id", None)
+
             text = await run_chat(
                 req.input,
                 [m.model_dump() for m in req.memory or []],
@@ -113,6 +117,8 @@ async def chat(
                 req.enable_tools,
                 req.preferred_tool,
                 req.allowlist,
+                user_id=user_email,
+                correlation_id=correlation_id,
             )
 
             logger.info(

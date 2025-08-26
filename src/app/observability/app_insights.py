@@ -63,7 +63,7 @@ class ApplicationInsights:
 
         # Apply comprehensive OpenTelemetry patches to prevent attribute validation errors
         apply_all_patches()
-        
+
         configure_azure_monitor(
             connection_string=connection_string,
             resource=resource,
@@ -172,31 +172,32 @@ class ApplicationInsights:
         span = trace.get_current_span()
         if span:
             span.record_exception(exception, attributes=properties or {})
-            
+
     def _patch_otel_attributes(self) -> None:
         """Patch OpenTelemetry attribute validation to handle logger objects."""
         try:
             from opentelemetry.util import attributes
+
             original_is_valid_attribute_value = attributes.is_valid_attribute_value
-            
+
             def patched_is_valid_attribute_value(value: Any) -> bool:
                 # Handle logger objects specifically
-                if hasattr(value, '__class__') and 'Logger' in value.__class__.__name__:
+                if hasattr(value, "__class__") and "Logger" in value.__class__.__name__:
                     return False  # Reject logger objects
                 return original_is_valid_attribute_value(value)
-            
+
             attributes.is_valid_attribute_value = patched_is_valid_attribute_value
             logger.debug("OpenTelemetry attribute validation patched successfully")
         except Exception as e:
             logger.warning(f"Failed to patch OpenTelemetry attributes: {e}")
-            
+
     def _sanitize_attributes(self, attrs: dict[str, Any]) -> dict[str, Any]:
         """Sanitize attributes to prevent OpenTelemetry validation errors."""
         sanitized = {}
         for key, value in attrs.items():
-            if key.startswith('_'):
+            if key.startswith("_"):
                 continue  # Skip private attributes
-            if hasattr(value, '__class__') and 'Logger' in value.__class__.__name__:
+            if hasattr(value, "__class__") and "Logger" in value.__class__.__name__:
                 continue  # Skip logger objects
             sanitized[key] = value
         return sanitized

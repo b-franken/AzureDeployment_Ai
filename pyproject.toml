@@ -87,6 +87,7 @@ dependencies = [
   "psycopg_pool",
   "jsonschema",
   "scikit-learn",
+  "opentelemetry-instrumentation",
 
 
 ]

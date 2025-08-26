@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from threading import Lock
 from time import monotonic
@@ -13,6 +14,8 @@ from app.ai.llm.base import LLMProvider
 from app.ai.llm.registry import ProviderAdapter, registry
 from app.ai.llm.unified_provider import UnifiedLLMProvider
 from app.core.config import GEMINI_MODEL, LLM_PROVIDER, OLLAMA_MODEL, OPENAI_MODEL
+
+logger = logging.getLogger(__name__)
 
 _reg = registry()
 
@@ -91,15 +94,43 @@ async def get_provider_and_model(
     provider: str | None = None, model: str | None = None
 ) -> tuple[LLMProvider, str]:
     selected_provider = (provider or LLM_PROVIDER).lower()
-    if selected_provider not in available_providers():
-        selected_provider = "ollama"
+    available = available_providers()
+
+    if selected_provider not in available:
+        logger.warning(
+            f"Requested provider '{selected_provider}' not in available providers {available}. Using OpenAI as fallback instead of Ollama."
+        )
+        # Prefer OpenAI over Ollama as fallback since it's more commonly configured
+        selected_provider = "openai" if "openai" in available else available[0]
+
+    logger.info(
+        f"Selected LLM provider: {selected_provider} (requested: {provider}, config default: {LLM_PROVIDER})"
+    )
 
     def select_model(available: list[str], configured: str, requested: str | None) -> str:
+        logger.info(
+            f"Model selection: requested='{requested}', configured='{configured}', available={available}"
+        )
+
         if requested and requested in available:
+            logger.info(f"Using requested model: {requested}")
             return requested
+        elif requested:
+            logger.warning(
+                f"Requested model '{requested}' not in available models {available}. Falling back to configured model."
+            )
+
         if configured in available:
+            logger.info(f"Using configured model: {configured}")
             return configured
-        return available[0] if available else configured
+        elif configured:
+            logger.warning(
+                f"Configured model '{configured}' not in available models {available}. Using first available model."
+            )
+
+        fallback = available[0] if available else configured
+        logger.info(f"Using fallback model: {fallback}")
+        return fallback
 
     if selected_provider == "openai":
         models = await available_models("openai")

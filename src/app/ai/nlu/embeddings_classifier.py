@@ -8,7 +8,10 @@ import numpy as np
 from numpy.typing import NDArray
 
 from app.ai.nlu.embeddings_clients import get_embedding_client
-from app.ai.nlu.lightweight_classifier import get_lightweight_classifier, replace_embeddings_classifier_in_dev
+from app.ai.nlu.lightweight_classifier import (
+    get_lightweight_classifier,
+    replace_embeddings_classifier_in_dev,
+)
 
 
 class EmbeddingsClassifierService:
@@ -26,14 +29,16 @@ class EmbeddingsClassifierService:
 
         # In development mode, prefer local embeddings for classification
         env_provider: str | None = os.getenv("EMBEDDINGS_PROVIDER")
-        use_local_for_classification = os.getenv("USE_LOCAL_EMBEDDINGS_FOR_CLASSIFICATION", "true").lower() in {"1", "true", "yes"}
+        use_local_for_classification = os.getenv(
+            "USE_LOCAL_EMBEDDINGS_FOR_CLASSIFICATION", "true"
+        ).lower() in {"1", "true", "yes"}
         is_development = os.getenv("ENVIRONMENT", "development") == "development"
-        
+
         if is_development and use_local_for_classification and provider is None:
             base_provider: str | None = "local"
         else:
             base_provider = provider if provider is not None else env_provider
-        
+
         provider_value: str = base_provider or "azure"
         self._provider: str = provider_value.lower()
 
@@ -88,7 +93,7 @@ class EmbeddingsClassifierService:
             lightweight = get_lightweight_classifier()
             results = lightweight.predict_proba(list(texts))
             return np.asarray(results, dtype=np.float32)
-            
+
         X = self._encode(texts)
         if X.size == 0:
             return np.empty((0, self._num_labels), dtype=np.float32)

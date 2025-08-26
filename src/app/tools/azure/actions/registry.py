@@ -47,6 +47,9 @@ _LAZY_BINDINGS: dict[str, str] = {
     "create_private_endpoint": _bind("private_link", "create_private_endpoint"),
     "create_apim": _bind("apim", "create_apim"),
     "create_eventhub": _bind("eventhub", "create_eventhub"),
+    "confirm_deployment": _bind("deployment", "confirm_deployment"),
+    "execute_deployment": _bind("deployment", "execute_deployment"),
+    "cancel_deployment": _bind("deployment", "cancel_deployment"),
 }
 
 _ALIASES_BASE: dict[str, str] = {
@@ -75,6 +78,14 @@ _ALIASES_BASE: dict[str, str] = {
     "create_pe": "create_private_endpoint",
     "create_api_management": "create_apim",
     "create_event_hub": "create_eventhub",
+    "deploy_confirmed": "confirm_deployment",
+    "confirm": "confirm_deployment",
+    "proceed": "execute_deployment",
+    "execute": "execute_deployment",
+    "deploy": "execute_deployment",
+    "cancel": "cancel_deployment",
+    "abort": "cancel_deployment",
+    "abort_deployment": "cancel_deployment",
 }
 
 _ALIAS_LOOKUP: dict[str, str] = {}

@@ -12,16 +12,18 @@ except Exception:  # noqa: BLE001
     Redis = None  # type: ignore[assignment,misc]
 
 # Normalize text for better cache hits
-_normalize_re = re.compile(r'\s+')
+_normalize_re = re.compile(r"\s+")
+
 
 def normalize_query(text: str) -> str:
     """Normalize query text to improve cache hit rates."""
     # Convert to lowercase, normalize whitespace, strip punctuation
     normalized = text.lower().strip()
-    normalized = _normalize_re.sub(' ', normalized)
+    normalized = _normalize_re.sub(" ", normalized)
     # Remove common punctuation that doesn't affect semantic meaning
-    normalized = re.sub(r'[.,!?;:]', '', normalized)
+    normalized = re.sub(r"[.,!?;:]", "", normalized)
     return normalized
+
 
 def normkey(text: str) -> str:
     # Use normalized text for cache key to improve hit rates
@@ -62,7 +64,7 @@ class RedisCache:
             ttl = self._ttl * 2  # Double the TTL for better caching
             pipe.set(k, json.dumps(v).encode("utf-8"), ex=ttl)
         await pipe.execute()
-        
+
     async def get_cache_stats(self) -> dict[str, Any]:
         """Get cache statistics for monitoring."""
         try:
@@ -70,7 +72,8 @@ class RedisCache:
             return {
                 "hits": info.get("keyspace_hits", 0),
                 "misses": info.get("keyspace_misses", 0),
-                "hit_rate": info.get("keyspace_hits", 0) / max(1, info.get("keyspace_hits", 0) + info.get("keyspace_misses", 0))
+                "hit_rate": info.get("keyspace_hits", 0)
+                / max(1, info.get("keyspace_hits", 0) + info.get("keyspace_misses", 0)),
             }
         except Exception:
             return {"hits": 0, "misses": 0, "hit_rate": 0.0}

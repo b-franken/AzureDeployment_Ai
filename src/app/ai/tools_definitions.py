@@ -41,12 +41,17 @@ def _to_openai_tool_schema(
 
 def build_openai_tools() -> list[dict[str, object]]:
     tools: list[dict[str, object]] = []
-    for t in list_tools():
+    available_tools = list_tools()
+    logger.info(f"Building OpenAI tools from {len(available_tools)} available tools")
+
+    for t in available_tools:
         try:
-            tools.append(_to_openai_tool_schema(t.name, t.description, t.schema))
+            tool_schema = _to_openai_tool_schema(t.name, t.description, t.schema)
+            tools.append(tool_schema)
+            logger.debug(f"Built tool schema for {t.name}")
         except Exception as exc:
-            logger.debug(
-                "Failed to build schema for tool %s: %s", getattr(t, "name", "unknown"), exc
-            )
+            logger.error(f"Failed to build schema for tool {getattr(t, 'name', 'unknown')}: {exc}")
             continue
+
+    logger.info(f"Built {len(tools)} OpenAI tool schemas")
     return tools

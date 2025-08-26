@@ -39,7 +39,7 @@ async def map_args_with_function_call(
         messages=messages,
         tools=[tool_def],
         tool_choice={"type": "function", "function": {"name": tool_name}},
-        temperature=0,
+        temperature=0.01,
         max_tokens=128,
     )
 

@@ -38,13 +38,13 @@ def _coerce(value: Any) -> Any:
         return {str(_coerce(k)): _coerce(v) for k, v in value.items()}
     if isinstance(value, Sequence) and not isinstance(value, (str | bytes | bytearray)):
         return [_coerce(v) for v in value]
-    
+
     # Special handling for logger objects and other problematic types
-    if hasattr(value, '__class__'):
+    if hasattr(value, "__class__"):
         class_name = value.__class__.__name__
-        if 'Logger' in class_name or 'FindCaller' in class_name:
+        if "Logger" in class_name or "FindCaller" in class_name:
             return f"<{class_name}>"  # Safe representation
-    
+
     try:
         return str(value)
     except Exception:
@@ -76,12 +76,12 @@ def install_log_record_sanitizer() -> None:
         "process",
         "asctime",
     }
-    
+
     # Check if already installed to avoid double-installation
     current_factory = logging.getLogRecordFactory()
-    if hasattr(current_factory, '_otel_sanitized'):
+    if hasattr(current_factory, "_otel_sanitized"):
         return
-        
+
     original_factory = current_factory
 
     def factory(*args: Any, **kwargs: Any) -> logging.LogRecord:
@@ -100,13 +100,13 @@ def install_log_record_sanitizer() -> None:
                 continue
             if key in std:
                 continue
-            
+
             # Extra filtering for problematic objects
-            if hasattr(value, '__class__') and 'Logger' in value.__class__.__name__:
+            if hasattr(value, "__class__") and "Logger" in value.__class__.__name__:
                 # Skip any logger objects
                 del record.__dict__[key]
                 continue
-                
+
             record.__dict__[key] = _coerce(value)
 
         return record

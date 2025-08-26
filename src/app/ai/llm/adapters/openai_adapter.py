@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -9,6 +10,8 @@ import httpx
 
 from app.ai.types import Message
 from app.core.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 class OpenAIAdapter:
@@ -32,7 +35,19 @@ class OpenAIAdapter:
             "Accept": "application/json",
         }
 
-    def _sanitize_kwargs(self, **kwargs: Any) -> dict[str, Any]:
+    def _sanitize_kwargs(self, model: str, **kwargs: Any) -> dict[str, Any]:
+        # Define parameters that are NOT supported by GPT-5
+        gpt5_unsupported = {
+            "temperature",
+            "top_p",
+            "presence_penalty",
+            "frequency_penalty",
+            "seed",
+            "logit_bias",
+            "logprobs",
+            "top_logprobs",
+        }
+
         allowed = {
             "temperature",
             "top_p",
@@ -51,19 +66,65 @@ class OpenAIAdapter:
             "top_logprobs",
         }
         out: dict[str, Any] = {}
+
+        is_gpt5 = model.startswith("gpt-5") or model == "gpt-5"
+
         for k, v in kwargs.items():
             if k in allowed and v is not None and v != "":
-                out[k] = v
+                # Skip parameters that GPT-5 doesn't support
+                if is_gpt5 and k in gpt5_unsupported:
+                    logger.info(f"GPT-5 model '{model}' doesn't support parameter '{k}', skipping")
+                    continue
+
+                # Handle temperature conversion for other models
+                if k == "temperature" and not is_gpt5 and v == 0:
+                    # Many models have issues with temperature=0, use a very small value instead
+                    logger.debug(f"Converting temperature=0 to 0.01 for model {model}")
+                    out[k] = 0.01
+                else:
+                    out[k] = v
+
         if not out.get("stream"):
             out.pop("stream", None)
+
+        logger.debug(f"Sanitized parameters for {model}: {out}")
         return out
 
     def build_payload(self, model: str, messages: list[Message], **kwargs: Any) -> dict[str, Any]:
+        # Convert messages to the correct format
+        formatted_messages = []
+        for m in messages:
+            msg = {"role": str(m["role"]), "content": str(m["content"])}
+
+            # Handle tool_calls if present
+            if "tool_calls" in m:
+                msg["tool_calls"] = m["tool_calls"]
+
+            # Handle tool_call_id for tool responses
+            if "tool_call_id" in m:
+                msg["tool_call_id"] = m["tool_call_id"]
+                msg["role"] = "tool"  # Ensure tool response has correct role
+
+            # Handle name field for tool responses
+            if "name" in m:
+                msg["name"] = m["name"]
+
+            formatted_messages.append(msg)
+
         payload: dict[str, Any] = {
             "model": model,
-            "messages": [{"role": str(m["role"]), "content": str(m["content"])} for m in messages],
+            "messages": formatted_messages,
         }
-        payload.update(self._sanitize_kwargs(**kwargs))
+
+        # Add other parameters with model-specific sanitization
+        sanitized_kwargs = self._sanitize_kwargs(model, **kwargs)
+        payload.update(sanitized_kwargs)
+
+        # Log payload structure for debugging
+        logger.debug(
+            f"Built payload: model={model}, messages_count={len(formatted_messages)}, kwargs={list(sanitized_kwargs.keys())}"
+        )
+
         return payload
 
     def extract_text(self, data: dict[str, Any]) -> str:
@@ -99,12 +160,33 @@ class OpenAIAdapter:
         self, client: httpx.AsyncClient, model: str, messages: list[dict[str, Any]], **kwargs: Any
     ) -> dict[str, Any]:
         payload = self.build_payload(model, messages, **kwargs)
+
+        # Log the request details for debugging
+        logger.info(f"OpenAI API request: model={model}, endpoint={self.endpoint()}")
+        logger.debug(f"OpenAI request payload: {json.dumps(payload, indent=2)}")
+
         resp = await client.post(self.endpoint(), json=payload, headers=self.headers())
+
         try:
             resp.raise_for_status()
         except httpx.HTTPStatusError as e:
-            detail = resp.text
+            error_detail = resp.text
+            logger.error(f"OpenAI API error {resp.status_code}: {error_detail}")
+            logger.error(f"Failed request payload: {json.dumps(payload, indent=2)}")
+
+            # Try to parse error details if it's JSON
+            try:
+                error_json = resp.json()
+                if "error" in error_json:
+                    error_info = error_json["error"]
+                    logger.error(f"OpenAI error details: {json.dumps(error_info, indent=2)}")
+            except:
+                pass
+
             raise httpx.HTTPStatusError(
-                f"{e}. body={detail}", request=e.request, response=e.response
+                f"OpenAI API error: {resp.status_code} - {error_detail}",
+                request=e.request,
+                response=e.response,
             ) from e
+
         return resp.json()

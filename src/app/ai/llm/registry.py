@@ -55,7 +55,16 @@ class ModelRegistry:
 
     @staticmethod
     def _ollama_models() -> list[str]:
+        """Fetch Ollama models - only call when actually needed."""
         defaults = ["llama3.1", "mistral", "gemma"]
+
+        # Check if Ollama is actually being used
+        from app.core.config import LLM_PROVIDER
+
+        if LLM_PROVIDER.lower() != "ollama":
+            logger.debug("Ollama not selected as provider, returning defaults without HTTP call")
+            return defaults
+
         try:
             with httpx.Client(timeout=5.0) as client:
                 resp = client.get(f"{OLLAMA_BASE_URL.rstrip('/')}/api/tags")

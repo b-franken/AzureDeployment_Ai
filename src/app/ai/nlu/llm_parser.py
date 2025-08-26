@@ -153,7 +153,7 @@ async def parse_with_llm(
         {"role": "user", "content": text},
     ]
     resp = await llm.chat_raw(
-        model=selected, messages=messages, tools=tools, tool_choice="auto", temperature=0
+        model=selected, messages=messages, tools=tools, tool_choice="auto", temperature=0.01
     )
     choices = resp.get("choices") or []
     if not choices:

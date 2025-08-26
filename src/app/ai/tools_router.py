@@ -74,6 +74,14 @@ class ToolExecutionContext:
     dry_run: bool = True
     classifier: EmbeddingsClassifierService | None = None
     audit_logger: AuditLogger | None = None
+    # Execution tracking
+    tool_execution_count: int = 0
+    max_tool_executions: int = 10
+    executed_tools: set[str] = None
+
+    def __post_init__(self):
+        if self.executed_tools is None:
+            self.executed_tools = set()
 
 
 def _extract_json_object(text: str) -> dict[str, object] | None:
@@ -220,6 +228,38 @@ def _maybe_wrap_approval(
 async def _run_tool(
     name: str, args: dict[str, object], context: ToolExecutionContext | None = None
 ) -> dict[str, object]:
+    # Circuit breaker: prevent infinite loops
+    if context:
+        context.tool_execution_count += 1
+        tool_signature = f"{name}:{hash(str(sorted(args.items())))}"
+
+        # Check execution limits
+        if context.tool_execution_count > context.max_tool_executions:
+            logger.error(
+                f"Tool execution limit exceeded ({context.max_tool_executions}). Stopping to prevent infinite loop."
+            )
+            return {
+                "ok": False,
+                "summary": "Execution limit exceeded",
+                "output": "Maximum tool execution limit reached. Please try again with a different approach.",
+            }
+
+        # Check for repeated identical tool calls
+        if tool_signature in context.executed_tools:
+            logger.warning(
+                f"Duplicate tool execution detected: {name} with identical args. Skipping to prevent loop."
+            )
+            return {
+                "ok": False,
+                "summary": "Duplicate execution prevented",
+                "output": f"Tool {name} was already executed with these parameters to prevent loops.",
+            }
+
+        context.executed_tools.add(tool_signature)
+
+    logger.info(
+        f"Executing tool: {name} with args: {args} (execution #{context.tool_execution_count if context else 'unknown'})"
+    )
     await _log_tool_execution(name, args, context)
     if name == "bert_classifier":
         text = args.get("text", "")
@@ -277,7 +317,11 @@ async def _openai_tools_orchestrator(
     if not tools:
         return None
     llm, selected_model = await get_provider_and_model(provider, model)
+    logger.info(f"OpenAI orchestrator using provider={provider} -> selected_model={selected_model}")
     if not isinstance(llm, SupportsChatRaw):
+        logger.warning(
+            f"Provider {provider} does not support chat_raw, skipping OpenAI orchestrator"
+        )
         return None
     messages: list[dict[str, object]] = [
         {
@@ -293,9 +337,17 @@ async def _openai_tools_orchestrator(
         messages.extend([{"role": m["role"], "content": m["content"]} for m in memory])
     messages.append({"role": "user", "content": user_input})
     if not allow_chaining:
-        first = await llm.chat_raw(
-            model=selected_model, messages=messages, tools=tools, tool_choice="auto"
-        )
+        try:
+            first = await llm.chat_raw(
+                model=selected_model,
+                messages=messages,
+                tools=tools,
+                tool_choice="auto",
+                temperature=0.01,
+            )
+        except Exception as e:
+            logger.error(f"OpenAI orchestrator single call failed: {e}")
+            return f"Failed to process request: {str(e)}"
         choices = first.get("choices", [])
         if not choices:
             return None
@@ -317,9 +369,17 @@ async def _openai_tools_orchestrator(
         return f"{tname} • {result.get('summary', '')}\n\njson\n{body}\n"
     steps = 0
     while steps < max_chain_steps and _within_budget(messages, token_budget):
-        resp = await llm.chat_raw(
-            model=selected_model, messages=messages, tools=tools, tool_choice="auto"
-        )
+        try:
+            resp = await llm.chat_raw(
+                model=selected_model,
+                messages=messages,
+                tools=tools,
+                tool_choice="auto",
+                temperature=0.01,
+            )
+        except Exception as e:
+            logger.error(f"OpenAI orchestrator chain step {steps} failed: {e}")
+            return f"Tool execution failed at step {steps}: {str(e)}"
         choices2 = resp.get("choices", [])
         if not choices2:
             return None
@@ -349,9 +409,17 @@ async def _openai_tools_orchestrator(
                 }
             )
             steps += 1
-    final = await llm.chat_raw(
-        model=selected_model, messages=messages, tools=tools, tool_choice="none"
-    )
+    try:
+        final = await llm.chat_raw(
+            model=selected_model,
+            messages=messages,
+            tools=tools,
+            tool_choice="none",
+            temperature=0.01,
+        )
+    except Exception as e:
+        logger.error(f"OpenAI orchestrator final call failed: {e}")
+        return f"Failed to generate final response: {str(e)}"
     choicesf = final.get("choices", [])
     if not choicesf:
         return None
@@ -391,7 +459,10 @@ async def maybe_call_tool(
     return_json: bool = False,
 ) -> str:
     from app.core.config import settings
-    
+
+    logger.info(
+        f"maybe_call_tool: user_input='{user_input[:100]}...' provider={provider} model={model} enable_tools={enable_tools}"
+    )
     await _log_request(user_input, context)
     # Skip classifier predictions in development mode to reduce embedding calls
     if context and context.classifier and settings.environment != "development":
@@ -428,6 +499,7 @@ async def maybe_call_tool(
         if allowlist:
             allowed = set(allowlist)
             tools = [t for t in tools if t.name in allowed]
+        # Use OpenAI orchestrator - it handles tool chaining internally
         via_openai = await _openai_tools_orchestrator(
             user_input,
             memory,
@@ -438,26 +510,11 @@ async def maybe_call_tool(
             token_budget=(int(context.cost_limit) if context and context.cost_limit else 6000),
             context=context,
         )
-        if isinstance(via_openai, str):
-            mapped2 = maybe_map_provision(via_openai)
-            if not mapped2:
-                mapped2 = await maybe_map_provision_async(via_openai)
-            if (
-                mapped2
-                and isinstance(mapped2, dict)
-                and mapped2.get("tool")
-                and isinstance(mapped2.get("args"), dict)
-            ):
-                if return_json:
-                    res = await _run_tool(str(mapped2["tool"]), dict(mapped2["args"]), context)
-                    return json.dumps(res, ensure_ascii=False, indent=2)
-                return await _run_tool_and_explain(
-                    str(mapped2["tool"]),
-                    dict(mapped2["args"]),
-                    provider,
-                    model,
-                    context,
-                )
+
+        # If OpenAI orchestrator succeeded, return the result directly
+        # Do NOT re-parse it as this causes infinite loops
+        if isinstance(via_openai, str) and via_openai.strip():
+            logger.info("OpenAI orchestrator completed successfully, returning result directly")
             return via_openai
         m = DIRECT_TOOL_RE.match(user_input)
         if m:

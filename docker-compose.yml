@@ -50,8 +50,10 @@ services:
       AZURE_LOG_LEVEL: warning
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       APPLICATIONINSIGHTS_CONNECTION_STRING: ${APPLICATIONINSIGHTS_CONNECTION_STRING}
-      LLM_PROVIDER: ollama
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
       LLM__OLLAMA_BASE_URL: http://ollama:11434
+      LLM__OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      LLM__OPENAI_API_BASE: ${OPENAI_API_BASE:-https://api.openai.com/v1}
     ports:
       - "${API_PORT}:${API_PORT}"
     depends_on:
@@ -60,7 +62,7 @@ services:
       ollama:
         condition: service_healthy
     command: >
-      sh -c "uvicorn app.api.main:app --host ${API_HOST} --port ${API_PORT} --workers 2"
+      sh -c "uvicorn app.api.main:app --host ${API_HOST} --port ${API_PORT} --workers 1"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:${API_PORT}${API_PREFIX}/health || exit 1"]
     restart: unless-stopped

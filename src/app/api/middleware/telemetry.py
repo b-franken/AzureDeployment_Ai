@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 from fastapi import FastAPI, Request, Response
 from opentelemetry import trace
@@ -11,6 +12,24 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
+
+
+def _sanitize_attribute_value(value: Any) -> Any:
+    """Sanitize attribute values for OpenTelemetry."""
+
+    if value is None:
+        return None
+
+    if isinstance(value, bool | int | float | str | bytes):
+        return value
+
+    if isinstance(value, list | tuple):
+        return [_sanitize_attribute_value(v) for v in value]
+
+    if isinstance(value, dict):
+        return {k: _sanitize_attribute_value(v) for k, v in value.items() if not k.startswith("_")}
+
+    return str(value)
 
 
 def install_telemetry_middleware(app: FastAPI) -> None:
@@ -41,7 +60,7 @@ def install_telemetry_middleware(app: FastAPI) -> None:
                 "x-request-id"
             )
             if correlation_id:
-                span.set_attribute("correlation_id", correlation_id)
+                span.set_attribute("correlation_id", str(correlation_id))
 
             auth_header = request.headers.get("authorization", "")
             if auth_header:
@@ -63,6 +82,21 @@ def install_telemetry_middleware(app: FastAPI) -> None:
                 else:
                     span.set_status(Status(StatusCode.OK))
 
+                duration_ms = (time.perf_counter() - start_time) * 1000
+                span.set_attribute("http.duration_ms", duration_ms)
+
+                log_extra = {
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status_code": response.status_code,
+                    "duration_ms": duration_ms,
+                }
+
+                if correlation_id:
+                    log_extra["correlation_id"] = str(correlation_id)
+
+                logger.info("Request completed", extra=log_extra)
+
                 return response
 
             except Exception as exc:
@@ -71,29 +105,15 @@ def install_telemetry_middleware(app: FastAPI) -> None:
                 span.set_attribute("error.message", str(exc))
                 span.record_exception(exc)
 
-                logger.error(
-                    "Request failed",
-                    extra={
-                        "method": request.method,
-                        "path": request.url.path,
-                        "error": str(exc),
-                        "correlation_id": correlation_id,
-                    },
-                    exc_info=exc,
-                )
+                log_extra = {
+                    "method": request.method,
+                    "path": request.url.path,
+                    "error": str(exc),
+                }
+
+                if correlation_id:
+                    log_extra["correlation_id"] = str(correlation_id)
+
+                logger.error("Request failed", extra=log_extra, exc_info=exc)
+
                 raise
-
-            finally:
-                duration_ms = (time.perf_counter() - start_time) * 1000
-                span.set_attribute("http.duration_ms", duration_ms)
-
-                logger.info(
-                    "Request completed",
-                    extra={
-                        "method": request.method,
-                        "path": request.url.path,
-                        "status_code": getattr(response, "status_code", 500),
-                        "duration_ms": duration_ms,
-                        "correlation_id": correlation_id,
-                    },
-                )

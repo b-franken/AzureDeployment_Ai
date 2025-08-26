@@ -29,6 +29,7 @@ from app.core.logging import get_logger
 from app.core.middelware.correlation import install_correlation_middleware
 from app.observability.app_insights import app_insights
 from app.observability.prometheus import instrument_app
+from .middleware.embeddings_budget import EmbeddingsBudgetMiddleware
 
 logger = get_logger(__name__)
 
@@ -48,8 +49,10 @@ limiter = RateLimiter(
         ),
         redis_max_connections=settings.database.redis_max_connections,
         redis_socket_timeout=float(settings.database.redis_socket_timeout),
-        tracker_max_age=float(settings.security.api_rate_limit_tracker_max_age_seconds),
-        cleanup_interval=float(settings.security.api_rate_limit_cleanup_interval_seconds),
+        tracker_max_age=float(
+            settings.security.api_rate_limit_tracker_max_age_seconds),
+        cleanup_interval=float(
+            settings.security.api_rate_limit_cleanup_interval_seconds),
     )
 )
 
@@ -62,7 +65,8 @@ async def _limiter_cleanup_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    logger.info("API starting up", version=settings.app_version, environment=settings.environment)
+    logger.info("API starting up", version=settings.app_version,
+                environment=settings.environment)
     app_insights.initialize()
     cleanup_task = asyncio.create_task(_limiter_cleanup_loop())
     try:
@@ -117,6 +121,7 @@ def _routes() -> list[str]:
     return [r.path for r in app.routes if isinstance(r, APIRoute | Route | Mount | WebSocketRoute)]
 
 
+app.add_middleware(EmbeddingsBudgetMiddleware)
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(chat_router, prefix="/api/chat", tags=["chat"])
 app.include_router(review_router, prefix="/api/review", tags=["review"])

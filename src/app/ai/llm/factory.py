@@ -55,11 +55,13 @@ def _fetch_openai_models() -> list[str]:
             return fallback
         base = s.llm.openai_api_base.rstrip("/")
         with httpx.Client(timeout=httpx.Timeout(10.0, connect=5.0)) as c:
-            r = c.get(f"{base}/models", headers={"Authorization": f"Bearer {api_key}"})
+            r = c.get(f"{base}/models",
+                      headers={"Authorization": f"Bearer {api_key}"})
             if r.status_code != 200:
                 return fallback
             data = r.json()
-            models = [m["id"] for m in data.get("data", []) if isinstance(m, dict) and m.get("id")]
+            models = [m["id"] for m in data.get(
+                "data", []) if isinstance(m, dict) and m.get("id")]
             return models or fallback
     except Exception:
         return fallback
@@ -77,9 +79,12 @@ def _ollama_list() -> list[str]:
     return _reg._ollama_models()
 
 
-_reg.register(ProviderAdapter("openai", _openai_list, ["gpt-4o-mini", "gpt-4o", "gpt-5"]))
-_reg.register(ProviderAdapter("gemini", _gemini_list, ["gemini-1.5-pro", "gemini-1.5-flash"]))
-_reg.register(ProviderAdapter("ollama", _ollama_list, ["llama3.1", "mistral", "gemma"]))
+_reg.register(ProviderAdapter("openai", _openai_list,
+              ["gpt-4o-mini", "gpt-4o", "gpt-5"]))
+_reg.register(ProviderAdapter("gemini", _gemini_list,
+              ["gemini-1.5-pro", "gemini-1.5-flash"]))
+_reg.register(ProviderAdapter("ollama", _ollama_list,
+              ["llama3.1", "mistral", "gemma"]))
 
 
 def available_providers() -> list[str]:
@@ -98,35 +103,29 @@ async def get_provider_and_model(
 
     if selected_provider not in available:
         logger.warning(
-            f"Requested provider '{selected_provider}' not in available providers {available}. Using OpenAI as fallback instead of Ollama."
-        )
-        # Prefer OpenAI over Ollama as fallback since it's more commonly configured
+            f"Requested provider '{selected_provider}' not in available providers {available}. Using OpenAI as fallback instead of Ollama.")
         selected_provider = "openai" if "openai" in available else available[0]
 
     logger.info(
-        f"Selected LLM provider: {selected_provider} (requested: {provider}, config default: {LLM_PROVIDER})"
-    )
+        f"Selected LLM provider: {selected_provider} (requested: {provider}, config default: {LLM_PROVIDER})")
 
     def select_model(available: list[str], configured: str, requested: str | None) -> str:
         logger.info(
-            f"Model selection: requested='{requested}', configured='{configured}', available={available}"
-        )
+            f"Model selection: requested='{requested}', configured='{configured}', available={available}")
 
         if requested and requested in available:
             logger.info(f"Using requested model: {requested}")
             return requested
         elif requested:
             logger.warning(
-                f"Requested model '{requested}' not in available models {available}. Falling back to configured model."
-            )
+                f"Requested model '{requested}' not in available models {available}. Falling back to configured model.")
 
         if configured in available:
             logger.info(f"Using configured model: {configured}")
             return configured
         elif configured:
             logger.warning(
-                f"Configured model '{configured}' not in available models {available}. Using first available model."
-            )
+                f"Configured model '{configured}' not in available models {available}. Using first available model.")
 
         fallback = available[0] if available else configured
         logger.info(f"Using fallback model: {fallback}")

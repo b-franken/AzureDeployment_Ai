@@ -19,6 +19,343 @@ from .validators import validate_location, validate_name
 logger = logging.getLogger(__name__)
 
 
+def _generate_bicep_code(action: str, params: dict[str, Any]) -> str:
+    """Generate Bicep Infrastructure as Code for the deployment."""
+    resource_group = params.get("resource_group", "myapp-dev-rg")
+    location = params.get("location", "westeurope")
+    name = params.get("name", "myresource")
+    
+    if action in ["create_rg", "create_resource_group"]:
+        return f"""targetScope = 'subscription'
+
+param resourceGroupName string = '{resource_group}'
+param location string = '{location}'
+
+resource rg 'Microsoft.Resources/resourceGroups@2021-04-01' = {{
+  name: resourceGroupName
+  location: location
+  tags: {{
+    Environment: '{params.get("environment", "dev")}'
+    CreatedBy: 'Azure-AI-Bot'
+  }}
+}}
+
+output resourceGroupId string = rg.id
+output resourceGroupName string = rg.name
+"""
+
+    elif action in ["create_storage", "create_storage_account"]:
+        sku = params.get("sku", "Standard_LRS")
+        access_tier = params.get("access_tier", "Hot")
+        return f"""param storageAccountName string = '{name}'
+param location string = '{location}'
+param sku string = '{sku}'
+param accessTier string = '{access_tier}'
+
+resource storageAccount 'Microsoft.Storage/storageAccounts@2023-01-01' = {{
+  name: storageAccountName
+  location: location
+  sku: {{
+    name: sku
+  }}
+  kind: 'StorageV2'
+  properties: {{
+    accessTier: accessTier
+    allowBlobPublicAccess: false
+    supportsHttpsTrafficOnly: true
+    minimumTlsVersion: 'TLS1_2'
+  }}
+  tags: {{
+    Environment: '{params.get("environment", "dev")}'
+    CreatedBy: 'Azure-AI-Bot'
+  }}
+}}
+
+output storageAccountId string = storageAccount.id
+output storageAccountName string = storageAccount.name
+output primaryEndpoints object = storageAccount.properties.primaryEndpoints
+"""
+
+    elif action in ["create_webapp", "create_web_app"]:
+        plan = params.get("plan", f"{name}-plan")
+        runtime = params.get("runtime", "python|3.9")
+        return f"""param webAppName string = '{name}'
+param appServicePlanName string = '{plan}'
+param location string = '{location}'
+param runtime string = '{runtime}'
+
+resource appServicePlan 'Microsoft.Web/serverfarms@2022-03-01' = {{
+  name: appServicePlanName
+  location: location
+  sku: {{
+    name: 'B1'
+    tier: 'Basic'
+  }}
+  properties: {{
+    reserved: true
+  }}
+  tags: {{
+    Environment: '{params.get("environment", "dev")}'
+    CreatedBy: 'Azure-AI-Bot'
+  }}
+}}
+
+resource webApp 'Microsoft.Web/sites@2022-03-01' = {{
+  name: webAppName
+  location: location
+  properties: {{
+    serverFarmId: appServicePlan.id
+    siteConfig: {{
+      linuxFxVersion: runtime
+      httpsOnly: true
+      minTlsVersion: '1.2'
+      alwaysOn: true
+    }}
+  }}
+  tags: {{
+    Environment: '{params.get("environment", "dev")}'
+    CreatedBy: 'Azure-AI-Bot'
+  }}
+}}
+
+output webAppId string = webApp.id
+output webAppName string = webApp.name
+output defaultHostName string = webApp.properties.defaultHostName
+"""
+
+    elif action == "create_aks":
+        node_count = params.get("node_count", 2)
+        vm_size = params.get("vm_size", "Standard_D2s_v3")
+        dns_prefix = params.get("dns_prefix", f"{name}-dns")
+        return f"""param clusterName string = '{name}'
+param location string = '{location}'
+param dnsPrefix string = '{dns_prefix}'
+param nodeCount int = {node_count}
+param vmSize string = '{vm_size}'
+
+resource aks 'Microsoft.ContainerService/managedClusters@2023-05-01' = {{
+  name: clusterName
+  location: location
+  properties: {{
+    dnsPrefix: dnsPrefix
+    agentPoolProfiles: [
+      {{
+        name: 'agentpool'
+        count: nodeCount
+        vmSize: vmSize
+        osType: 'Linux'
+        mode: 'System'
+      }}
+    ]
+    servicePrincipalProfile: {{
+      clientId: 'msi'
+    }}
+  }}
+  identity: {{
+    type: 'SystemAssigned'
+  }}
+  tags: {{
+    Environment: '{params.get("environment", "dev")}'
+    CreatedBy: 'Azure-AI-Bot'
+  }}
+}}
+
+output aksClusterId string = aks.id
+output aksClusterName string = aks.name
+output kubeconfigCommand string = 'az aks get-credentials --resource-group ${{resourceGroup().name}} --name ${{aks.name}}'
+"""
+
+    else:
+        return f"""// Generic resource template for {action}
+param resourceName string = '{name}'
+param location string = '{location}'
+
+// Add specific resource definition here based on requirements
+// Action: {action}
+// Parameters: {json.dumps(params, indent=2)}
+
+output resourceName string = resourceName
+output location string = location
+"""
+
+
+def _generate_terraform_code(action: str, params: dict[str, Any]) -> str:
+    """Generate Terraform Infrastructure as Code for the deployment."""
+    resource_group = params.get("resource_group", "myapp-dev-rg")
+    location = params.get("location", "westeurope")
+    name = params.get("name", "myresource")
+    
+    terraform_config = f"""terraform {{
+  required_providers {{
+    azurerm = {{
+      source  = "hashicorp/azurerm"
+      version = "~>3.0"
+    }}
+  }}
+}}
+
+provider "azurerm" {{
+  features {{}}
+}}
+
+"""
+    
+    if action in ["create_rg", "create_resource_group"]:
+        terraform_config += f"""resource "azurerm_resource_group" "main" {{
+  name     = "{resource_group}"
+  location = "{location}"
+
+  tags = {{
+    Environment = "{params.get("environment", "dev")}"
+    CreatedBy   = "Azure-AI-Bot"
+  }}
+}}
+
+output "resource_group_id" {{
+  value = azurerm_resource_group.main.id
+}}
+
+output "resource_group_name" {{
+  value = azurerm_resource_group.main.name
+}}
+"""
+
+    elif action in ["create_storage", "create_storage_account"]:
+        sku = params.get("sku", "Standard_LRS")
+        access_tier = params.get("access_tier", "Hot")
+        terraform_config += f"""resource "azurerm_storage_account" "main" {{
+  name                     = "{name}"
+  resource_group_name      = "{resource_group}"
+  location                 = "{location}"
+  account_tier             = "Standard"
+  account_replication_type = "{sku.split('_')[1] if '_' in sku else 'LRS'}"
+  access_tier              = "{access_tier}"
+
+  enable_https_traffic_only = true
+  min_tls_version          = "TLS1_2"
+  allow_nested_items_to_be_public = false
+
+  tags = {{
+    Environment = "{params.get("environment", "dev")}"
+    CreatedBy   = "Azure-AI-Bot"
+  }}
+}}
+
+output "storage_account_id" {{
+  value = azurerm_storage_account.main.id
+}}
+
+output "storage_account_name" {{
+  value = azurerm_storage_account.main.name
+}}
+
+output "primary_blob_endpoint" {{
+  value = azurerm_storage_account.main.primary_blob_endpoint
+}}
+"""
+
+    elif action in ["create_webapp", "create_web_app"]:
+        plan = params.get("plan", f"{name}-plan")
+        runtime = params.get("runtime", "python|3.9")
+        terraform_config += f"""resource "azurerm_service_plan" "main" {{
+  name                = "{plan}"
+  resource_group_name = "{resource_group}"
+  location            = "{location}"
+  os_type             = "Linux"
+  sku_name            = "B1"
+
+  tags = {{
+    Environment = "{params.get("environment", "dev")}"
+    CreatedBy   = "Azure-AI-Bot"
+  }}
+}}
+
+resource "azurerm_linux_web_app" "main" {{
+  name                = "{name}"
+  resource_group_name = "{resource_group}"
+  location            = "{location}"
+  service_plan_id     = azurerm_service_plan.main.id
+
+  site_config {{
+    application_stack {{
+      python_version = "{runtime.split('|')[1] if '|' in runtime else '3.9'}"
+    }}
+    always_on = true
+    https_only = true
+    minimum_tls_version = "1.2"
+  }}
+
+  tags = {{
+    Environment = "{params.get("environment", "dev")}"
+    CreatedBy   = "Azure-AI-Bot"
+  }}
+}}
+
+output "web_app_id" {{
+  value = azurerm_linux_web_app.main.id
+}}
+
+output "web_app_name" {{
+  value = azurerm_linux_web_app.main.name
+}}
+
+output "default_hostname" {{
+  value = azurerm_linux_web_app.main.default_hostname
+}}
+"""
+
+    elif action == "create_aks":
+        node_count = params.get("node_count", 2)
+        vm_size = params.get("vm_size", "Standard_D2s_v3")
+        dns_prefix = params.get("dns_prefix", f"{name}-dns")
+        terraform_config += f"""resource "azurerm_kubernetes_cluster" "main" {{
+  name                = "{name}"
+  location            = "{location}"
+  resource_group_name = "{resource_group}"
+  dns_prefix          = "{dns_prefix}"
+
+  default_node_pool {{
+    name       = "default"
+    node_count = {node_count}
+    vm_size    = "{vm_size}"
+  }}
+
+  identity {{
+    type = "SystemAssigned"
+  }}
+
+  tags = {{
+    Environment = "{params.get("environment", "dev")}"
+    CreatedBy   = "Azure-AI-Bot"
+  }}
+}}
+
+output "kube_config" {{
+  value = azurerm_kubernetes_cluster.main.kube_config_raw
+  sensitive = true
+}}
+
+output "cluster_id" {{
+  value = azurerm_kubernetes_cluster.main.id
+}}
+
+output "cluster_name" {{
+  value = azurerm_kubernetes_cluster.main.name
+}}
+"""
+
+    else:
+        terraform_config += f"""# Generic resource template for {action}
+# Resource name: {name}
+# Location: {location}
+# Parameters: {json.dumps(params, indent=2)}
+
+# Add specific resource configuration here
+"""
+    
+    return terraform_config
+
+
 def _ok(summary: str, obj: dict | str = "") -> ToolResult:
     return {
         "ok": True,
@@ -508,19 +845,39 @@ class AzureProvision(Tool):
                 deployment_id = str(uuid.uuid4())[:8]
                 logger.info(f"Generated deployment ID: {deployment_id}")
 
-                # TEMPORARY: Simple test to see if we get here
-                test_result = _ok(
-                    f"🔍 DRY RUN TEST - {canonical_action} (ID: {deployment_id})",
-                    {
-                        "deployment_id": deployment_id,
-                        "action": canonical_action,
-                        "parameters": params,
-                        "status": "dry_run_test",
-                        "message": "This is a test response to verify dry-run path works",
+                # Generate deployment preview with Infrastructure as Code
+                bicep_code = _generate_bicep_code(canonical_action, params)
+                terraform_code = _generate_terraform_code(canonical_action, params)
+                
+                # Build resource preview summary
+                resource_preview = _build_resource_preview(canonical_action, params)
+                cost_estimate = _estimate_basic_cost(canonical_action, params)
+                
+                deployment_summary = {
+                    "deployment_id": deployment_id,
+                    "action": canonical_action,
+                    "status": "deployment_preview",
+                    "summary": f"Ready to deploy {_get_resource_display_name(canonical_action)} '{params.get('name', 'resource')}' in {params.get('location', 'westeurope')}",
+                    "resource_details": resource_preview,
+                    "cost_estimate": cost_estimate,
+                    "infrastructure_code": {
+                        "bicep": bicep_code,
+                        "terraform": terraform_code
                     },
-                )
-                logger.info(f"🔍 RETURNING DRY-RUN TEST RESULT: {test_result}")
-                return test_result
+                    "next_steps": [
+                        "Review the deployment details and infrastructure code above",
+                        "To proceed with deployment, confirm with: 'deploy confirmed' or 'execute deployment'",
+                        "To cancel: 'cancel deployment' or 'abort'"
+                    ],
+                    "warning": "⚠️ This will create real Azure resources and may incur costs",
+                    "environment": params.get("environment", "dev"),
+                    "subscription_id": params.get("subscription_id"),
+                    "resource_group": params.get("resource_group"),
+                    "location": params.get("location"),
+                }
+                
+                logger.info(f"Generated deployment preview for {canonical_action} with ID {deployment_id}")
+                return _ok(f"Deployment Preview: {canonical_action}", deployment_summary)
             else:
                 logger.info(
                     f"🚀 ENTERING ACTUAL EXECUTION PATH for {canonical_action} (dry_run=False)"

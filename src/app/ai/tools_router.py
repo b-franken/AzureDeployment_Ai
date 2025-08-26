@@ -31,7 +31,8 @@ _TOOLS_PLAN = (
     "When you call a tool, return only the JSON with no prose."
 )
 
-_CODEFENCE_JSON_RE = re.compile(r"(?:```(?:json)?\s*)?(\{.*?\})(?:\s*```)?\s*", re.DOTALL)
+_CODEFENCE_JSON_RE = re.compile(
+    r"(?:```(?:json)?\s*)?(\{.*?\})(?:\s*```)?\s*", re.DOTALL)
 DIRECT_TOOL_RE = re.compile(
     r"^\s*tool\s*:\s*([a-z0-9-]+)\s*(\{.*\})\s*$", re.IGNORECASE | re.DOTALL
 )
@@ -228,62 +229,63 @@ def _maybe_wrap_approval(
 async def _run_tool(
     name: str, args: dict[str, object], context: ToolExecutionContext | None = None
 ) -> dict[str, object]:
-    # Circuit breaker: prevent infinite loops
     if context:
         context.tool_execution_count += 1
         tool_signature = f"{name}:{hash(str(sorted(args.items())))}"
-
-        # Check execution limits
         if context.tool_execution_count > context.max_tool_executions:
             logger.error(
-                f"Tool execution limit exceeded ({context.max_tool_executions}). Stopping to prevent infinite loop."
-            )
+                f"Tool execution limit exceeded ({context.max_tool_executions}). Stopping to prevent infinite loop.")
             return {
                 "ok": False,
                 "summary": "Execution limit exceeded",
                 "output": "Maximum tool execution limit reached. Please try again with a different approach.",
             }
-
-        # Check for repeated identical tool calls
-        if tool_signature in context.executed_tools:
+        # Allow Azure provisioning tools to be re-executed as they may be intentionally repeated
+        is_provisioning_tool = name in ["azure_provision"]
+        if tool_signature in context.executed_tools and not is_provisioning_tool:
             logger.warning(
-                f"Duplicate tool execution detected: {name} with identical args. Skipping to prevent loop."
-            )
+                f"Duplicate tool execution detected: {name} with identical args. Skipping to prevent loop.")
             return {
                 "ok": False,
                 "summary": "Duplicate execution prevented",
                 "output": f"Tool {name} was already executed with these parameters to prevent loops.",
             }
-
-        context.executed_tools.add(tool_signature)
+        elif is_provisioning_tool and tool_signature in context.executed_tools:
+            logger.info(
+                f"Re-executing provisioning tool {name} - this is allowed for deployment operations.")
+        
+            context.executed_tools.add(tool_signature)
 
     logger.info(
-        f"Executing tool: {name} with args: {args} (execution #{context.tool_execution_count if context else 'unknown'})"
-    )
+        f"Executing tool: {name} with args: {args} (execution #{context.tool_execution_count if context else 'unknown'})")
     await _log_tool_execution(name, args, context)
-    if name == "bert_classifier":
-        text = args.get("text", "")
-        if not isinstance(text, str) or not text.strip():
-            return {"ok": False, "summary": "No text provided", "output": ""}
-        svc = context.classifier if context else None
-        if not svc:
-            return {"ok": False, "summary": "Classifier unavailable", "output": ""}
-        scores = svc.predict_proba([text])
-        if hasattr(scores, "detach"):
-            arr = scores.detach().cpu().numpy()
-        elif isinstance(scores, np.ndarray):
-            arr = scores
-        elif isinstance(scores, list):
-            arr = np.asarray(scores, dtype=np.float32)
-        else:
-            arr = np.asarray(scores, dtype=np.float32)
-        pred = int(arr.argmax(axis=-1)[0]) if arr.size else 0
-        return {"ok": True, "summary": f"Predicted class {pred}", "output": arr.tolist()}
+
+    merged_args = dict(args or {})
+    if context:
+        logger.info(f"Merging context into tool args. Context subscription_id: {context.subscription_id}, args subscription_id: {args.get('subscription_id') if args else None}")
+        if "dry_run" not in merged_args:
+            merged_args["dry_run"] = bool(context.dry_run)
+        if "subscription_id" not in merged_args and context.subscription_id:
+            merged_args["subscription_id"] = context.subscription_id
+            logger.info(f"Added subscription_id from context: {context.subscription_id}")
+        elif "subscription_id" in merged_args:
+            logger.info(f"subscription_id already in args: {merged_args['subscription_id']}")
+        elif not context.subscription_id:
+            logger.warning(f"Context has no subscription_id to merge")
+        if "resource_group" not in merged_args and context.resource_group:
+            merged_args["resource_group"] = context.resource_group
+        if "environment" not in merged_args and context.environment:
+            merged_args["environment"] = context.environment
+        if "correlation_id" not in merged_args and context.correlation_id:
+            merged_args["correlation_id"] = context.correlation_id
+
     tool = get_tool(name)
     if not tool:
         return {"ok": False, "summary": f"tool {name} not found", "output": ""}
-    raw = await tool.run(**args)
-    result = raw if isinstance(raw, dict) else {"ok": True, "summary": "", "output": raw}
+
+    raw = await tool.run(**merged_args)
+    result = raw if isinstance(raw, dict) else {
+        "ok": True, "summary": "", "output": raw}
     if isinstance(result, dict):
         result = _maybe_wrap_approval(result, context)
     return result
@@ -317,7 +319,8 @@ async def _openai_tools_orchestrator(
     if not tools:
         return None
     llm, selected_model = await get_provider_and_model(provider, model)
-    logger.info(f"OpenAI orchestrator using provider={provider} -> selected_model={selected_model}")
+    logger.info(
+        f"OpenAI orchestrator using provider={provider} -> selected_model={selected_model}")
     if not isinstance(llm, SupportsChatRaw):
         logger.warning(
             f"Provider {provider} does not support chat_raw, skipping OpenAI orchestrator"
@@ -334,7 +337,8 @@ async def _openai_tools_orchestrator(
         }
     ]
     if memory:
-        messages.extend([{"role": m["role"], "content": m["content"]} for m in memory])
+        messages.extend([{"role": m["role"], "content": m["content"]}
+                        for m in memory])
     messages.append({"role": "user", "content": user_input})
     if not allow_chaining:
         try:
@@ -389,7 +393,8 @@ async def _openai_tools_orchestrator(
             content = (msg.get("content") or "").strip()
             return content or None
         messages.append(
-            {"role": "assistant", "content": msg.get("content") or "", "tool_calls": tool_calls}
+            {"role": "assistant", "content": msg.get(
+                "content") or "", "tool_calls": tool_calls}
         )
         for call in tool_calls:
             if steps >= max_chain_steps or not _within_budget(messages, token_budget):
@@ -493,7 +498,8 @@ async def maybe_call_tool(
                 res = await _run_tool(str(mapped["tool"]), dict(mapped["args"]), context)
                 return json.dumps(res, ensure_ascii=False, indent=2)
             return await _run_tool_and_explain(
-                str(mapped["tool"]), dict(mapped["args"]), provider, model, context
+                str(mapped["tool"]), dict(
+                    mapped["args"]), provider, model, context
             )
         tools = list_tools()
         if allowlist:
@@ -507,14 +513,16 @@ async def maybe_call_tool(
             model,
             allow_chaining=True,
             max_chain_steps=4,
-            token_budget=(int(context.cost_limit) if context and context.cost_limit else 6000),
+            token_budget=(int(context.cost_limit)
+                          if context and context.cost_limit else 6000),
             context=context,
         )
 
         # If OpenAI orchestrator succeeded, return the result directly
         # Do NOT re-parse it as this causes infinite loops
         if isinstance(via_openai, str) and via_openai.strip():
-            logger.info("OpenAI orchestrator completed successfully, returning result directly")
+            logger.info(
+                "OpenAI orchestrator completed successfully, returning result directly")
             return via_openai
         m = DIRECT_TOOL_RE.match(user_input)
         if m:
@@ -535,7 +543,8 @@ async def maybe_call_tool(
             if not t or (allowlist and preferred_tool not in set(allowlist)):
                 return f"Preferred tool {preferred_tool} is not available."
             schema = getattr(
-                t, "schema", {"type": "object", "properties": {}, "additionalProperties": True}
+                t, "schema", {"type": "object", "properties": {},
+                              "additionalProperties": True}
             )
             try:
                 mapped_args = await map_args_with_function_call(
@@ -554,7 +563,8 @@ async def maybe_call_tool(
                 preferred_tool, mapped_args, provider, model, context
             )
         tools_desc = (
-            "\n".join(f"- {t.name}: {t.description} schema={t.schema}" for t in tools) or "None"
+            "\n".join(
+                f"- {t.name}: {t.description} schema={t.schema}" for t in tools) or "None"
         )
         plan = await generate_response(
             f"{_TOOLS_PLAN}\n\nAvailable tools:\n{tools_desc}\n\nUser: {user_input}",
@@ -571,7 +581,8 @@ async def maybe_call_tool(
             return plan
         name = str(req.get("tool"))
         raw_args = req.get("args")
-        args: dict[str, object] = dict(raw_args) if isinstance(raw_args, dict) else {}
+        args: dict[str, object] = dict(
+            raw_args) if isinstance(raw_args, dict) else {}
         if return_json:
             res = await _run_tool(name, args, context)
             return json.dumps(res, ensure_ascii=False, indent=2)

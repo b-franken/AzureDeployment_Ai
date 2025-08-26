@@ -6,6 +6,7 @@ from collections.abc import Sequence
 
 from app.ai.reviewer import senior_review
 from app.ai.tools_router import ToolExecutionContext, maybe_call_tool
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -20,16 +21,25 @@ async def run_chat(
     allowlist: Sequence[str] | None,
     user_id: str = "dev@example.com",
     correlation_id: str | None = None,
+    subscription_id: str | None = None,
+    resource_group: str | None = None,
+    environment: str = "dev",
 ) -> str:
     mem = list(memory or [])
 
     # Create execution context with circuit breaker
+    # Use settings subscription_id as fallback if none provided
+    effective_subscription_id = subscription_id or settings.azure.subscription_id
+    
     context = (
         ToolExecutionContext(
             user_id=user_id,
             correlation_id=correlation_id or str(uuid.uuid4()),
+            subscription_id=effective_subscription_id,
+            resource_group=resource_group,
+            environment=environment,
             audit_enabled=True,
-            dry_run=False,  # Allow actual deployments
+            dry_run=True,  # Show preview first, require confirmation for actual deployment
             max_tool_executions=5,  # Reasonable limit to prevent loops
         )
         if enable_tools
@@ -38,7 +48,7 @@ async def run_chat(
 
     if context:
         logger.info(
-            f"Created tool execution context: correlation_id={context.correlation_id}, max_executions={context.max_tool_executions}"
+            f"Created tool execution context: correlation_id={context.correlation_id}, max_executions={context.max_tool_executions}, subscription_id={context.subscription_id}"
         )
 
     return await maybe_call_tool(

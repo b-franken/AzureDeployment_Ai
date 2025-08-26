@@ -163,6 +163,10 @@ async def chat_v2(
                 provider=body.provider,
                 model=body.model,
                 enable_tools=body.enable_tools,
+                preferred_tool=None,
+                allowlist=None,
+                user_id=user_email,
+                correlation_id=body.correlation_id,
             )
 
             took = time.time() - start

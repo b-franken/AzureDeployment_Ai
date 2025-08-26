@@ -46,7 +46,11 @@ logger = logging.getLogger(__name__)
 def _sub_id(explicit: str | None) -> str:
     sid = explicit or settings.azure.subscription_id
     if not sid:
-        raise RuntimeError("subscription_id missing and no subscription_id provided")
+        raise RuntimeError(
+            f"subscription_id missing and no subscription_id provided. "
+            f"Explicit: {explicit}, Settings: {settings.azure.subscription_id}. "
+            f"Please configure settings.azure.subscription_id or pass subscription_id via context."
+        )
     return sid
 
 

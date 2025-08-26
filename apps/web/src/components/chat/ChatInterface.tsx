@@ -10,7 +10,7 @@ import { ReviewButton } from "@/components/chat/ReviewButton"
 import { DeployButton } from "@/components/chat/DeployButton"
 import { chat as call_chat, API_BASE_URL } from "@/lib/api"
 import { chatStream } from "@/lib/stream"
-import { ChatWSClient } from "@/lib/ws"
+import { connectChatWs, ChatSocket } from "@/lib/ws"
 
 type ChatMsg = {
     id: string
@@ -46,7 +46,7 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
         []
     )
 
-    const wsRef = useRef<ChatWSClient | null>(null)
+    const wsRef = useRef<ChatSocket | null>(null)
 
     useEffect(() => {
         scrollRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -71,8 +71,11 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
 
     useEffect(() => {
         if (transport !== "ws") return
-        const client = new ChatWSClient({ url: API_BASE_URL })
-        client.connect()
+        const client = connectChatWs(
+            (delta) => {
+
+            }
+        )
         wsRef.current = client
         return () => {
             wsRef.current?.close()
@@ -100,7 +103,7 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
             setMessages((prev) => [...prev, assistantMsg])
 
             if (!deployToolsEnabled) {
-                // Use SSE streaming for responses; ChatWSClient.sendChat does not accept callbacks
+                // Use SSE streaming for responses; connectChatWs handles streaming
                 abortControllerRef.current = new AbortController()
                 const fullContent = await chatStream(
                     API_BASE_URL,

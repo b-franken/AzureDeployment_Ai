@@ -1,6 +1,27 @@
-// Registration Page Component
-const RegisterPage = ({ onRegister }) => {
-    const [formData, setFormData] = useState({
+import React, { useState } from 'react';
+import { User, Eye, EyeOff } from 'lucide-react';
+
+interface FormData {
+    fullName: string;
+    email: string;
+    password: string;
+    confirmPassword: string;
+    organization: string;
+    role: string;
+}
+
+interface FormErrors {
+    confirmPassword?: string;
+    password?: string;
+    terms?: string;
+}
+
+interface RegisterPageProps {
+    onRegister: (formData: FormData) => void;
+}
+
+const RegisterPage: React.FC<RegisterPageProps> = ({ onRegister }) => {
+    const [formData, setFormData] = useState<FormData>({
         fullName: '',
         email: '',
         password: '',
@@ -11,9 +32,9 @@ const RegisterPage = ({ onRegister }) => {
     const [showPassword, setShowPassword] = useState(false);
     const [acceptTerms, setAcceptTerms] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
-    const [errors, setErrors] = useState({});
+    const [errors, setErrors] = useState<FormErrors>({});
 
-    const passwordStrength = (password) => {
+    const passwordStrength = (password: string): number => {
         if (!password) return 0;
         let strength = 0;
         if (password.length >= 8) strength++;
@@ -23,9 +44,9 @@ const RegisterPage = ({ onRegister }) => {
         return strength;
     };
 
-    const handleSubmit = async (e) => {
+    const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
-        const newErrors = {};
+        const newErrors: FormErrors = {};
 
         if (formData.password !== formData.confirmPassword) {
             newErrors.confirmPassword = "Passwords don't match";
@@ -236,3 +257,5 @@ const RegisterPage = ({ onRegister }) => {
         </div>
     );
 };
+
+export default RegisterPage;

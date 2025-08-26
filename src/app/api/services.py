@@ -27,10 +27,8 @@ async def run_chat(
 ) -> str:
     mem = list(memory or [])
 
-    # Create execution context with circuit breaker
-    # Use settings subscription_id as fallback if none provided
     effective_subscription_id = subscription_id or settings.azure.subscription_id
-    
+
     context = (
         ToolExecutionContext(
             user_id=user_id,
@@ -39,8 +37,8 @@ async def run_chat(
             resource_group=resource_group,
             environment=environment,
             audit_enabled=True,
-            dry_run=True,  # Show preview first, require confirmation for actual deployment
-            max_tool_executions=5,  # Reasonable limit to prevent loops
+            dry_run=True,
+            max_tool_executions=5,
         )
         if enable_tools
         else None

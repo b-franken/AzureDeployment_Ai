@@ -839,7 +839,8 @@ class AzureProvision(Tool):
             if not is_valid:
                 return _err("Invalid parameters", validation_msg)
 
-            if params.get("dry_run", True):
+            # Always show preview with Bicep/Terraform unless explicitly confirmed for deployment
+            if params.get("dry_run", True) or not params.get("confirmed", False):
                 logger.info(f"🔍 ENTERING DRY-RUN PATH for {canonical_action}")
                 # Generate unique deployment ID
                 deployment_id = str(uuid.uuid4())[:8]

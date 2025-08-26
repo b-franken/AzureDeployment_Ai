@@ -10,6 +10,7 @@ from opentelemetry.sdk.resources import Resource
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.observability.otel_patch import apply_all_patches
 
 logger = get_logger(__name__)
 
@@ -24,11 +25,13 @@ class ApplicationInsights:
         return cls._instance
 
     def __init__(self) -> None:
-        if not self._initialized:
+        # Only initialize once at the class level
+        if not ApplicationInsights._initialized:
             self.initialize()
 
     def initialize(self) -> None:
-        if self._initialized:
+        if ApplicationInsights._initialized:
+            logger.debug("Application Insights already initialized, skipping")
             return
 
         connection_string = (
@@ -58,6 +61,9 @@ class ApplicationInsights:
             }
         )
 
+        # Apply comprehensive OpenTelemetry patches to prevent attribute validation errors
+        apply_all_patches()
+        
         configure_azure_monitor(
             connection_string=connection_string,
             resource=resource,
@@ -73,7 +79,7 @@ class ApplicationInsights:
 
         self._setup_custom_metrics()
 
-        self._initialized = True
+        ApplicationInsights._initialized = True
         logger.info(
             "Application Insights initialized",
             service_name=service_name,
@@ -166,6 +172,34 @@ class ApplicationInsights:
         span = trace.get_current_span()
         if span:
             span.record_exception(exception, attributes=properties or {})
+            
+    def _patch_otel_attributes(self) -> None:
+        """Patch OpenTelemetry attribute validation to handle logger objects."""
+        try:
+            from opentelemetry.util import attributes
+            original_is_valid_attribute_value = attributes.is_valid_attribute_value
+            
+            def patched_is_valid_attribute_value(value: Any) -> bool:
+                # Handle logger objects specifically
+                if hasattr(value, '__class__') and 'Logger' in value.__class__.__name__:
+                    return False  # Reject logger objects
+                return original_is_valid_attribute_value(value)
+            
+            attributes.is_valid_attribute_value = patched_is_valid_attribute_value
+            logger.debug("OpenTelemetry attribute validation patched successfully")
+        except Exception as e:
+            logger.warning(f"Failed to patch OpenTelemetry attributes: {e}")
+            
+    def _sanitize_attributes(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        """Sanitize attributes to prevent OpenTelemetry validation errors."""
+        sanitized = {}
+        for key, value in attrs.items():
+            if key.startswith('_'):
+                continue  # Skip private attributes
+            if hasattr(value, '__class__') and 'Logger' in value.__class__.__name__:
+                continue  # Skip logger objects
+            sanitized[key] = value
+        return sanitized
 
 
 app_insights = ApplicationInsights()

@@ -100,61 +100,21 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
             setMessages((prev) => [...prev, assistantMsg])
 
             if (!deployToolsEnabled) {
-                if (transport === "ws" && wsRef.current) {
-                    await new Promise<void>((resolve, reject) => {
-                        try {
-                            wsRef.current!.sendChat(
-                                { input: userMessage.content, memory: history.slice(0, -1), provider, model },
-                                {
-                                    onDelta: (delta) => {
-                                        setMessages((prev) =>
-                                            prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + delta } : m))
-                                        )
-                                    },
-                                    onDone: () => {
-                                        setMessages((prev) =>
-                                            prev.map((m) => (m.id === assistantId ? { ...m, timestamp: new Date() } : m))
-                                        )
-                                        resolve()
-                                    },
-                                    onError: (e) => reject(e instanceof Error ? e : new Error("ws_error")),
-                                }
-                            )
-                        } catch (e) {
-                            reject(e as Error)
-                        }
-                    }).catch(async () => {
-                        abortControllerRef.current = new AbortController()
-                        const fullContent = await chatStream(
-                            API_BASE_URL,
-                            { input: userMessage.content, memory: history.slice(0, -1), provider, model, enable_tools: false },
-                            (delta) => {
-                                setMessages((prev) =>
-                                    prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + delta } : m))
-                                )
-                            },
-                            abortControllerRef.current.signal
-                        )
+                // Use SSE streaming for responses; ChatWSClient.sendChat does not accept callbacks
+                abortControllerRef.current = new AbortController()
+                const fullContent = await chatStream(
+                    API_BASE_URL,
+                    { input: userMessage.content, memory: history.slice(0, -1), provider, model, enable_tools: false },
+                    (delta: string) => {
                         setMessages((prev) =>
-                            prev.map((m) => (m.id === assistantId ? { ...m, content: fullContent, timestamp: new Date() } : m))
+                            prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + delta } : m))
                         )
-                    })
-                } else {
-                    abortControllerRef.current = new AbortController()
-                    const fullContent = await chatStream(
-                        API_BASE_URL,
-                        { input: userMessage.content, memory: history.slice(0, -1), provider, model, enable_tools: false },
-                        (delta) => {
-                            setMessages((prev) =>
-                                prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + delta } : m))
-                            )
-                        },
-                        abortControllerRef.current.signal
-                    )
-                    setMessages((prev) =>
-                        prev.map((m) => (m.id === assistantId ? { ...m, content: fullContent, timestamp: new Date() } : m))
-                    )
-                }
+                    },
+                    abortControllerRef.current.signal
+                )
+                setMessages((prev) =>
+                    prev.map((m) => (m.id === assistantId ? { ...m, content: fullContent, timestamp: new Date() } : m))
+                )
             } else {
                 const reply = await call_chat(userMessage.content, history.slice(0, -1), provider, model, true)
                 setMessages((prev) =>

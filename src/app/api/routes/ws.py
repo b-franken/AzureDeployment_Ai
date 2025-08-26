@@ -1,3 +1,4 @@
+# src/app/api/routes/ws.py
 from __future__ import annotations
 
 import os
@@ -30,10 +31,7 @@ def _origin_ok(origin: str) -> bool:
 async def _accept(ws: WebSocket) -> bool:
     origin = ws.headers.get("origin", "")
     if not _origin_ok(origin):
-        try:
-            await ws.close(code=1008)
-        except Exception:
-            pass
+        await ws.close(code=1008)
         return False
     await ws.accept(subprotocol="json")
     return True
@@ -138,11 +136,4 @@ async def ws_alias(ws: WebSocket) -> None:
 
 @router.websocket("/")
 async def ws_root(ws: WebSocket) -> None:
-    if not await _accept(ws):
-        return
-    try:
-        await ws.send_json(
-            {"type": "error", "message": "invalid_path", "hint": "/ws/chat or /ws/deploy/{id}"}
-        )
-    finally:
-        await ws.close(code=status.WS_1000_NORMAL_CLOSURE)
+    await ws.close(code=status.WS_1008_POLICY_VIOLATION)

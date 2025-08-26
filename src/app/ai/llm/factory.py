@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+from threading import Lock
+from time import monotonic
+
 import httpx
 
 from app.ai.llm.adapters.gemini_adapter import GeminiAdapter
@@ -8,17 +12,36 @@ from app.ai.llm.adapters.openai_adapter import OpenAIAdapter
 from app.ai.llm.base import LLMProvider
 from app.ai.llm.registry import ProviderAdapter, registry
 from app.ai.llm.unified_provider import UnifiedLLMProvider
-from app.core.config import (
-    GEMINI_MODEL,
-    LLM_PROVIDER,
-    OLLAMA_MODEL,
-    OPENAI_MODEL,
-)
+from app.core.config import GEMINI_MODEL, LLM_PROVIDER, OLLAMA_MODEL, OPENAI_MODEL
 
 _reg = registry()
 
+_TTL_SECONDS: float = 600.0
+_CACHE: dict[str, tuple[float, list[str]]] = {}
+_CACHE_LOCK = Lock()
 
-def _openai_list() -> list[str]:
+
+def _get_cached(key: str, fetch: Callable[[], list[str]]) -> list[str]:
+    now = monotonic()
+    with _CACHE_LOCK:
+        entry = _CACHE.get(key)
+        if entry and entry[0] > now:
+            return entry[1]
+    result = fetch()
+    with _CACHE_LOCK:
+        _CACHE[key] = (now + _TTL_SECONDS, result)
+    return result
+
+
+def invalidate_model_cache(provider: str | None = None) -> None:
+    with _CACHE_LOCK:
+        if provider:
+            _CACHE.pop(provider, None)
+        else:
+            _CACHE.clear()
+
+
+def _fetch_openai_models() -> list[str]:
     fallback = ["gpt-4o-mini", "gpt-4o", "gpt-5"]
     try:
         from app.core.config import get_settings
@@ -37,6 +60,10 @@ def _openai_list() -> list[str]:
             return models or fallback
     except Exception:
         return fallback
+
+
+def _openai_list() -> list[str]:
+    return _get_cached("openai_models", _fetch_openai_models)
 
 
 def _gemini_list() -> list[str]:

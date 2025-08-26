@@ -59,9 +59,9 @@ class ModelRegistry:
         defaults = ["llama3.1", "mistral", "gemma"]
 
         from app.core.config import LLM_PROVIDER
+
         if LLM_PROVIDER.lower() != "ollama":
-            logger.debug(
-                "Ollama not selected as provider, returning defaults without HTTP call")
+            logger.debug("Ollama not selected as provider, returning defaults without HTTP call")
             return defaults
 
         try:

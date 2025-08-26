@@ -7,7 +7,7 @@ import json
 try:
     from redis.asyncio import Redis
 except Exception:  # noqa: BLE001
-    Redis = None  # type: ignore[assignment]
+    Redis = None  # type: ignore[assignment,misc]
 
 
 def normkey(text: str) -> str:

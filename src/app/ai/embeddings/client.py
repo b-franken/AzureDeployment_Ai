@@ -34,9 +34,9 @@ class EmbeddingsService:
         normed = [self._norm(t) for t in texts]
         keys = [normkey(t) for t in normed]
         local = req_cache_var.get()
-        hits: dict[str, list[float]] = {
-            k: v for k, v in ((k, local.get(k)) for k in keys) if v is not None
-        }
+        hits: dict[str, list[float]] = {}
+        if local is not None:
+            hits = {k: v for k, v in ((k, local.get(k)) for k in keys) if v is not None}
         miss_keys = [k for k in keys if k not in hits]
         miss_texts = [t for t, k in zip(normed, keys, strict=False) if k in set(miss_keys)]
         if self._redis:
@@ -69,8 +69,11 @@ class EmbeddingsService:
                 budget.spend(spend)
                 for pair, d in zip(batch, res.data, strict=False):
                     out[pair[0]] = d.embedding
-        local.update(out)
-        req_cache_var.set(local)
+        if local is not None:
+            local.update(out)
+            req_cache_var.set(local)
+        else:
+            req_cache_var.set(out)
         if self._redis:
             to_set = {k: v for k, v in out.items()}
             await self._redis.set_many(to_set)

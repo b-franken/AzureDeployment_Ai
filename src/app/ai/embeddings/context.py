@@ -22,6 +22,6 @@ class EmbeddingsBudget:
 
 
 budget_var: contextvars.ContextVar[EmbeddingsBudget] = contextvars.ContextVar("emb_budget")
-req_cache_var: contextvars.ContextVar[dict[str, list[float]]] = contextvars.ContextVar(
-    "emb_cache", default={}
+req_cache_var: contextvars.ContextVar[dict[str, list[float]] | None] = contextvars.ContextVar(
+    "emb_cache", default=None
 )

@@ -30,7 +30,7 @@ from app.core.middelware.correlation import install_correlation_middleware
 from app.observability.app_insights import app_insights
 from app.observability.prometheus import instrument_app
 
-from .middleware.embeddings_budget import EmbeddingsBudgetMiddleware
+from .middleware.embeddings_budget import install_embeddings_budget_middleware
 
 logger = get_logger(__name__)
 
@@ -105,6 +105,7 @@ install_error_handlers(app)
 install_correlation_middleware(app)
 install_telemetry_middleware(app)
 install_auth_middleware(app)
+install_embeddings_budget_middleware(app)
 
 
 @app.middleware("http")
@@ -119,7 +120,6 @@ def _routes() -> list[str]:
     return [r.path for r in app.routes if isinstance(r, APIRoute | Route | Mount | WebSocketRoute)]
 
 
-app.add_middleware(EmbeddingsBudgetMiddleware)
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(chat_router, prefix="/api/chat", tags=["chat"])
 app.include_router(review_router, prefix="/api/review", tags=["review"])

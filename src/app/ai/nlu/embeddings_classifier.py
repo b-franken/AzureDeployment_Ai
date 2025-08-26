@@ -8,6 +8,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from app.ai.nlu.embeddings_clients import get_embedding_client
+from app.ai.nlu.lightweight_classifier import get_lightweight_classifier, replace_embeddings_classifier_in_dev
 
 
 class EmbeddingsClassifierService:
@@ -23,8 +24,16 @@ class EmbeddingsClassifierService:
         if dimensions is not None:
             os.environ["EMBEDDINGS_DIMENSIONS"] = str(int(dimensions))
 
+        # In development mode, prefer local embeddings for classification
         env_provider: str | None = os.getenv("EMBEDDINGS_PROVIDER")
-        base_provider: str | None = provider if provider is not None else env_provider
+        use_local_for_classification = os.getenv("USE_LOCAL_EMBEDDINGS_FOR_CLASSIFICATION", "true").lower() in {"1", "true", "yes"}
+        is_development = os.getenv("ENVIRONMENT", "development") == "development"
+        
+        if is_development and use_local_for_classification and provider is None:
+            base_provider: str | None = "local"
+        else:
+            base_provider = provider if provider is not None else env_provider
+        
         provider_value: str = base_provider or "azure"
         self._provider: str = provider_value.lower()
 
@@ -74,6 +83,12 @@ class EmbeddingsClassifierService:
         return np.asarray(vecs, dtype=np.float32)
 
     def predict_proba(self, texts: Sequence[str]) -> NDArray[np.float32]:
+        # Use lightweight classifier in development to avoid embeddings entirely
+        if replace_embeddings_classifier_in_dev():
+            lightweight = get_lightweight_classifier()
+            results = lightweight.predict_proba(list(texts))
+            return np.asarray(results, dtype=np.float32)
+            
         X = self._encode(texts)
         if X.size == 0:
             return np.empty((0, self._num_labels), dtype=np.float32)

@@ -157,11 +157,12 @@ async def parse_with_llm(
     )
     choices = resp.get("choices") or []
     if not choices:
-        base = unified_nlu_parser(use_embeddings=True).parse(text)
+        # Fall back to rule-based parsing only (no embeddings) to avoid redundant calls
+        base = unified_nlu_parser(use_embeddings=False).parse(text)
         return UnifiedParseResult(
             text=text,
             intent=base.intent,
-            confidence=base.confidence,
+            confidence=base.confidence * 0.8,  # Reduce confidence for fallback
             resource_type=base.resource_type,
             resource_name=base.resource_name,
             action=base.action,

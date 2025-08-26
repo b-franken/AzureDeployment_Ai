@@ -38,6 +38,13 @@ def _coerce(value: Any) -> Any:
         return {str(_coerce(k)): _coerce(v) for k, v in value.items()}
     if isinstance(value, Sequence) and not isinstance(value, (str | bytes | bytearray)):
         return [_coerce(v) for v in value]
+    
+    # Special handling for logger objects and other problematic types
+    if hasattr(value, '__class__'):
+        class_name = value.__class__.__name__
+        if 'Logger' in class_name or 'FindCaller' in class_name:
+            return f"<{class_name}>"  # Safe representation
+    
     try:
         return str(value)
     except Exception:
@@ -45,6 +52,7 @@ def _coerce(value: Any) -> Any:
 
 
 def install_log_record_sanitizer() -> None:
+    """Install a log record sanitizer to prevent OpenTelemetry attribute validation issues."""
     std = {
         "name",
         "msg",
@@ -67,17 +75,24 @@ def install_log_record_sanitizer() -> None:
         "processName",
         "process",
         "asctime",
-        "_FixedFindCallerLogger",
     }
-    original_factory = logging.getLogRecordFactory()
+    
+    # Check if already installed to avoid double-installation
+    current_factory = logging.getLogRecordFactory()
+    if hasattr(current_factory, '_otel_sanitized'):
+        return
+        
+    original_factory = current_factory
 
     def factory(*args: Any, **kwargs: Any) -> logging.LogRecord:
         record = original_factory(*args, **kwargs)  # type: ignore[misc]
 
+        # Remove all private attributes (starting with _)
         for key in list(record.__dict__.keys()):
             if key.startswith("_"):
                 del record.__dict__[key]
 
+        # Remove any logger objects or complex objects that might cause OpenTelemetry issues
         for key, value in list(record.__dict__.items()):
             if key == "exc_info":
                 if value and value is not True and not isinstance(value, tuple):
@@ -85,10 +100,19 @@ def install_log_record_sanitizer() -> None:
                 continue
             if key in std:
                 continue
+            
+            # Extra filtering for problematic objects
+            if hasattr(value, '__class__') and 'Logger' in value.__class__.__name__:
+                # Skip any logger objects
+                del record.__dict__[key]
+                continue
+                
             record.__dict__[key] = _coerce(value)
 
         return record
 
+    # Mark the factory as sanitized to prevent double-installation
+    factory._otel_sanitized = True  # type: ignore[attr-defined]
     logging.setLogRecordFactory(factory)
 
 
@@ -140,6 +164,7 @@ class LoggerFactory:
         if self._configured:
             return
 
+        # Install sanitizer FIRST before any other logging configuration
         install_log_record_sanitizer()
 
         log_level = getattr(logging, level.upper(), logging.INFO)

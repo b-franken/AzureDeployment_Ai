@@ -390,8 +390,11 @@ async def maybe_call_tool(
     context: ToolExecutionContext | None = None,
     return_json: bool = False,
 ) -> str:
+    from app.core.config import settings
+    
     await _log_request(user_input, context)
-    if context and context.classifier:
+    # Skip classifier predictions in development mode to reduce embedding calls
+    if context and context.classifier and settings.environment != "development":
         try:
             _ = context.classifier.predict_proba([user_input])
         except Exception as exc:

@@ -477,11 +477,21 @@ def maybe_map_provision(text: str) -> dict[str, object] | None:
 
 
 async def maybe_map_provision_async(text: str) -> dict[str, object] | None:
+    # Try fast rule-based parsing first (no embeddings)
+    r = unified_nlu_parser(use_embeddings=False).parse(text)
+    if r.confidence >= 0.5:  # Higher threshold for rule-based confidence
+        args = r.to_orchestrator_args()
+        if isinstance(args, dict):
+            return {"tool": "provision_orchestrator", "args": args}
+    
+    # Only use embeddings if rule-based parsing has low confidence
     r = parse_provision_request(text)
     if r.confidence >= 0.3:
         args = r.to_orchestrator_args()
         if isinstance(args, dict):
             return {"tool": "provision_orchestrator", "args": args}
+            
+    # LLM parsing as final fallback (this doesn't use embeddings for classification)
     from app.ai.nlu.llm_parser import parse_with_llm
 
     r2 = await parse_with_llm(text)

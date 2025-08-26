@@ -5,6 +5,7 @@ import re
 
 from openai import AsyncOpenAI
 
+from .batch_processor import DynamicBatchProcessor
 from .cache import RedisCache, normkey
 from .config import EmbeddingsConfig
 from .context import budget_var, req_cache_var
@@ -22,6 +23,17 @@ class EmbeddingsService:
         self._api_version = cfg.azure_api_version
         self._sem = asyncio.Semaphore(value=max(1, cfg.max_concurrency))
         self._redis = RedisCache(cfg.redis_url, cfg.ttl_seconds) if cfg.redis_url else None
+        
+        # Initialize batch processor if dynamic batching is enabled
+        self._batch_processor: DynamicBatchProcessor | None = None
+        if cfg.enable_dynamic_batching:
+            self._batch_processor = DynamicBatchProcessor(
+                embed_fn=self._direct_embed,
+                batch_size=cfg.batch_size,
+                batch_wait_ms=cfg.batch_wait_ms
+            )
+            # Start the batch processor
+            asyncio.create_task(self._batch_processor.start())
 
     def _norm(self, text: str) -> str:
         if not self._cfg.normalize:
@@ -29,6 +41,18 @@ class EmbeddingsService:
         return _ws_re.sub(" ", text.strip())
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
+        """Main embedding method that handles caching and batching."""
+        if not texts:
+            return []
+            
+        # Use batch processor if enabled
+        if self._batch_processor:
+            return await self._batch_processor.embed(texts)
+        else:
+            return await self._direct_embed(texts)
+            
+    async def _direct_embed(self, texts: list[str]) -> list[list[float]]:
+        """Direct embedding method without batch processing (used by batch processor)."""
         if not texts:
             return []
         normed = [self._norm(t) for t in texts]

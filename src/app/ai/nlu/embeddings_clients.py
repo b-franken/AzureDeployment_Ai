@@ -257,6 +257,76 @@ class MistralClient(EmbeddingClient):
         return np.asarray(out, dtype=np.float32)
 
 
+class LocalEmbeddingClient(EmbeddingClient):
+    """Lightweight local embedding client using simple TF-IDF for classification."""
+    
+    def __init__(self, model_name: str = "tfidf") -> None:
+        self.model_name = model_name
+        self._vectorizer = None
+        self._fallback_dim = 384  # Standard embedding dimension
+        
+    def _ensure_vectorizer(self) -> None:
+        if self._vectorizer is None:
+            try:
+                from sklearn.feature_extraction.text import TfidfVectorizer
+                # Simple TF-IDF vectorizer for lightweight classification
+                self._vectorizer = TfidfVectorizer(
+                    max_features=self._fallback_dim,
+                    stop_words='english',
+                    lowercase=True,
+                    ngram_range=(1, 2),
+                    min_df=1,
+                    max_df=0.95
+                )
+            except ImportError:
+                # Ultra-lightweight fallback: hash-based features
+                self._vectorizer = None
+    
+    def _simple_hash_embedding(self, text: str, dim: int = 384) -> list[float]:
+        """Ultra-lightweight hash-based embedding as fallback."""
+        import hashlib
+        
+        # Create multiple hash features
+        features = [0.0] * dim
+        words = text.lower().split()
+        
+        for i, word in enumerate(words):
+            # Use different hash seeds for variety
+            for seed in range(3):
+                hash_val = int(hashlib.md5(f"{word}_{seed}".encode()).hexdigest(), 16)
+                idx = hash_val % dim
+                features[idx] += 1.0 / (i + 1)  # Weight by position
+                
+        # Normalize
+        norm = sum(f * f for f in features) ** 0.5
+        if norm > 0:
+            features = [f / norm for f in features]
+            
+        return features
+    
+    def encode(self, texts: Sequence[str], batch_size: int = 256) -> np.ndarray:
+        if not texts:
+            return np.empty((0, 0), dtype=np.float32)
+        
+        # Try TF-IDF if sklearn is available
+        if self._vectorizer is not None:
+            try:
+                self._ensure_vectorizer()
+                # Fit on the texts (simple approach for classification)
+                tfidf_matrix = self._vectorizer.fit_transform(texts)
+                return tfidf_matrix.toarray().astype(np.float32)
+            except Exception:
+                pass
+        
+        # Ultra-lightweight fallback: hash-based embeddings
+        embeddings = []
+        for text in texts:
+            embedding = self._simple_hash_embedding(text, self._fallback_dim)
+            embeddings.append(embedding)
+            
+        return np.asarray(embeddings, dtype=np.float32)
+
+
 def get_embedding_client(provider: str | None = None) -> EmbeddingClient:
     base = provider if provider is not None else (os.getenv("EMBEDDINGS_PROVIDER") or "azure")
     p = base.lower()
@@ -272,4 +342,7 @@ def get_embedding_client(provider: str | None = None) -> EmbeddingClient:
         return VoyageClient(output_dimension=dims)
     if p == "mistral":
         return MistralClient()
+    if p == "local":
+        model_name = os.getenv("LOCAL_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+        return LocalEmbeddingClient(model_name)
     raise ValueError(f"Unknown embeddings provider: {provider}")

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from opentelemetry import trace
@@ -16,6 +18,26 @@ router = APIRouter()
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
 
+_ALLOWED = {o.strip() for o in os.getenv("WS_ALLOWED_ORIGINS", "*").split(",") if o.strip()}
+
+
+def _origin_ok(origin: str) -> bool:
+    if not _ALLOWED or "*" in _ALLOWED:
+        return True
+    return origin in _ALLOWED
+
+
+async def _accept(ws: WebSocket) -> bool:
+    origin = ws.headers.get("origin", "")
+    if not _origin_ok(origin):
+        try:
+            await ws.close(code=1008)
+        except Exception:
+            pass
+        return False
+    await ws.accept(subprotocol="json")
+    return True
+
 
 class ChatInit(BaseModel):
     provider: str | None = None
@@ -26,11 +48,13 @@ class ChatInit(BaseModel):
 
 @router.websocket("/ws/chat")
 async def chat_ws(ws: WebSocket) -> None:
-    await ws.accept(subprotocol="json")
+    if not await _accept(ws):
+        return
     with tracer.start_as_current_span("ws.chat") as span:
+        span.set_attribute("ws.origin", ws.headers.get("origin", ""))
         try:
             while True:
-                raw = await ws.receive_json()
+                raw: dict[str, Any] = await ws.receive_json()
                 msg_type = str(raw.get("type", "chat"))
                 if msg_type == "ping":
                     await ws.send_json({"type": "pong"})
@@ -76,16 +100,15 @@ async def chat_ws(ws: WebSocket) -> None:
 
 @router.websocket("/ws/deploy/{deployment_id}")
 async def deployment_stream(ws: WebSocket, deployment_id: str) -> None:
-    await ws.accept(subprotocol="json")
+    if not await _accept(ws):
+        return
     with tracer.start_as_current_span("ws.deploy") as span:
         span.set_attribute("deployment.id", deployment_id)
         logger.info("ws_deploy_stream_start", deployment_id=deployment_id)
         try:
             async for line in streaming_handler.stream_logs(deployment_id):
                 evt = DeploymentEvent(
-                    type="log",
-                    payload={"line": line},
-                    timestamp=datetime.now(tz=UTC),
+                    type="log", payload={"line": line}, timestamp=datetime.now(tz=UTC)
                 )
                 await ws.send_text(evt.model_dump_json())
             complete = DeploymentEvent(
@@ -106,3 +129,20 @@ async def deployment_stream(ws: WebSocket, deployment_id: str) -> None:
                 await ws.send_json({"type": "error", "message": "stream_failed"})
             finally:
                 await ws.close(code=status.WS_1011_INTERNAL_ERROR)
+
+
+@router.websocket("/ws")
+async def ws_alias(ws: WebSocket) -> None:
+    await chat_ws(ws)
+
+
+@router.websocket("/")
+async def ws_root(ws: WebSocket) -> None:
+    if not await _accept(ws):
+        return
+    try:
+        await ws.send_json(
+            {"type": "error", "message": "invalid_path", "hint": "/ws/chat or /ws/deploy/{id}"}
+        )
+    finally:
+        await ws.close(code=status.WS_1000_NORMAL_CLOSURE)

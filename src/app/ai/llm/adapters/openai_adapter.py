@@ -25,7 +25,11 @@ class OpenAIAdapter:
         return f"{self._base}/chat/completions"
 
     def headers(self) -> dict[str, str]:
-        return {"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"}
+        return {
+            "Authorization": f"Bearer {self._key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
 
     def build_payload(self, model: str, messages: list[Message], **kwargs: Any) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -49,26 +53,27 @@ class OpenAIAdapter:
         ) as r:
             r.raise_for_status()
             async for line in r.aiter_lines():
-                if not line or not line.startswith("data:"):
+                if not line:
                     continue
-                data = line.removeprefix("data:").strip()
+                if not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
                 if data == "[DONE]":
                     break
                 try:
                     obj = json.loads(data)
-                    choice = (obj.get("choices") or [{}])[0]
-                    delta = choice.get("delta") or {}
-                    piece = delta.get("content")
-                    if piece:
-                        yield str(piece)
                 except Exception:
                     continue
+                choice = (obj.get("choices") or [{}])[0]
+                delta = choice.get("delta") or {}
+                piece = delta.get("content")
+                if piece:
+                    yield str(piece)
 
     async def chat_raw(
         self, client: httpx.AsyncClient, model: str, messages: list[dict[str, Any]], **kwargs: Any
     ) -> dict[str, Any]:
-        payload = {"model": model, "messages": messages}
-        payload.update(kwargs)
+        payload = self.build_payload(model, messages, **kwargs)
         resp = await client.post(self.endpoint(), json=payload, headers=self.headers())
         resp.raise_for_status()
         return resp.json()

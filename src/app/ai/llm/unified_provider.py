@@ -27,16 +27,15 @@ class LLMAdapter(Protocol):
     def stream(
         self, client: httpx.AsyncClient, model: str, messages: list[Message], **kwargs: Any
     ) -> AsyncIterator[str]: ...
-
     async def chat_raw(
         self, client: httpx.AsyncClient, model: str, messages: list[dict[str, Any]], **kwargs: Any
     ) -> dict[str, Any]: ...
 
 
 class UnifiedLLMProvider(LLMProvider):
-    def __init__(self, adapter: LLMAdapter) -> None:
-        self._adapter = adapter
-        self._tracer = trace.get_tracer(f"llm.{adapter.name()}")
+    def __init__(self, adapter: LLMAdapter | list[LLMAdapter] | tuple[LLMAdapter, ...]) -> None:
+        self._adapters = tuple(adapter) if isinstance(adapter, list | tuple) else (adapter,)
+        self._tracer = trace.get_tracer("llm.unified")
         self._client = httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=5.0))
 
     async def aclose(self) -> None:
@@ -55,58 +54,111 @@ class UnifiedLLMProvider(LLMProvider):
 
     @retry_on_error(max_retries=3, base_delay=0.5)
     async def chat(self, model: str, messages: list[Message]) -> str:
-        with self._tracer.start_as_current_span(f"{self._adapter.name()}.chat") as span:
-            span.set_attribute("llm.provider", self._adapter.name())
-            span.set_attribute("llm.model.requested", model)
-            try:
-                payload = self._adapter.build_payload(model, messages)
-                resp = await self._client.post(
-                    self._adapter.endpoint(), json=payload, headers=self._adapter.headers()
-                )
-                resp.raise_for_status()
-                text = self._adapter.extract_text(resp.json())
-                return text.strip()
-            except Exception as err:
-                current = trace.get_current_span()
-                if current:
-                    current.record_exception(err)
-                    current.set_status(Status(StatusCode.ERROR, str(err)))
-                raise ExternalServiceException("LLM service unavailable", retryable=True) from err
+        with self._tracer.start_as_current_span("chat") as span:
+            span.set_attribute(
+                "llm.providers.available", ",".join(a.name() for a in self._adapters)
+            )
+            span.set_attribute("llm.provider.primary", self._adapters[0].name())
+            last_err: Exception | None = None
+            for idx, adapter in enumerate(self._adapters):
+                with self._tracer.start_as_current_span(f"{adapter.name()}.attempt") as attempt:
+                    attempt.set_attribute("llm.provider", adapter.name())
+                    attempt.set_attribute("llm.model.requested", model)
+                    try:
+                        payload = adapter.build_payload(model, messages)
+                        resp = await self._client.post(
+                            adapter.endpoint(), json=payload, headers=adapter.headers()
+                        )
+                        resp.raise_for_status()
+                        text = adapter.extract_text(resp.json()).strip()
+                        span.set_attribute("llm.provider.used", adapter.name())
+                        span.set_attribute("llm.fallback_used", bool(idx > 0))
+                        return text
+                    except Exception as err:
+                        attempt.record_exception(err)
+                        attempt.set_status(Status(StatusCode.ERROR, str(err)))
+                        last_err = err
+                        continue
+            current = trace.get_current_span()
+            if current and last_err is not None:
+                current.record_exception(last_err)
+                current.set_status(Status(StatusCode.ERROR, str(last_err)))
+            raise ExternalServiceException("LLM service unavailable", retryable=True)
 
     @retry_on_error(max_retries=2, base_delay=0.5)
     async def chat_stream(
         self, model: str, messages: list[Message], **kwargs: Any
     ) -> AsyncIterator[str]:
-        with self._tracer.start_as_current_span(f"{self._adapter.name()}.chat.stream") as span:
-            span.set_attribute("llm.provider", self._adapter.name())
-            span.set_attribute("llm.model.requested", model)
-            try:
-                stream = self._adapter.stream(self._client, model, messages, **kwargs)
-                async for piece in stream:
-                    yield piece
-            except Exception as err:
-                current = trace.get_current_span()
-                if current:
-                    current.record_exception(err)
-                    current.set_status(Status(StatusCode.ERROR, str(err)))
-                raise ExternalServiceException("LLM service unavailable", retryable=True) from err
-            yield ""
+        with self._tracer.start_as_current_span("chat.stream") as span:
+            span.set_attribute(
+                "llm.providers.available", ",".join(a.name() for a in self._adapters)
+            )
+            span.set_attribute("llm.provider.primary", self._adapters[0].name())
+            last_err: Exception | None = None
+            for idx, adapter in enumerate(self._adapters):
+                with self._tracer.start_as_current_span(f"{adapter.name()}.attempt") as attempt:
+                    attempt.set_attribute("llm.provider", adapter.name())
+                    attempt.set_attribute("llm.model.requested", model)
+                    agen: AsyncIterator[str] | None = None
+                    try:
+                        agen = adapter.stream(self._client, model, messages, **kwargs)
+                        first = await anext(agen)
+                        span.set_attribute("llm.provider.used", adapter.name())
+                        span.set_attribute("llm.fallback_used", bool(idx > 0))
+                        yield first
+                        async for piece in agen:
+                            yield piece
+                        yield ""
+                        return
+                    except StopAsyncIteration:
+                        span.set_attribute("llm.provider.used", adapter.name())
+                        span.set_attribute("llm.fallback_used", bool(idx > 0))
+                        yield ""
+                        return
+                    except Exception as err:
+                        if agen is not None:
+                            close = getattr(agen, "aclose", None)
+                            if callable(close):
+                                try:
+                                    await close()
+                                except Exception:
+                                    pass
+                        attempt.record_exception(err)
+                        attempt.set_status(Status(StatusCode.ERROR, str(err)))
+                        last_err = err
+                        continue
+            current = trace.get_current_span()
+            if current and last_err is not None:
+                current.record_exception(last_err)
+                current.set_status(Status(StatusCode.ERROR, str(last_err)))
+            raise ExternalServiceException("LLM service unavailable", retryable=True)
 
     @retry_on_error(max_retries=3, base_delay=0.5)
     async def chat_raw(
-        self,
-        model: str,
-        messages: list[dict[str, Any]],
-        **kwargs: Any,
+        self, model: str, messages: list[dict[str, Any]], **kwargs: Any
     ) -> dict[str, Any]:
-        with self._tracer.start_as_current_span(f"{self._adapter.name()}.chat.raw") as span:
-            span.set_attribute("llm.provider", self._adapter.name())
-            span.set_attribute("llm.model.requested", model)
-            try:
-                return await self._adapter.chat_raw(self._client, model, messages, **kwargs)
-            except Exception as err:
-                current = trace.get_current_span()
-                if current:
-                    current.record_exception(err)
-                    current.set_status(Status(StatusCode.ERROR, str(err)))
-                raise ExternalServiceException("LLM service unavailable", retryable=True) from err
+        with self._tracer.start_as_current_span("chat.raw") as span:
+            span.set_attribute(
+                "llm.providers.available", ",".join(a.name() for a in self._adapters)
+            )
+            span.set_attribute("llm.provider.primary", self._adapters[0].name())
+            last_err: Exception | None = None
+            for idx, adapter in enumerate(self._adapters):
+                with self._tracer.start_as_current_span(f"{adapter.name()}.attempt") as attempt:
+                    attempt.set_attribute("llm.provider", adapter.name())
+                    attempt.set_attribute("llm.model.requested", model)
+                    try:
+                        out = await adapter.chat_raw(self._client, model, messages, **kwargs)
+                        span.set_attribute("llm.provider.used", adapter.name())
+                        span.set_attribute("llm.fallback_used", bool(idx > 0))
+                        return out
+                    except Exception as err:
+                        attempt.record_exception(err)
+                        attempt.set_status(Status(StatusCode.ERROR, str(err)))
+                        last_err = err
+                        continue
+            current = trace.get_current_span()
+            if current and last_err is not None:
+                current.record_exception(last_err)
+                current.set_status(Status(StatusCode.ERROR, str(last_err)))
+            raise ExternalServiceException("LLM service unavailable", retryable=True)

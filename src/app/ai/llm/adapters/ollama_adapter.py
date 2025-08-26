@@ -22,20 +22,19 @@ class OllamaAdapter:
         return f"{self._base}/api/chat"
 
     def headers(self) -> dict[str, str]:
-        return {"Content-Type": "application/json"}
+        return {"Content-Type": "application/json", "Accept": "application/json"}
 
     def build_payload(self, model: str, messages: list[Message], **kwargs: Any) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": model,
             "messages": [{"role": str(m["role"]), "content": str(m["content"])} for m in messages],
-            "stream": False,
         }
         payload.update(kwargs)
         return payload
 
     def extract_text(self, data: dict[str, Any]) -> str:
         msg = data.get("message") or {}
-        return str(msg.get("content") or "")
+        return str(msg.get("content") or data.get("response") or "")
 
     async def stream(
         self, client: httpx.AsyncClient, model: str, messages: list[Message], **kwargs: Any
@@ -50,34 +49,33 @@ class OllamaAdapter:
                     continue
                 try:
                     obj = json.loads(line)
-                    msg = obj.get("message") or {}
-                    piece = msg.get("content") or obj.get("response")
-                    if piece:
-                        yield str(piece)
                 except Exception:
                     continue
+                msg = obj.get("message") or {}
+                piece = msg.get("content") or obj.get("response")
+                if piece:
+                    yield str(piece)
 
     async def chat_raw(
         self, client: httpx.AsyncClient, model: str, messages: list[dict[str, Any]], **kwargs: Any
     ) -> dict[str, Any] | list[dict[str, Any]]:
-        stream_mode = kwargs.pop("stream", False)
-
+        stream_mode = bool(kwargs.pop("stream", False))
         if not stream_mode:
-            payload = {"model": model, "messages": messages, **kwargs}
+            payload = self.build_payload(model, messages, stream=False, **kwargs)
             resp = await client.post(self.endpoint(), json=payload, headers=self.headers())
             resp.raise_for_status()
             return resp.json()
-
-        payload = {"model": model, "messages": messages, "stream": True, **kwargs}
+        payload = self.build_payload(model, messages, stream=True, **kwargs)
         async with client.stream(
             "POST", self.endpoint(), json=payload, headers=self.headers()
         ) as r:
             r.raise_for_status()
             chunks: list[dict[str, Any]] = []
             async for line in r.aiter_lines():
-                if line:
-                    try:
-                        chunks.append(json.loads(line))
-                    except Exception:
-                        continue
+                if not line:
+                    continue
+                try:
+                    chunks.append(json.loads(line))
+                except Exception:
+                    continue
             return chunks

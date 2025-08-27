@@ -9,11 +9,15 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
 
+from opentelemetry import trace
+
 from app.core.config import MAX_MEMORY, MAX_TOTAL_MEMORY
 from app.core.data.repository import get_data_layer
 from app.core.logging import get_logger
+from app.observability.app_insights import app_insights
 
 logger = get_logger(__name__)
+tracer = trace.get_tracer(__name__)
 
 Role = Literal["user", "assistant", "system", "tool", "reviewer"]
 
@@ -60,45 +64,63 @@ class AsyncMemoryStore:
         async with self._init_lock:
             if self._initialized:
                 return
-            await self.db.initialize()
-            await self.db.execute(
-                """
-                CREATE TABLE IF NOT EXISTS messages (
-                    id BIGSERIAL PRIMARY KEY,
-                    user_id TEXT NOT NULL,
-                    role TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    metadata JSONB,
-                    timestamp TIMESTAMPTZ DEFAULT now(),
-                    created_at TIMESTAMPTZ DEFAULT now()
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_user_timestamp
-                    ON messages (user_id, timestamp DESC);
-
-                CREATE INDEX IF NOT EXISTS idx_user_created
-                    ON messages (user_id, created_at DESC);
-
-                CREATE INDEX IF NOT EXISTS idx_user_thread_created
-                    ON messages (
-                        user_id,
-                        (metadata->>'thread_id'),
-                        created_at DESC
+            
+            logger.info("Initializing memory store", max_memory=self.max_memory, max_total_memory=self.max_total_memory)
+            
+            with tracer.start_as_current_span("memory_store_initialize") as span:
+                span.set_attributes({
+                    "memory.max_memory": self.max_memory,
+                    "memory.max_total_memory": self.max_total_memory,
+                })
+                
+                await self.db.initialize()
+                await self.db.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS messages (
+                        id BIGSERIAL PRIMARY KEY,
+                        user_id TEXT NOT NULL,
+                        role TEXT NOT NULL,
+                        content TEXT NOT NULL,
+                        metadata JSONB,
+                        timestamp TIMESTAMPTZ DEFAULT now(),
+                        created_at TIMESTAMPTZ DEFAULT now()
                     );
 
-                CREATE INDEX IF NOT EXISTS idx_user_agent_created
-                    ON messages (
-                        user_id,
-                        (metadata->>'agent'),
-                        created_at DESC
-                    );
+                    CREATE INDEX IF NOT EXISTS idx_user_timestamp
+                        ON messages (user_id, timestamp DESC);
 
-                CREATE INDEX IF NOT EXISTS idx_messages_metadata_gin
-                    ON messages USING GIN (metadata);
-                """
-            )
-            self._initialized = True
-            logger.info("initialized memory store")
+                    CREATE INDEX IF NOT EXISTS idx_user_created
+                        ON messages (user_id, created_at DESC);
+
+                    CREATE INDEX IF NOT EXISTS idx_user_thread_created
+                        ON messages (
+                            user_id,
+                            (metadata->>'thread_id'),
+                            created_at DESC
+                        );
+
+                    CREATE INDEX IF NOT EXISTS idx_user_agent_created
+                        ON messages (
+                            user_id,
+                            (metadata->>'agent'),
+                            created_at DESC
+                        );
+
+                    CREATE INDEX IF NOT EXISTS idx_messages_metadata_gin
+                        ON messages USING GIN (metadata);
+                    """
+                )
+                
+                self._initialized = True
+                logger.info("Memory store initialized successfully")
+                
+                app_insights.track_custom_event(
+                    "memory_store_initialized",
+                    {
+                        "max_memory": self.max_memory,
+                        "max_total_memory": self.max_total_memory,
+                    }
+                )
 
     @asynccontextmanager
     async def get_connection(self) -> AsyncIterator[Any]:
@@ -116,29 +138,70 @@ class AsyncMemoryStore:
         thread_id: str | None = None,
         agent: str | None = None,
     ) -> int:
-        if isinstance(role, str):
-            role = MessageRole(role)
-        merged = dict(metadata or {})
-        if thread_id is not None:
-            merged["thread_id"] = thread_id
-        if agent is not None:
-            merged["agent"] = agent
-        async with self.get_connection() as conn:
-            row = await conn.fetchrow(
-                """
-                INSERT INTO messages (user_id, role, content, metadata)
-                VALUES ($1, $2, $3, $4)
-                RETURNING id
-                """,
-                user_id,
-                role.value,
-                content,
-                json.dumps(merged) if merged else None,
+        with tracer.start_as_current_span(
+            "memory_store_message",
+            attributes={
+                "memory.user_id": user_id,
+                "memory.role": str(role),
+                "memory.content_length": len(content),
+                "memory.has_thread": thread_id is not None,
+                "memory.has_agent": agent is not None,
+            }
+        ) as span:
+            if isinstance(role, str):
+                role = MessageRole(role)
+            merged = dict(metadata or {})
+            if thread_id is not None:
+                merged["thread_id"] = thread_id
+            if agent is not None:
+                merged["agent"] = agent
+                
+            logger.debug(
+                "Storing message",
+                user_id=user_id,
+                role=role.value,
+                content_length=len(content),
+                thread_id=thread_id,
+                agent=agent,
             )
-        message_id = int(row["id"])
-        await self.trim_user_memory(user_id)
-        logger.debug("stored message id=%s user_id=%s", message_id, user_id)
-        return message_id
+                
+            async with self.get_connection() as conn:
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO messages (user_id, role, content, metadata)
+                    VALUES ($1, $2, $3, $4)
+                    RETURNING id
+                    """,
+                    user_id,
+                    role.value,
+                    content,
+                    json.dumps(merged) if merged else None,
+                )
+            message_id = int(row["id"])
+            span.set_attribute("memory.message_id", message_id)
+            
+            await self.trim_user_memory(user_id)
+            
+            logger.info(
+                "Message stored successfully",
+                message_id=message_id,
+                user_id=user_id,
+                role=role.value,
+                content_length=len(content),
+            )
+            
+            app_insights.track_custom_event(
+                "message_stored",
+                {
+                    "user_id": user_id,
+                    "role": role.value,
+                    "content_length": len(content),
+                    "has_thread": thread_id is not None,
+                    "has_agent": agent is not None,
+                }
+            )
+            
+            return message_id
 
     async def get_user_memory(
         self,
@@ -232,27 +295,56 @@ class AsyncMemoryStore:
         user_id: str,
         max_rows: int | None = None,
     ) -> int:
-        cap = int(max_rows if max_rows is not None else self.max_total_memory)
-        async with self.get_connection() as conn:
-            result = await conn.execute(
-                """
-                DELETE FROM messages
-                WHERE user_id = $1
-                  AND id NOT IN (
-                    SELECT id
-                    FROM messages
+        with tracer.start_as_current_span(
+            "memory_trim_user",
+            attributes={
+                "memory.user_id": user_id,
+                "memory.max_rows": max_rows or self.max_total_memory,
+            }
+        ) as span:
+            cap = int(max_rows if max_rows is not None else self.max_total_memory)
+            
+            logger.debug("Trimming user memory", user_id=user_id, max_rows=cap)
+            
+            async with self.get_connection() as conn:
+                result = await conn.execute(
+                    """
+                    DELETE FROM messages
                     WHERE user_id = $1
-                    ORDER BY created_at DESC
-                    LIMIT $2
-                  )
-                """,
-                user_id,
-                cap,
-            )
-        deleted = int(result.split()[-1]) if result else 0
-        if deleted > 0:
-            logger.info("trimmed %s messages for user_id=%s", deleted, user_id)
-        return deleted
+                      AND id NOT IN (
+                        SELECT id
+                        FROM messages
+                        WHERE user_id = $1
+                        ORDER BY created_at DESC
+                        LIMIT $2
+                      )
+                    """,
+                    user_id,
+                    cap,
+                )
+            deleted = int(result.split()[-1]) if result else 0
+            span.set_attribute("memory.deleted_messages", deleted)
+            
+            if deleted > 0:
+                logger.info(
+                    "Trimmed user memory",
+                    user_id=user_id,
+                    deleted_messages=deleted,
+                    max_rows=cap,
+                )
+                
+                app_insights.track_custom_event(
+                    "memory_trimmed",
+                    {
+                        "user_id": user_id,
+                        "deleted_messages": deleted,
+                        "max_rows": cap,
+                    }
+                )
+            else:
+                logger.debug("No messages to trim", user_id=user_id)
+                
+            return deleted
 
     async def forget_user(self, user_id: str) -> int:
         async with self.get_connection() as conn:

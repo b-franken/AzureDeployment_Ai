@@ -284,7 +284,22 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
-    def validate_environment(self) -> Settings:
+    def configure_logging_and_validate_environment(self) -> Settings:
+        # Configure logging level based on debug and environment settings
+        if self.debug:
+            # Debug mode: log everything
+            self.log_level = "DEBUG"
+            self.observability.log_level = "DEBUG"
+        elif self.environment == "development":
+            # Development: info and above
+            self.log_level = "INFO"
+            self.observability.log_level = "INFO"
+        elif self.environment in ("staging", "production"):
+            # Staging/Production: warnings and errors only
+            self.log_level = "WARNING"
+            self.observability.log_level = "WARNING"
+        
+        # Environment-specific validation
         if self.environment == "production":
             if self.debug:
                 raise ValueError("Debug must be disabled in production")

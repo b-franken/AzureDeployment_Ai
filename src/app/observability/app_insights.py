@@ -1,6 +1,7 @@
 # src/app/observability/app_insights.py
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
 
@@ -82,12 +83,15 @@ class ApplicationInsights:
         )
 
         self._setup_custom_metrics()
+        self._configure_logger_levels()
 
         ApplicationInsights._initialized = True
         logger.info(
             "Application Insights initialized",
             service_name=service_name,
             environment=settings.environment,
+            log_level=settings.log_level,
+            debug_mode=settings.debug,
         )
 
     def _setup_custom_metrics(self) -> None:
@@ -205,6 +209,50 @@ class ApplicationInsights:
                 continue  # Skip logger objects
             sanitized[key] = value
         return sanitized
+
+    def _configure_logger_levels(self) -> None:
+        """Configure third-party logger levels based on application settings."""
+        # Get the configured log level from settings
+        configured_level = getattr(logging, settings.log_level.upper(), logging.INFO)
+        
+        # Azure SDK loggers - always at WARNING or higher to reduce noise unless debug mode
+        if settings.debug:
+            # In debug mode, let Azure logs through but still filter the noisiest ones
+            azure_level = logging.INFO
+        else:
+            # In production/staging, keep Azure logs at WARNING or higher
+            azure_level = max(configured_level, logging.WARNING)
+            
+        logger.debug(
+            "Configuring third-party logger levels",
+            configured_level=settings.log_level,
+            debug_mode=settings.debug,
+            azure_level=logging.getLevelName(azure_level),
+        )
+        
+        # Azure SDK core loggers
+        logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(azure_level)
+        logging.getLogger("azure.monitor.opentelemetry").setLevel(azure_level)
+        logging.getLogger("azure.core").setLevel(azure_level)
+        logging.getLogger("azure.identity").setLevel(azure_level)
+        logging.getLogger("azure.mgmt").setLevel(azure_level)
+        
+        # HTTP client loggers - respect debug settings more granularly
+        if settings.debug:
+            logging.getLogger("httpx").setLevel(logging.DEBUG)
+            logging.getLogger("urllib3").setLevel(logging.INFO)  # urllib3 is very verbose on DEBUG
+            logging.getLogger("requests").setLevel(logging.DEBUG)
+        else:
+            # In production, only show warnings/errors from HTTP libraries
+            logging.getLogger("httpx").setLevel(logging.WARNING)
+            logging.getLogger("urllib3").setLevel(logging.WARNING)
+            logging.getLogger("requests").setLevel(logging.WARNING)
+            
+        # OpenTelemetry loggers
+        if settings.debug:
+            logging.getLogger("opentelemetry").setLevel(logging.INFO)
+        else:
+            logging.getLogger("opentelemetry").setLevel(logging.WARNING)
 
 
 app_insights = ApplicationInsights()

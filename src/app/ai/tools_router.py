@@ -79,6 +79,7 @@ class ToolExecutionContext:
     tool_execution_count: int = 0
     max_tool_executions: int = 10
     executed_tools: set[str] = None
+    last_tool_output: str | None = None
 
     def __post_init__(self):
         if self.executed_tools is None:
@@ -291,7 +292,13 @@ async def _run_tool(
     if not tool:
         return {"ok": False, "summary": f"tool {name} not found", "output": ""}
 
-    raw = await tool.run(**merged_args)
+    logger.info(f"About to execute tool {name} with merged_args: {merged_args}")
+    try:
+        raw = await tool.run(**merged_args)
+        logger.info(f"Tool {name} execution completed successfully, result: {raw}")
+    except Exception as e:
+        logger.error(f"Tool {name} execution failed with exception: {str(e)}", exc_info=True)
+        raise
     result = raw if isinstance(raw, dict) else {
         "ok": True, "summary": "", "output": raw}
     if isinstance(result, dict):
@@ -348,6 +355,10 @@ async def _openai_tools_orchestrator(
         messages.extend([{"role": m["role"], "content": m["content"]}
                         for m in memory])
     messages.append({"role": "user", "content": user_input})
+    
+    # Track rich formatted responses from tools
+    last_rich_response: str | None = None
+    
     if not allow_chaining:
         try:
             first = await llm.chat_raw(
@@ -375,6 +386,19 @@ async def _openai_tools_orchestrator(
         tname = (fn.get("name") or "").strip()
         args = _pick_args(fn.get("arguments") or {})
         result = await _run_tool(tname, args, context)
+        
+        # Check if this tool result contains rich formatted content (infrastructure code)
+        if (isinstance(result, dict) and 
+            isinstance(result.get("output"), str) and 
+            ("## Bicep Infrastructure Code" in result.get("output", "") or 
+             "## Terraform Infrastructure Code" in result.get("output", ""))):
+            output = result.get("output")
+            # Store in context for services layer access
+            if context:
+                context.last_tool_output = output
+            logger.info(f"Found infrastructure code in {tname} output (single call), returning directly")
+            return output
+        
         body = result.get("output") if isinstance(result, dict) else result
         if isinstance(body, dict):
             body = json.dumps(body, ensure_ascii=False, indent=2)
@@ -399,6 +423,9 @@ async def _openai_tools_orchestrator(
         tool_calls = msg.get("tool_calls") or []
         if not tool_calls:
             content = (msg.get("content") or "").strip()
+            # If we have rich formatted content from tools, return that instead of generic response
+            if last_rich_response:
+                return last_rich_response
             return content or None
         messages.append(
             {"role": "assistant", "content": msg.get(
@@ -413,6 +440,17 @@ async def _openai_tools_orchestrator(
             tname = (fn.get("name") or "").strip()
             args = _pick_args(fn.get("arguments") or {})
             result = await _run_tool(tname, args, context)
+            
+            # Capture rich infrastructure responses to prioritize over generic OpenAI responses
+            if isinstance(result, dict) and isinstance(result.get("output"), str):
+                output = result.get("output")
+                if ("## Bicep Infrastructure Code" in output or "## Terraform Infrastructure Code" in output):
+                    last_rich_response = output
+                    # Store in context for services layer access
+                    if context:
+                        context.last_tool_output = output
+                    logger.info(f"Captured rich infrastructure response from {tname}")
+            
             messages.append(
                 {
                     "role": "tool",
@@ -438,6 +476,13 @@ async def _openai_tools_orchestrator(
         return None
     msgf = choicesf[0]["message"]
     content = (msgf.get("content") or "").strip()
+    
+    # Return rich formatted infrastructure content if available, otherwise use OpenAI response
+    if last_rich_response:
+        logger.info("Returning rich infrastructure response instead of generic OpenAI response")
+        return last_rich_response
+    
+    logger.info(f"No rich content captured, returning OpenAI response: {content[:100]}{'...' if content and len(content) > 100 else ''}")
     return content or None
 
 

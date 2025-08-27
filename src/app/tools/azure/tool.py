@@ -120,7 +120,10 @@ class AzureProvision(Tool):
             if not is_valid:
                 return err("Invalid parameters", validation_msg)
 
-            if params.get("dry_run", True) or not params.get("confirmed", False):
+            logger.info(f"Tool execution check: dry_run={params.get('dry_run', True)}, params={params}")
+            
+            if params.get("dry_run", True):
+                logger.info("Entering DRY RUN mode - generating preview only")
                 deployment_id = str(uuid.uuid4())[:8]
                 bicep_code = generate_bicep_code(canonical_action, params)
                 terraform_code = generate_terraform_code(
@@ -177,7 +180,9 @@ class AzureProvision(Tool):
                     "location": params.get("location"),
                 }
                 return ok(f"Deployment Preview: {canonical_action}", summary)
-
+            
+            logger.info("DRY RUN check passed - proceeding with ACTUAL DEPLOYMENT")
+            logger.info(f"Creating Azure clients for subscription: {params.get('subscription_id')}")
             clients = await get_clients(params.get("subscription_id"))
             env = params.get("env", "dev")
             owner = params.get("owner", "devops-bot")
@@ -186,7 +191,10 @@ class AzureProvision(Tool):
 
             _, action_func = resolve_action(canonical_action)
             if not action_func:
+                logger.error(f"Action function not found for: {canonical_action}")
                 return err("Action not implemented", f"Action {canonical_action} is not available")
+            
+            logger.info(f"Action function resolved: {action_func.__name__} for action: {canonical_action}")
 
             resource_definition = build_resource_definition(
                 canonical_action, params)
@@ -204,64 +212,46 @@ class AzureProvision(Tool):
             }
             store_pending_deployment(deployment_id, deployment_data)
 
-            try:
-                status, payload = await action_func(clients=clients, tags=tags, dry_run=True, **params)
-                if status == "plan":
-                    detailed_plan = {
-                        "deployment_id": deployment_id,
-                        "deployment_plan": payload,
-                        "action": canonical_action,
-                        "parameters": params,
-                        "confirmation_required": True,
-                        "next_steps": [
-                            "Review the deployment details above carefully",
-                            "To proceed with actual deployment: 'deploy confirmed' or 'execute deployment'",
-                            "To cancel: 'cancel deployment' or 'abort'",
-                        ],
-                        "estimated_resources": extract_resource_summary(payload),
-                        "environment": env,
-                        "resource_group": params.get("resource_group"),
-                        "location": params.get("location"),
-                        "cost_warning": "This will create real Azure resources and may incur charges",
-                    }
-                    return ok(f"Deployment Plan Ready - {canonical_action} (ID: {deployment_id})", detailed_plan)
+            params["dry_run"] = False
+            logger.info(f"Calling action function with params: {params}")
+            status, payload = await action_func(clients=clients, tags=tags, **params)
+            logger.info(f"Action function returned: status={status}, payload={payload}")
+            if status == "plan":
+                detailed_plan = {
+                    "deployment_id": deployment_id,
+                    "deployment_plan": payload,
+                    "action": canonical_action,
+                    "parameters": params,
+                    "confirmation_required": False,
+                    "next_steps": [],
+                    "estimated_resources": extract_resource_summary(payload),
+                    "environment": env,
+                    "resource_group": params.get("resource_group"),
+                    "location": params.get("location"),
+                }
+                return ok(f"Deployment Executed Plan - {canonical_action}", detailed_plan)
 
-                estimated_cost = estimate_basic_cost(canonical_action, params)
-                detailed_preview = {
-                    "deployment_id": deployment_id,
-                    "action": canonical_action,
-                    "parameters": params,
-                    "confirmation_required": True,
-                    "resource_details": build_resource_preview(canonical_action, params),
-                    "estimated_cost": estimated_cost,
-                    "next_steps": [
-                        "Review the resource configuration above",
-                        "To proceed with actual deployment: 'deploy confirmed' or 'execute deployment'",
-                        "To cancel: 'cancel deployment' or 'abort'",
-                    ],
-                    "environment": env,
-                    "cost_warning": "This will create real Azure resources and may incur charges",
-                }
-                return ok(f"Deployment Preview Ready - {canonical_action} (ID: {deployment_id})", detailed_preview)
-            except Exception as e:
-                estimated_cost = estimate_basic_cost(canonical_action, params)
-                fallback_preview = {
-                    "deployment_id": deployment_id,
-                    "action": canonical_action,
-                    "parameters": params,
-                    "confirmation_required": True,
-                    "resource_details": build_resource_preview(canonical_action, params),
-                    "estimated_cost": estimated_cost,
-                    "planning_error": str(e),
-                    "next_steps": [
-                        "Detailed planning failed, showing basic configuration above",
-                        "To proceed with deployment anyway: 'deploy confirmed'",
-                        "To cancel: 'cancel deployment' or 'abort'",
-                    ],
-                    "environment": env,
-                    "cost_warning": "This will create real Azure resources and may incur charges",
-                }
-                return ok(f"Basic Preview Ready - {canonical_action} (ID: {deployment_id})", fallback_preview)
+            bicep_code = generate_bicep_code(canonical_action, params)
+            terraform_code = generate_terraform_code(canonical_action, params)
+            resource_preview = build_resource_preview(canonical_action, params)
+            cost_estimate = estimate_basic_cost(canonical_action, params)
+            
+            executed = {
+                "deployment_id": deployment_id,
+                "action": canonical_action,
+                "status": "deployment_completed",
+                "summary": f"Successfully deployed {get_resource_display_name(canonical_action)} '{params.get('name', 'resource')}' in {params.get('location', 'westeurope')}",
+                "parameters": params,
+                "result": payload,
+                "environment": env,
+                "resource_details": resource_preview,
+                "cost_estimate": cost_estimate,
+                "infrastructure_code": {"bicep": bicep_code, "terraform": terraform_code},
+                "subscription_id": params.get("subscription_id"),
+                "resource_group": params.get("resource_group"),
+                "location": params.get("location"),
+            }
+            return ok(f"Deployment Executed - {canonical_action}", executed)
         except Exception as e:
             msg = str(e)
             if "AccountKey" in msg or "password" in msg.lower():

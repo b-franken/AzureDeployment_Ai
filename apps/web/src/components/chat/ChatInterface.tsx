@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils"
 import LLMSelector from "@/components/chat/LLMSelector"
 import { ReviewButton } from "@/components/chat/ReviewButton"
 import { DeployButton } from "@/components/chat/DeployButton"
+import MessageContent from "@/components/chat/MessageContent"
 import { chat as call_chat, API_BASE_URL } from "@/lib/api"
 import { chatStream } from "@/lib/stream"
 import { connectChatWs, ChatSocket } from "@/lib/ws"
@@ -71,11 +72,7 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
 
     useEffect(() => {
         if (transport !== "ws") return
-        const client = connectChatWs(
-            (delta) => {
-
-            }
-        )
+        const client = connectChatWs(() => { })
         wsRef.current = client
         return () => {
             wsRef.current?.close()
@@ -85,7 +82,6 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
 
     const handleSend = async () => {
         if (!input.trim() || isLoading) return
-
         if (abortControllerRef.current) abortControllerRef.current.abort()
 
         const now = new Date()
@@ -94,24 +90,24 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
         setInput("")
         setIsLoading(true)
 
+        // create assistant placeholder message before starting network calls
+        const assistantId = crypto.randomUUID()
+        setMessages((prev) => [...prev, { id: assistantId, role: "assistant", content: "", timestamp: new Date() }])
+
         try {
             const history = [...messages, userMessage].map((m) => ({ role: m.role, content: m.content }))
             const { provider, model } = splitModel(modelId)
 
-            const assistantId = crypto.randomUUID()
-            const assistantMsg: ChatMsg = { id: assistantId, role: "assistant", content: "", timestamp: new Date() }
-            setMessages((prev) => [...prev, assistantMsg])
+            const intentDeploy = /\b(proceed|confirm|deploy confirmed)\b/i.test(userMessage.content)
+            const doDeploy = deployToolsEnabled || intentDeploy
 
-            if (!deployToolsEnabled) {
-                // Use SSE streaming for responses; connectChatWs handles streaming
+            if (!doDeploy) {
                 abortControllerRef.current = new AbortController()
                 const fullContent = await chatStream(
                     API_BASE_URL,
                     { input: userMessage.content, memory: history.slice(0, -1), provider, model, enable_tools: false },
                     (delta: string) => {
-                        setMessages((prev) =>
-                            prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + delta } : m))
-                        )
+                        setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + delta } : m)))
                     },
                     abortControllerRef.current.signal
                 )
@@ -119,13 +115,27 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
                     prev.map((m) => (m.id === assistantId ? { ...m, content: fullContent, timestamp: new Date() } : m))
                 )
             } else {
-                const reply = await call_chat(userMessage.content, history.slice(0, -1), provider, model, true)
-                setMessages((prev) =>
-                    prev.map((m) => (m.id === assistantId ? { ...m, content: reply, timestamp: new Date() } : m))
-                )
+                try {
+                    const reply = await call_chat(
+                        userMessage.content,
+                        history.slice(0, -1),
+                        { provider, model, enable_tools: true, dry_run: false }
+                    )
+                    setMessages((prev) =>
+                        prev.map((m) => (m.id === assistantId ? { ...m, content: reply, timestamp: new Date() } : m))
+                    )
+                } catch (deployError: any) {
+                    const errorMsg = `Deployment failed: ${deployError?.message || 'Unknown error'}.\n\nPlease try again or check your Azure configuration.`
+                    setMessages((prev) =>
+                        prev.map((m) => (m.id === assistantId ? { ...m, content: errorMsg, timestamp: new Date() } : m))
+                    )
+                }
             }
-        } catch {
-            setMessages((prev) => prev.slice(0, -1))
+        } catch (error: any) {
+            const errorMsg = `Request failed: ${error?.message || 'Unknown error'}`
+            setMessages((prev) =>
+                prev.map((m) => (m.id === assistantId ? { ...m, content: errorMsg, timestamp: new Date() } : m))
+            )
         } finally {
             setIsLoading(false)
             inputRef.current?.focus()
@@ -189,11 +199,16 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
                                 )}
                                 <div
                                     className={cn(
-                                        "relative max-w-[80%] rounded-xl px-4 py-3 group",
-                                        message.role === "user" ? "border border-blue-500/30 bg-gradient-to-r from-blue-500/20 to-cyan-500/20" : "glass"
+                                        "relative rounded-xl px-4 py-3 group",
+                                        message.role === "user" 
+                                            ? "max-w-[80%] bg-blue-500 text-white" 
+                                            : "max-w-[95%] bg-blue-600 text-black"
                                     )}
                                 >
-                                    <p className="whitespace-pre-wrap text-sm">{message.content}</p>
+                                    <MessageContent
+                                        content={message.content}
+                                        onCopy={(text) => handleCopy(text, message.id)}
+                                    />
                                     <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
                                         <span>{message.timestamp.toLocaleTimeString()}</span>
                                         <Button

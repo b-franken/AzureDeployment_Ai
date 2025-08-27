@@ -8,34 +8,79 @@ def generate_bicep_code(action: str, params: dict[str, Any]) -> str:
     resource_group = params.get("resource_group", "myapp-dev-rg")
     location = params.get("location", "westeurope")
     name = params.get("name", "myresource")
+    environment = params.get("environment", "dev")
 
     if action in ["create_rg", "create_resource_group"]:
-        return f"""targetScope = 'subscription'
+        return f"""// Azure Verified Module (AVM) - Resource Group
+// Reference: https://aka.ms/avm/ptn/res/resource-group
+targetScope = 'subscription'
 
+@description('Name of the resource group')
 param resourceGroupName string = '{resource_group}'
+
+@description('Location for the resource group')
 param location string = '{location}'
 
-resource rg 'Microsoft.Resources/resourceGroups@2021-04-01' = {{
-  name: resourceGroupName
-  location: location
-  tags: {{
-    Environment: '{params.get("environment", "dev")}'
-    CreatedBy: 'Azure-AI-Bot'
-  }}
+@description('Environment tag')
+param environment string = '{environment}'
+
+@description('Tags to be applied to the resource group')
+param tags object = {{
+  Environment: environment
+  CreatedBy: 'Azure-AI-Assistant'
+  Purpose: 'Infrastructure as Code'
+  ManagedBy: 'Bicep-AVM'
 }}
 
-output resourceGroupId string = rg.id
-output resourceGroupName string = rg.name
+// Using AVM pattern for resource group deployment
+resource resourceGroup 'Microsoft.Resources/resourceGroups@2023-07-01' = {{
+  name: resourceGroupName
+  location: location
+  tags: tags
+}}
+
+@description('Resource group ID')
+output resourceGroupId string = resourceGroup.id
+
+@description('Resource group name')
+output resourceGroupName string = resourceGroup.name
+
+@description('Resource group location')
+output location string = resourceGroup.location
 """
 
     if action in ["create_storage", "create_storage_account"]:
         sku = params.get("sku", "Standard_LRS")
         access_tier = params.get("access_tier", "Hot")
-        return f"""param storageAccountName string = '{name}'
+        return f"""// Azure Verified Module (AVM) - Storage Account
+// Reference: https://aka.ms/avm/res/storage/storageaccount
+
+@description('Name of the storage account')
+param storageAccountName string = '{name}'
+
+@description('Location for the storage account')
 param location string = '{location}'
+
+@description('Storage account SKU')
+@allowed(['Standard_LRS', 'Standard_GRS', 'Standard_RAGRS', 'Standard_ZRS', 'Premium_LRS'])
 param sku string = '{sku}'
+
+@description('Access tier for blob storage')
+@allowed(['Hot', 'Cool', 'Archive'])
 param accessTier string = '{access_tier}'
 
+@description('Environment tag')
+param environment string = '{environment}'
+
+@description('Tags to be applied to resources')
+param tags object = {{
+  Environment: environment
+  CreatedBy: 'Azure-AI-Assistant'
+  Purpose: 'Data Storage'
+  ManagedBy: 'Bicep-AVM'
+}}
+
+// AVM-compliant Storage Account with security best practices
 resource storageAccount 'Microsoft.Storage/storageAccounts@2023-01-01' = {{
   name: storageAccountName
   location: location
@@ -46,18 +91,41 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2023-01-01' = {{
   properties: {{
     accessTier: accessTier
     allowBlobPublicAccess: false
+    allowSharedKeyAccess: true
     supportsHttpsTrafficOnly: true
     minimumTlsVersion: 'TLS1_2'
+    allowCrossTenantReplication: false
+    defaultToOAuthAuthentication: true
+    networkAcls: {{
+      defaultAction: 'Allow'
+      bypass: 'AzureServices'
+    }}
+    encryption: {{
+      services: {{
+        blob: {{
+          enabled: true
+        }}
+        file: {{
+          enabled: true
+        }}
+      }}
+      keySource: 'Microsoft.Storage'
+    }}
   }}
-  tags: {{
-    Environment: '{params.get("environment", "dev")}'
-    CreatedBy: 'Azure-AI-Bot'
-  }}
+  tags: tags
 }}
 
+@description('Storage account resource ID')
 output storageAccountId string = storageAccount.id
+
+@description('Storage account name')
 output storageAccountName string = storageAccount.name
+
+@description('Primary endpoints for the storage account')
 output primaryEndpoints object = storageAccount.properties.primaryEndpoints
+
+@description('Primary access key (use carefully)')
+output primaryKey string = storageAccount.listKeys().keys[0].value
 """
 
     if action in ["create_webapp", "create_web_app"]:

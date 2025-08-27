@@ -154,8 +154,7 @@ export type ChatRequest = {
   provider?: string | null
   model?: string | null
   enable_tools?: boolean
-  preferred_tool?: string | null
-  allowlist?: string[] | null
+  correlation_id?: string
   dry_run?: boolean
   subscription_id?: string | null
   resource_group?: string | null
@@ -238,18 +237,7 @@ export async function chat(
 
 export async function chatV2(
   token: string | null,
-  body: {
-    input: string
-    memory?: ChatMsg[]
-    provider?: string | null
-    model?: string | null
-    enable_tools?: boolean
-    correlation_id?: string
-    dry_run?: boolean
-    subscription_id?: string | null
-    resource_group?: string | null
-    environment?: string
-  }
+  body: ChatRequest
 ): Promise<ChatV2Response> {
   const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {}
   return apiClient.post<ChatV2Response>("/api/chat/v2", body, { headers, context: "chat-v2" })
@@ -330,4 +318,16 @@ export async function rejectDeployRequest(token: string, id: string): Promise<{ 
 export async function deployRequestById(token: string, id: string): Promise<{ ok: true }> {
   const headers: HeadersInit = { Authorization: `Bearer ${token}` }
   return apiClient.post(`/api/deploy/requests/${encodeURIComponent(id)}/deploy`, {}, { headers, context: "deploy/deploy" })
+}
+
+export type ChatResponse = {
+  message: string
+  summary?: string
+  bicep?: string
+  terraform?: string
+  runId?: string
+}
+
+export async function sendChat(input: { message: string; deploy: boolean }): Promise<ChatResponse> {
+  return apiClient.post<ChatResponse>("/api/chat", input, { context: "chat-deploy" })
 }

@@ -292,12 +292,15 @@ async def _run_tool(
     if not tool:
         return {"ok": False, "summary": f"tool {name} not found", "output": ""}
 
-    logger.info(f"About to execute tool {name} with merged_args: {merged_args}")
+    logger.info(
+        f"About to execute tool {name} with merged_args: {merged_args}")
     try:
         raw = await tool.run(**merged_args)
-        logger.info(f"Tool {name} execution completed successfully, result: {raw}")
+        logger.info(
+            f"Tool {name} execution completed successfully, result: {raw}")
     except Exception as e:
-        logger.error(f"Tool {name} execution failed with exception: {str(e)}", exc_info=True)
+        logger.error(
+            f"Tool {name} execution failed with exception: {str(e)}", exc_info=True)
         raise
     result = raw if isinstance(raw, dict) else {
         "ok": True, "summary": "", "output": raw}
@@ -345,9 +348,12 @@ async def _openai_tools_orchestrator(
         {
             "role": "system",
             "content": (
-                "You are a DevOps assistant. an expert in infrastructure, "
+                "You are a DevOps assistant, an expert in infrastructure, "
                 "CI/CD, Kubernetes, Terraform, cloud platforms, monitoring, and automation. "
-                "Provide accurate, concise, production-ready guidance."
+                "Provide accurate, concise, production-ready guidance.\n\n"
+                "IMPORTANT: When a tool execution succeeds (status='created', 'deployed', or 'exists'), "
+                "the task is COMPLETE. Do NOT call the same tool again. "
+                "If a resource already exists, that means the request was fulfilled successfully."
             ),
         }
     ]
@@ -355,10 +361,10 @@ async def _openai_tools_orchestrator(
         messages.extend([{"role": m["role"], "content": m["content"]}
                         for m in memory])
     messages.append({"role": "user", "content": user_input})
-    
+
     # Track rich formatted responses from tools
     last_rich_response: str | None = None
-    
+
     if not allow_chaining:
         try:
             first = await llm.chat_raw(
@@ -386,19 +392,19 @@ async def _openai_tools_orchestrator(
         tname = (fn.get("name") or "").strip()
         args = _pick_args(fn.get("arguments") or {})
         result = await _run_tool(tname, args, context)
-        
-        # Check if this tool result contains rich formatted content (infrastructure code)
-        if (isinstance(result, dict) and 
-            isinstance(result.get("output"), str) and 
-            ("## Bicep Infrastructure Code" in result.get("output", "") or 
+
+        if (isinstance(result, dict) and
+            isinstance(result.get("output"), str) and
+            ("## Bicep Infrastructure Code" in result.get("output", "") or
              "## Terraform Infrastructure Code" in result.get("output", ""))):
             output = result.get("output")
-            # Store in context for services layer access
+
             if context:
                 context.last_tool_output = output
-            logger.info(f"Found infrastructure code in {tname} output (single call), returning directly")
+            logger.info(
+                f"Found infrastructure code in {tname} output (single call), returning directly")
             return output
-        
+
         body = result.get("output") if isinstance(result, dict) else result
         if isinstance(body, dict):
             body = json.dumps(body, ensure_ascii=False, indent=2)
@@ -423,8 +429,12 @@ async def _openai_tools_orchestrator(
         tool_calls = msg.get("tool_calls") or []
         if not tool_calls:
             content = (msg.get("content") or "").strip()
+            logger.info(
+                f"OpenAI orchestrator finished - no more tool calls requested (step {steps})")
             # If we have rich formatted content from tools, return that instead of generic response
             if last_rich_response:
+                logger.info(
+                    "Returning rich infrastructure response instead of generic OpenAI response")
                 return last_rich_response
             return content or None
         messages.append(
@@ -440,17 +450,55 @@ async def _openai_tools_orchestrator(
             tname = (fn.get("name") or "").strip()
             args = _pick_args(fn.get("arguments") or {})
             result = await _run_tool(tname, args, context)
-            
-            # Capture rich infrastructure responses to prioritize over generic OpenAI responses
+
             if isinstance(result, dict) and isinstance(result.get("output"), str):
                 output = result.get("output")
                 if ("## Bicep Infrastructure Code" in output or "## Terraform Infrastructure Code" in output):
                     last_rich_response = output
-                    # Store in context for services layer access
+
                     if context:
                         context.last_tool_output = output
-                    logger.info(f"Captured rich infrastructure response from {tname}")
+                    logger.info(
+                        f"Captured rich infrastructure response from {tname}")
+
+            # Professional completion detection logic - 2025 standards
+            result_summary = result.get("summary", "").lower() if isinstance(result, dict) else ""
+            result_output = result.get("output", "") if isinstance(result, dict) else ""
+            result_ok = result.get("ok") if isinstance(result, dict) else False
             
+            # Debug logging for detection analysis
+            logger.info(
+                f"COMPLETION DETECTION DEBUG: tool={tname}, result_type={type(result)}, "
+                f"ok={result_ok}, summary='{result.get('summary', '') if isinstance(result, dict) else 'N/A'}', "
+                f"output_length={len(result_output)}, has_bicep_code={'## Bicep Infrastructure Code' in result_output}, "
+                f"has_terraform_code={'## Terraform Infrastructure Code' in result_output}"
+            )
+            
+            is_successful_completion = (
+                isinstance(result, dict) and 
+                result_ok is True and (
+                    # Check summary for completion keywords
+                    any(keyword in result_summary for keyword in [
+                        "success", "deployed", "created", "completed", "executed"
+                    ]) or
+                    # Definitive completion: Infrastructure code generated
+                    ("## Bicep Infrastructure Code" in result_output or 
+                     "## Terraform Infrastructure Code" in result_output) or
+                    # For Azure operations: Any successful status with "ok": True
+                    (tname == "azure_provision" and result_ok is True)
+                )
+            )
+            
+            # Log completion detection for debugging
+            if is_successful_completion:
+                logger.info(
+                    f"SUCCESS DETECTED: {tname} - Breaking tool chain after execution #{steps}"
+                )
+            else:
+                logger.info(
+                    f"SUCCESS NOT DETECTED: {tname} - Continuing tool chain (execution #{steps})"
+                )
+
             messages.append(
                 {
                     "role": "tool",
@@ -460,6 +508,41 @@ async def _openai_tools_orchestrator(
                 }
             )
             steps += 1
+
+            # Professional chain breaking logic - 2025 standards  
+            if is_successful_completion and tname in ["azure_provision", "terraform_apply", "kubectl_apply"]:
+                logger.info(
+                    f"BREAKING TOOL CHAIN: {tname} completed successfully (execution #{steps}), "
+                    f"preventing further repetitions"
+                )
+                
+                # Always return rich response if available for infrastructure tools
+                if last_rich_response:
+                    logger.info(
+                        "Returning rich infrastructure response, chain terminated successfully"
+                    )
+                    return last_rich_response
+                
+                # If no rich response, construct one from the successful result  
+                logger.info(
+                    "No rich response available, constructing response from successful result"
+                )
+                output = result.get("output", str(result))
+                return output if isinstance(output, str) else json.dumps(result, indent=2)
+            
+            # Additional safety check: if we've executed the same tool multiple times successfully, break the chain
+            if (tname == "azure_provision" and steps >= 2 and 
+                isinstance(result, dict) and result.get("ok") is True):
+                logger.info(
+                    f"SAFETY BREAK: azure_provision executed {steps} times successfully, "
+                    f"terminating to prevent loops"
+                )
+                
+                if last_rich_response:
+                    return last_rich_response
+                    
+                output = result.get("output", str(result))
+                return output if isinstance(output, str) else json.dumps(result, indent=2)
     try:
         final = await llm.chat_raw(
             model=selected_model,
@@ -476,13 +559,14 @@ async def _openai_tools_orchestrator(
         return None
     msgf = choicesf[0]["message"]
     content = (msgf.get("content") or "").strip()
-    
-    # Return rich formatted infrastructure content if available, otherwise use OpenAI response
+
     if last_rich_response:
-        logger.info("Returning rich infrastructure response instead of generic OpenAI response")
+        logger.info(
+            "Returning rich infrastructure response instead of generic OpenAI response")
         return last_rich_response
-    
-    logger.info(f"No rich content captured, returning OpenAI response: {content[:100]}{'...' if content and len(content) > 100 else ''}")
+
+    logger.info(
+        f"No rich content captured, returning OpenAI response: {content[:100]}{'...' if content and len(content) > 100 else ''}")
     return content or None
 
 
@@ -522,7 +606,7 @@ async def maybe_call_tool(
         f"maybe_call_tool: user_input='{user_input[:100]}...' provider={provider} model={model} enable_tools={enable_tools}"
     )
     await _log_request(user_input, context)
-    # Skip classifier predictions in development mode to reduce embedding calls
+
     if context and context.classifier and settings.environment != "development":
         try:
             _ = context.classifier.predict_proba([user_input])
@@ -558,7 +642,7 @@ async def maybe_call_tool(
         if allowlist:
             allowed = set(allowlist)
             tools = [t for t in tools if t.name in allowed]
-        # Use OpenAI orchestrator - it handles tool chaining internally
+
         via_openai = await _openai_tools_orchestrator(
             user_input,
             memory,
@@ -571,8 +655,6 @@ async def maybe_call_tool(
             context=context,
         )
 
-        # If OpenAI orchestrator succeeded, return the result directly
-        # Do NOT re-parse it as this causes infinite loops
         if isinstance(via_openai, str) and via_openai.strip():
             logger.info(
                 "OpenAI orchestrator completed successfully, returning result directly")

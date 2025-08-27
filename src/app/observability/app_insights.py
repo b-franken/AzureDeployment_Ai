@@ -8,6 +8,8 @@ from typing import Any
 from azure.monitor.opentelemetry import configure_azure_monitor
 from opentelemetry import metrics, trace
 from opentelemetry.sdk.resources import Resource
+from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+from opentelemetry.instrumentation.requests import RequestsInstrumentor
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -70,18 +72,44 @@ class ApplicationInsights:
             resource=resource,
             logger_name="app",
             instrumentation_options={
-                "fastapi": {"enabled": True},
+                "fastapi": {
+                    "enabled": True,
+                    "record_exception": True,
+                    "capture_headers": True,
+                },
                 "psycopg2": {"enabled": True},
                 "django": {"enabled": False},
                 "flask": {"enabled": False},
-                "azure_sdk": {"enabled": True},
-                "httpx": {"enabled": True},
-                "requests": {"enabled": True},
-                "urllib": {"enabled": True},
-                "urllib3": {"enabled": True},
+                "azure_sdk": {
+                    "enabled": True,
+                    "record_exception": True,
+                },
+                "httpx": {
+                    "enabled": True,
+                    "record_exception": True,
+                    "capture_request_headers": True,
+                    "capture_response_headers": True,
+                    "skip_dep_check": True,
+                },
+                "requests": {
+                    "enabled": True,
+                    "record_exception": True,
+                    "capture_request_headers": True,
+                    "capture_response_headers": True,
+                },
+                "urllib": {
+                    "enabled": True,
+                    "record_exception": True,
+                },
+                "urllib3": {
+                    "enabled": True,
+                    "record_exception": True,
+                },
             },
         )
 
+        # Explicitly instrument HTTP clients for OpenAI visibility
+        self._setup_http_instrumentation()
         self._setup_custom_metrics()
         self._configure_logger_levels()
 
@@ -209,6 +237,86 @@ class ApplicationInsights:
                 continue  # Skip logger objects
             sanitized[key] = value
         return sanitized
+
+    def _setup_http_instrumentation(self) -> None:
+        """Explicitly set up HTTP client instrumentation for comprehensive request tracking."""
+        try:
+            # Instrument HTTPX for OpenAI API calls
+            HTTPXClientInstrumentor().instrument(
+                tracer_provider=trace.get_tracer_provider(),
+                request_hook=self._http_request_hook,
+                response_hook=self._http_response_hook,
+            )
+            
+            # Instrument Requests library as fallback
+            RequestsInstrumentor().instrument(
+                tracer_provider=trace.get_tracer_provider(),
+                request_hook=self._http_request_hook,
+                response_hook=self._http_response_hook,
+            )
+            
+            logger.info("HTTP client instrumentation configured successfully")
+            
+        except Exception as e:
+            logger.warning(f"Failed to configure HTTP instrumentation: {e}")
+
+    def _http_request_hook(self, span: Any, request: Any) -> None:
+        """Hook to enrich HTTP request spans with additional context."""
+        try:
+            if hasattr(request, 'url'):
+                url = str(request.url)
+                
+                # Add OpenAI-specific attributes
+                if 'api.openai.com' in url:
+                    span.set_attribute("llm.vendor", "openai")
+                    span.set_attribute("http.url.domain", "api.openai.com")
+                    
+                    # Extract model from request body for completions
+                    if hasattr(request, 'content') and request.content:
+                        try:
+                            import json
+                            body = json.loads(request.content.decode('utf-8'))
+                            if isinstance(body, dict) and 'model' in body:
+                                span.set_attribute("llm.request.model", body['model'])
+                        except Exception:
+                            pass
+                            
+                # Add general HTTP context
+                span.set_attribute("http.request.method", getattr(request, 'method', 'unknown'))
+                span.set_attribute("component", "http_client")
+                
+        except Exception as e:
+            logger.debug(f"HTTP request hook error: {e}")
+
+    def _http_response_hook(self, span: Any, request: Any, response: Any) -> None:
+        """Hook to enrich HTTP response spans with additional context."""
+        try:
+            if hasattr(response, 'status_code'):
+                span.set_attribute("http.response.status_code", response.status_code)
+                
+                # Add success/error classification
+                if 200 <= response.status_code < 400:
+                    span.set_attribute("http.response.success", True)
+                else:
+                    span.set_attribute("http.response.success", False)
+                    
+            # For OpenAI responses, try to extract token usage
+            if hasattr(request, 'url') and 'api.openai.com' in str(request.url):
+                if hasattr(response, 'content'):
+                    try:
+                        import json
+                        response_data = json.loads(response.content.decode('utf-8'))
+                        if isinstance(response_data, dict) and 'usage' in response_data:
+                            usage = response_data['usage']
+                            if isinstance(usage, dict):
+                                for key, value in usage.items():
+                                    if isinstance(value, (int, float)):
+                                        span.set_attribute(f"llm.usage.{key}", value)
+                    except Exception:
+                        pass
+                        
+        except Exception as e:
+            logger.debug(f"HTTP response hook error: {e}")
 
     def _configure_logger_levels(self) -> None:
         """Configure third-party logger levels based on application settings."""

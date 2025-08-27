@@ -45,6 +45,7 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
     const scrollRef = useRef<HTMLDivElement>(null)
     const inputRef = useRef<HTMLTextAreaElement>(null)
     const abortControllerRef = useRef<AbortController | null>(null)
+    const pendingRequestRef = useRef<string | null>(null) // Track pending requests to prevent duplicates
 
     const transport = useMemo<"sse" | "ws">(
         () =>
@@ -91,13 +92,26 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
     const handleSend = async () => {
         if (!input.trim() || isLoading) return
 
+        // Create a unique request ID to prevent duplicates
+        const requestId = crypto.randomUUID()
+        const currentInput = input.trim()
+        
+        // Check for duplicate requests (same content already pending)
+        if (pendingRequestRef.current === currentInput) {
+            console.warn("Duplicate request detected, skipping")
+            return
+        }
+
         if (abortControllerRef.current) abortControllerRef.current.abort()
+
+        // Set pending request tracking
+        pendingRequestRef.current = currentInput
 
         const now = new Date()
         const userMessage: ChatMsg = {
             id: crypto.randomUUID(),
             role: "user",
-            content: input,
+            content: currentInput,
             timestamp: now,
         }
         setMessages((prev) => [...prev, userMessage])
@@ -194,6 +208,10 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
             setIsLoading(false)
             inputRef.current?.focus()
             abortControllerRef.current = null
+            // Clear pending request tracking when done
+            if (pendingRequestRef.current === currentInput) {
+                pendingRequestRef.current = null
+            }
         }
     }
 

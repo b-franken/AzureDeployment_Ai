@@ -29,6 +29,16 @@ class APIClient {
     this.timeoutMs = opts?.timeoutMs ?? REQUEST_TIMEOUT_MS
   }
 
+  private shouldRetryForPath(path: string, attempt: number): boolean {
+    // Chat requests should have minimal retries to prevent duplicate conversations
+    if (path.includes('/api/chat')) {
+      return attempt === 0 // Only 1 retry for chat requests
+    }
+    
+    // Other API calls can use normal retry logic
+    return attempt < this.maxRetries
+  }
+
   private isRetryableStatus(status?: number) {
     return !!status && [408, 429, 500, 502, 503, 504].includes(status)
   }
@@ -88,7 +98,7 @@ class APIClient {
               : ""
         const message = messageFromBody || `${init.context || "request"} failed ${res.status}`
         const err = new ApiError(message, undefined, res.status, detail)
-        if (attempt < this.maxRetries && this.isRetryableStatus(res.status)) {
+        if (this.shouldRetryForPath(path, attempt) && this.isRetryableStatus(res.status)) {
           const retryAfter = this.parseRetryAfter(res.headers.get("retry-after"))
           await this.delay(this.nextDelay(attempt, retryAfter))
           return this.request<T>(path, init, attempt + 1)
@@ -101,7 +111,7 @@ class APIClient {
       return (await res.text()) as unknown as T
     } catch (e) {
       if (e instanceof ApiError) {
-        if (attempt < this.maxRetries && this.isRetryableStatus(e.status)) {
+        if (this.shouldRetryForPath(path, attempt) && this.isRetryableStatus(e.status)) {
           await this.delay(this.nextDelay(attempt))
           return this.request<T>(path, init, attempt + 1)
         }
@@ -109,7 +119,7 @@ class APIClient {
       }
       const isTimeout = e instanceof Error && e.name === "AbortError"
       const wrapped = new ApiError(isTimeout ? `${init.context || "request"} timed out` : `${init.context || "request"} error`, e)
-      if (attempt < this.maxRetries && (isTimeout || this.isNetworkError(e))) {
+      if (this.shouldRetryForPath(path, attempt) && (isTimeout || this.isNetworkError(e))) {
         await this.delay(this.nextDelay(attempt))
         return this.request<T>(path, init, attempt + 1)
       }

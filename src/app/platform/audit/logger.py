@@ -563,4 +563,4 @@ class AuditLogger:
             )
         except Exception:
             logger.error("audit_alert_failed", exc_info=True)
-            return None
+            return

@@ -47,7 +47,7 @@ async def azure_auth(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=401, detail="invalid token") from err
 
     scopes = set((claims.get("scp") or "").split())
-    roles_list = cast(Sequence[str], claims.get("roles") or [])
+    roles_list = cast("Sequence[str]", claims.get("roles") or [])
     roles = set(roles_list)
 
     return {
@@ -56,5 +56,5 @@ async def azure_auth(request: Request) -> dict[str, Any]:
         "email": claims.get("preferred_username") or claims.get("upn"),
         "scopes": scopes,
         "roles": roles,
-        "exp": datetime.fromtimestamp(int(cast(str | int, claims["exp"]))),
+        "exp": datetime.fromtimestamp(int(cast("str | int", claims["exp"]))),
     }

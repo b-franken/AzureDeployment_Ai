@@ -292,28 +292,28 @@ class UnifiedDataLayer:
     async def cache_delete(self, key: str) -> None:
         if self._redis:
             await self._redis.delete(key)
-    
+
     # Delegation methods for AsyncMemoryStore compatibility
     async def execute(self, query: str, *args: Any) -> str:
         if not self._postgres:
             raise RuntimeError("postgres not configured")
         return await self._postgres.execute(query, *args)
-    
+
     async def fetch(self, query: str, *args: Any) -> list[asyncpg.Record]:
         if not self._postgres:
-            raise RuntimeError("postgres not configured") 
+            raise RuntimeError("postgres not configured")
         return await self._postgres.fetch(query, *args)
-    
+
     async def fetchrow(self, query: str, *args: Any) -> asyncpg.Record | None:
         if not self._postgres:
             raise RuntimeError("postgres not configured")
         return await self._postgres.fetchrow(query, *args)
-    
+
     async def fetchval(self, query: str, *args: Any) -> Any:
         if not self._postgres:
             raise RuntimeError("postgres not configured")
         return await self._postgres.fetchval(query, *args)
-    
+
     @asynccontextmanager
     async def connection(self) -> AsyncIterator[asyncpg.Connection]:
         # Alias for transaction for backward compatibility

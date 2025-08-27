@@ -10,7 +10,7 @@ def _normalize_backend(value: str | None) -> backendname | None:
         return None
     v = value.strip().lower()
     if v in ("sdk", "terraform", "bicep"):
-        return cast(backendname, v)
+        return cast("backendname", v)
     return None
 
 

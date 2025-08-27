@@ -71,11 +71,12 @@ class Agent(ABC, Generic[TState, TResult]):
                 success=result.success, planning_time=planning_time, execution_time=execution_time
             )
             self.status = AgentStatus.COMPLETED if result.success else AgentStatus.FAILED
-            return result
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, AttributeError) as e:
             self.status = AgentStatus.FAILED
             self._update_metrics(success=False)
             return ExecutionResult(success=False, error=str(e), execution_time=datetime.utcnow())
+        else:
+            return result
 
     def _update_metrics(
         self, success: bool, planning_time: float | None = None, execution_time: float | None = None

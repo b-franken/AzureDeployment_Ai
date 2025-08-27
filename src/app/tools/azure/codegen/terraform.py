@@ -9,18 +9,18 @@ def generate_terraform_code(action: str, params: dict[str, Any]) -> str:
     location = params.get("location", "westeurope")
     name = params.get("name", "myresource")
 
-    terraform_config = f"""terraform {{
-  required_providers {{
-    azurerm = {{
+    terraform_config = """terraform {
+  required_providers {
+    azurerm = {
       source  = "hashicorp/azurerm"
       version = "~>3.0"
-    }}
-  }}
-}}
+    }
+  }
+}
 
-provider "azurerm" {{
-  features {{}}
-}}
+provider "azurerm" {
+  features {}
+}
 
 """
 

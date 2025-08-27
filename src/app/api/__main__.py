@@ -12,16 +12,20 @@ def main() -> None:
         level=settings.log_level,
         fmt=settings.observability.log_format,
         log_file=settings.observability.log_file,
-        max_bytes=settings.observability.log_rotation_size_mb * 1024 * 1024 if settings.observability.log_rotation_size_mb else None,
+        max_bytes=(
+            settings.observability.log_rotation_size_mb * 1024 * 1024
+            if settings.observability.log_rotation_size_mb
+            else None
+        ),
         retention=settings.observability.log_retention_days,
         enable_console=True,
         context={
             "service": settings.observability.otel_service_name,
             "version": settings.app_version,
             "environment": settings.environment,
-        }
+        },
     )
-    
+
     uvicorn.run(
         "app.api.main:app",
         host=API_HOST,

@@ -28,14 +28,14 @@ class RedisCache(CacheBackend):
     async def _client_or_init(self) -> Redis:
         if self._client is None:
             self._client = Redis(connection_pool=self._pool)
-            fut = cast(Awaitable[bool], self._client.ping())
+            fut = cast("Awaitable[bool]", self._client.ping())
             await fut
         return self._client
 
     async def get(self, key: str) -> Any | None:
         try:
             cli = await self._client_or_init()
-            fut = cast(Awaitable[bytes | None], cli.get(key))
+            fut = cast("Awaitable[bytes | None]", cli.get(key))
             raw = await fut
             if raw is None:
                 return None
@@ -49,9 +49,9 @@ class RedisCache(CacheBackend):
             data = dumps(value)
             seconds = ttl if ttl is not None else self.default_ttl
             if seconds > 0:
-                fut = cast(Awaitable[bool], cli.setex(key, seconds, data))
+                fut = cast("Awaitable[bool]", cli.setex(key, seconds, data))
                 return await fut
-            fut = cast(Awaitable[bool], cli.set(key, data))
+            fut = cast("Awaitable[bool]", cli.set(key, data))
             return await fut
         except RedisError:
             raise
@@ -59,7 +59,7 @@ class RedisCache(CacheBackend):
     async def delete(self, *keys: str) -> int:
         try:
             cli = await self._client_or_init()
-            fut = cast(Awaitable[int], cli.delete(*keys))
+            fut = cast("Awaitable[int]", cli.delete(*keys))
             return await fut
         except RedisError:
             raise
@@ -67,7 +67,7 @@ class RedisCache(CacheBackend):
     async def exists(self, *keys: str) -> int:
         try:
             cli = await self._client_or_init()
-            fut = cast(Awaitable[int], cli.exists(*keys))
+            fut = cast("Awaitable[int]", cli.exists(*keys))
             return await fut
         except RedisError:
             raise
@@ -75,7 +75,7 @@ class RedisCache(CacheBackend):
     async def expire(self, key: str, seconds: int) -> bool:
         try:
             cli = await self._client_or_init()
-            fut = cast(Awaitable[bool], cli.expire(key, seconds))
+            fut = cast("Awaitable[bool]", cli.expire(key, seconds))
             return await fut
         except RedisError:
             raise
@@ -83,7 +83,7 @@ class RedisCache(CacheBackend):
     async def incr(self, key: str, amount: int = 1) -> int:
         try:
             cli = await self._client_or_init()
-            fut = cast(Awaitable[int], cli.incrby(key, amount))
+            fut = cast("Awaitable[int]", cli.incrby(key, amount))
             return await fut
         except RedisError:
             raise
@@ -91,7 +91,7 @@ class RedisCache(CacheBackend):
     async def decr(self, key: str, amount: int = 1) -> int:
         try:
             cli = await self._client_or_init()
-            fut = cast(Awaitable[int], cli.decrby(key, amount))
+            fut = cast("Awaitable[int]", cli.decrby(key, amount))
             return await fut
         except RedisError:
             raise
@@ -99,7 +99,7 @@ class RedisCache(CacheBackend):
     async def hset(self, name: str, key: str, value: Any) -> int:
         try:
             cli = await self._client_or_init()
-            fut = cast(Awaitable[int], cli.hset(name, key, dumps(value)))
+            fut = cast("Awaitable[int]", cli.hset(name, key, dumps(value)))
             return await fut
         except RedisError:
             raise
@@ -107,7 +107,7 @@ class RedisCache(CacheBackend):
     async def hget(self, name: str, key: str) -> Any | None:
         try:
             cli = await self._client_or_init()
-            fut = cast(Awaitable[bytes | None], cli.hget(name, key))
+            fut = cast("Awaitable[bytes | None]", cli.hget(name, key))
             raw = await fut
             if raw is None:
                 return None
@@ -118,7 +118,7 @@ class RedisCache(CacheBackend):
     async def hgetall(self, name: str) -> dict[str, Any]:
         try:
             cli = await self._client_or_init()
-            fut = cast(Awaitable[dict[bytes, bytes]], cli.hgetall(name))
+            fut = cast("Awaitable[dict[bytes, bytes]]", cli.hgetall(name))
             data = await fut
             out: dict[str, Any] = {}
             for k, v in data.items():
@@ -131,7 +131,7 @@ class RedisCache(CacheBackend):
         try:
             cli = await self._client_or_init()
             payload = [dumps(v) for v in values]
-            fut = cast(Awaitable[int], cli.lpush(key, *payload))
+            fut = cast("Awaitable[int]", cli.lpush(key, *payload))
             return await fut
         except RedisError:
             raise
@@ -140,10 +140,10 @@ class RedisCache(CacheBackend):
         try:
             cli = await self._client_or_init()
             if count is None:
-                fut_one = cast(Awaitable[bytes | None], cli.rpop(key))
+                fut_one = cast("Awaitable[bytes | None]", cli.rpop(key))
                 raw = await fut_one
                 return loads(raw) if raw is not None else None
-            fut_many = cast(Awaitable[list[bytes] | None], cli.rpop(key, count))
+            fut_many = cast("Awaitable[list[bytes] | None]", cli.rpop(key, count))
             raw_list = await fut_many
             if raw_list is None:
                 return None
@@ -155,21 +155,21 @@ class RedisCache(CacheBackend):
         try:
             cli = await self._client_or_init()
             if pattern is None:
-                fut_keys = cast(Awaitable[list[bytes]], cli.keys("*"))
+                fut_keys = cast("Awaitable[list[bytes]]", cli.keys("*"))
                 keys = await fut_keys
             else:
-                fut_keys = cast(Awaitable[list[bytes]], cli.keys(pattern))
+                fut_keys = cast("Awaitable[list[bytes]]", cli.keys(pattern))
                 keys = await fut_keys
             if not keys:
                 return 0
-            fut_del = cast(Awaitable[int], cli.delete(*keys))
+            fut_del = cast("Awaitable[int]", cli.delete(*keys))
             return await fut_del
         except RedisError:
             raise
 
     async def aclose(self) -> None:
         if self._client:
-            fut = cast(Awaitable[bool], self._client.close())
+            fut = cast("Awaitable[bool]", self._client.close())
             await fut
-        fut_pool = cast(Awaitable[None], self._pool.disconnect())
+        fut_pool = cast("Awaitable[None]", self._pool.disconnect())
         await fut_pool

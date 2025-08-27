@@ -84,7 +84,7 @@ def _error_response(
     error_code: str,
     message: str,
     detail: Any = None,
-    retry_after: int | float | None = None,
+    retry_after: float | None = None,
 ) -> JSONResponse:
     payload: dict[str, Any] = {
         "error_code": error_code,

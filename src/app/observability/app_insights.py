@@ -5,11 +5,17 @@ import logging
 import os
 from typing import Any
 
+# Import OpenTelemetry fixes for deprecation warnings - must be first
+from app.observability.otel_fixes import ensure_proper_otel_initialization
+
+# Apply fixes early
+ensure_proper_otel_initialization()
+
 from azure.monitor.opentelemetry import configure_azure_monitor
 from opentelemetry import metrics, trace
-from opentelemetry.sdk.resources import Resource
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 from opentelemetry.instrumentation.requests import RequestsInstrumentor
+from opentelemetry.sdk.resources import Resource
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -125,10 +131,10 @@ class ApplicationInsights:
 
         # Explicitly instrument HTTP clients for OpenAI visibility
         self._setup_http_instrumentation()
-        
+
         # Explicitly instrument database connections for PostgreSQL visibility
         self._setup_database_instrumentation()
-        
+
         self._setup_custom_metrics()
         self._configure_logger_levels()
 
@@ -216,10 +222,23 @@ class ApplicationInsights:
             },
         )
 
-    def track_custom_event(self, name: str, properties: dict[str, Any] | None = None) -> None:
+    def track_custom_event(
+        self,
+        name: str,
+        properties: dict[str, Any] | None = None,
+        measurements: dict[str, float] | None = None,
+    ) -> None:
         span = trace.get_current_span()
         if span:
-            span.add_event(name, attributes=properties or {})
+            # Combine properties and measurements into attributes
+            attributes = {}
+            if properties:
+                attributes.update(properties)
+            if measurements:
+                # Convert measurements to attributes
+                for key, value in measurements.items():
+                    attributes[f"measurement.{key}"] = value
+            span.add_event(name, attributes=attributes)
 
     def track_exception(
         self, exception: Exception, properties: dict[str, Any] | None = None
@@ -243,7 +262,7 @@ class ApplicationInsights:
 
             attributes.is_valid_attribute_value = patched_is_valid_attribute_value
             logger.debug("OpenTelemetry attribute validation patched successfully")
-        except Exception as e:
+        except (ImportError, AttributeError, TypeError) as e:
             logger.warning(f"Failed to patch OpenTelemetry attributes: {e}")
 
     def _sanitize_attributes(self, attrs: dict[str, Any]) -> dict[str, Any]:
@@ -266,26 +285,26 @@ class ApplicationInsights:
                 request_hook=self._http_request_hook,
                 response_hook=self._http_response_hook,
             )
-            
+
             # Instrument Requests library as fallback
             RequestsInstrumentor().instrument(
                 tracer_provider=trace.get_tracer_provider(),
                 request_hook=self._http_request_hook,
                 response_hook=self._http_response_hook,
             )
-            
+
             logger.info("HTTP client instrumentation configured successfully")
-            
-        except Exception as e:
+
+        except (ImportError, RuntimeError, ValueError) as e:
             logger.warning(f"Failed to configure HTTP instrumentation: {e}")
 
     def _setup_database_instrumentation(self) -> None:
-        """Explicitly set up database instrumentation for PostgreSQL visibility in Application Map."""
+        """Set up database instrumentation for PostgreSQL visibility in Application Map."""
         try:
             # Import and instrument AsyncPG if available
             try:
                 from opentelemetry.instrumentation.asyncpg import AsyncPGInstrumentor
-                
+
                 AsyncPGInstrumentor().instrument(
                     tracer_provider=trace.get_tracer_provider(),
                     enable_commenter=True,
@@ -298,91 +317,93 @@ class ApplicationInsights:
                     },
                 )
                 logger.info("AsyncPG database instrumentation configured successfully")
-                
+
             except ImportError:
                 logger.debug("AsyncPG instrumentation not available, skipping")
-            
+
             # Import and instrument psycopg2 if available (fallback)
             try:
                 from opentelemetry.instrumentation.psycopg2 import Psycopg2Instrumentor
-                
+
                 Psycopg2Instrumentor().instrument(
                     tracer_provider=trace.get_tracer_provider(),
                     enable_commenter=True,
                 )
                 logger.info("Psycopg2 database instrumentation configured successfully")
-                
+
             except ImportError:
                 logger.debug("Psycopg2 instrumentation not available, skipping")
-                
+
             logger.info("Database instrumentation setup completed")
-            
-        except Exception as e:
+
+        except (ImportError, RuntimeError, ValueError) as e:
             logger.warning(f"Failed to configure database instrumentation: {e}")
 
     def _http_request_hook(self, span: Any, request: Any) -> None:
         """Hook to enrich HTTP request spans with additional context."""
         try:
-            if hasattr(request, 'url'):
+            if hasattr(request, "url"):
                 url = str(request.url)
-                
+
                 # Add OpenAI-specific attributes
-                if 'api.openai.com' in url:
+                if "api.openai.com" in url:
                     span.set_attribute("llm.vendor", "openai")
                     span.set_attribute("http.url.domain", "api.openai.com")
-                    
+
                     # Extract model from request body for completions
-                    if hasattr(request, 'content') and request.content:
+                    if hasattr(request, "content") and request.content:
                         try:
                             import json
-                            body = json.loads(request.content.decode('utf-8'))
-                            if isinstance(body, dict) and 'model' in body:
-                                span.set_attribute("llm.request.model", body['model'])
-                        except Exception:
+
+                            body = json.loads(request.content.decode("utf-8"))
+                            if isinstance(body, dict) and "model" in body:
+                                span.set_attribute("llm.request.model", body["model"])
+                        except (ValueError, TypeError, KeyError, AttributeError):
                             pass
-                            
+
                 # Add general HTTP context
-                span.set_attribute("http.request.method", getattr(request, 'method', 'unknown'))
+                span.set_attribute("http.request.method", getattr(request, "method", "unknown"))
                 span.set_attribute("component", "http_client")
-                
-        except Exception as e:
+
+        except (AttributeError, TypeError, ValueError) as e:
             logger.debug(f"HTTP request hook error: {e}")
 
     def _http_response_hook(self, span: Any, request: Any, response: Any) -> None:
         """Hook to enrich HTTP response spans with additional context."""
         try:
-            if hasattr(response, 'status_code'):
+            if hasattr(response, "status_code"):
                 span.set_attribute("http.response.status_code", response.status_code)
-                
+
                 # Add success/error classification
                 if 200 <= response.status_code < 400:
                     span.set_attribute("http.response.success", True)
                 else:
                     span.set_attribute("http.response.success", False)
-                    
+
             # For OpenAI responses, try to extract token usage
-            if hasattr(request, 'url') and 'api.openai.com' in str(request.url):
-                if hasattr(response, 'content'):
+            if hasattr(request, "url") and "api.openai.com" in str(request.url):
+                if hasattr(response, "content"):
                     try:
                         import json
-                        response_data = json.loads(response.content.decode('utf-8'))
-                        if isinstance(response_data, dict) and 'usage' in response_data:
-                            usage = response_data['usage']
+
+                        response_data = json.loads(response.content.decode("utf-8"))
+                        if isinstance(response_data, dict) and "usage" in response_data:
+                            usage = response_data["usage"]
                             if isinstance(usage, dict):
                                 for key, value in usage.items():
-                                    if isinstance(value, (int, float)):
+                                    if isinstance(value, int | float):
                                         span.set_attribute(f"llm.usage.{key}", value)
-                    except Exception:
+                    except (ValueError, TypeError, KeyError, AttributeError):
                         pass
-                        
-        except Exception as e:
+
+        except (AttributeError, TypeError, ValueError) as e:
             logger.debug(f"HTTP response hook error: {e}")
 
     def _configure_logger_levels(self) -> None:
         """Configure third-party logger levels based on application settings."""
         # Get the configured log level from settings
         configured_level = getattr(logging, settings.log_level.upper(), logging.INFO)
-        
+
         # Azure SDK loggers - always at WARNING or higher to reduce noise unless debug mode
         if settings.debug:
             # In debug mode, let Azure logs through but still filter the noisiest ones
@@ -390,21 +411,21 @@ class ApplicationInsights:
         else:
             # In production/staging, keep Azure logs at WARNING or higher
             azure_level = max(configured_level, logging.WARNING)
-            
+
         logger.debug(
             "Configuring third-party logger levels",
             configured_level=settings.log_level,
             debug_mode=settings.debug,
             azure_level=logging.getLevelName(azure_level),
         )
-        
+
         # Azure SDK core loggers
         logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(azure_level)
         logging.getLogger("azure.monitor.opentelemetry").setLevel(azure_level)
         logging.getLogger("azure.core").setLevel(azure_level)
         logging.getLogger("azure.identity").setLevel(azure_level)
         logging.getLogger("azure.mgmt").setLevel(azure_level)
-        
+
         # HTTP client loggers - respect debug settings more granularly
         if settings.debug:
             logging.getLogger("httpx").setLevel(logging.DEBUG)
@@ -415,7 +436,7 @@ class ApplicationInsights:
             logging.getLogger("httpx").setLevel(logging.WARNING)
             logging.getLogger("urllib3").setLevel(logging.WARNING)
             logging.getLogger("requests").setLevel(logging.WARNING)
-            
+
         # OpenTelemetry loggers
         if settings.debug:
             logging.getLogger("opentelemetry").setLevel(logging.INFO)

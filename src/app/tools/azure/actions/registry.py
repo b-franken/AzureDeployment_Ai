@@ -285,10 +285,10 @@ ACTION_MAP = _ACTIONS
 
 __all__ = [
     "ACTION_MAP",
-    "available_actions",
+    "action",
     "action_names_with_aliases",
-    "resolve_action",
+    "available_actions",
     "get_action",
     "register_action",
-    "action",
+    "resolve_action",
 ]

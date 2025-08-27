@@ -172,7 +172,7 @@ async def create_front_door(
     except HttpResponseError as exc:
         logger.error("Front Door create_or_update failed: %s", exc.message)
         return "error", {"code": exc.status_code, "message": exc.message}
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.exception("Unexpected error while creating Front Door")
         return "error", {"message": str(exc)}
     finally:
@@ -282,7 +282,7 @@ async def create_waf_policy(
     except HttpResponseError as exc:
         logger.error("WAF policy create_or_update failed: %s", exc.message)
         return "error", {"code": exc.status_code, "message": exc.message}
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.exception("Unexpected error while creating WAF policy")
         return "error", {"message": str(exc)}
     finally:

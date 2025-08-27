@@ -29,7 +29,7 @@ class AsyncToSyncCredentialAdapter(TokenCredential):
         if loop is None:
             raise RuntimeError("credential loop not ready")
         fut = asyncio.run_coroutine_threadsafe(self._async_cred.get_token(*scopes, **kwargs), loop)
-        return cast(AccessToken, fut.result())
+        return cast("AccessToken", fut.result())
 
     def close(self) -> None:
         loop = self._loop

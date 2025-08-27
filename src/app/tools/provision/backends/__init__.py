@@ -5,4 +5,4 @@ from .bicep import BicepBackend
 from .sdk import SdkBackend
 from .terraform import TerraformBackend
 
-__all__ = ["Backend", "PlanResult", "ApplyResult", "SdkBackend", "TerraformBackend", "BicepBackend"]
+__all__ = ["ApplyResult", "Backend", "BicepBackend", "PlanResult", "SdkBackend", "TerraformBackend"]

@@ -16,4 +16,4 @@ class DeploymentEvent(BaseModel):
     sequence: int = 0
 
 
-__all__ = ["EventType", "DeploymentEvent"]
+__all__ = ["DeploymentEvent", "EventType"]

@@ -78,7 +78,7 @@ class ChainAgent(Agent[list[ChainLink], Any]):
                                 step_name=link.name,
                                 success=True,
                                 output=current_value,
-                                error=f"Handled: {str(e)}",
+                                error=f"Handled: {e!s}",
                             )
                         )
                     else:
@@ -91,7 +91,7 @@ class ChainAgent(Agent[list[ChainLink], Any]):
                 step_results=step_results,
             )
 
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, AttributeError) as e:
             return ExecutionResult(
                 success=False,
                 error=str(e),

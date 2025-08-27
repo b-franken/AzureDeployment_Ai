@@ -63,9 +63,7 @@ class SecurityConfig(BaseModel):
             Fernet(
                 raw
                 if isinstance(raw, bytes)
-                else raw.encode()
-                if isinstance(raw, str)
-                else str(raw).encode()
+                else raw.encode() if isinstance(raw, str) else str(raw).encode()
             )
         except Exception as err:
             raise ValueError("Invalid encryption key") from err
@@ -266,7 +264,7 @@ class Settings(BaseSettings):
             }
             resolved = aliases.get(val)
             if resolved:
-                self.llm.default_provider = cast(ProviderLiteral, resolved)
+                self.llm.default_provider = cast("ProviderLiteral", resolved)
             else:
                 logger.warning(
                     "settings.invalid_llm_provider",
@@ -298,7 +296,7 @@ class Settings(BaseSettings):
             # Staging/Production: warnings and errors only
             self.log_level = "WARNING"
             self.observability.log_level = "WARNING"
-        
+
         # Environment-specific validation
         if self.environment == "production":
             if self.debug:

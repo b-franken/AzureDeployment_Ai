@@ -13,6 +13,29 @@ from sklearn.preprocessing import PolynomialFeatures
 
 from app.tools.finops.cost_ingestion import CostIngestionService
 
+# Constants for magic values
+MINIMUM_HISTORICAL_DATA_POINTS = 7
+MINIMUM_FORECAST_PERIOD_DAYS = 14
+DEFAULT_CONFIDENCE_LEVEL = 0.95
+OPTIMAL_SAMPLE_SIZE = 30
+ANOMALY_THRESHOLD_MULTIPLIER = 2.0
+SEASONALITY_DETECTION_POINTS = 21
+OUTLIER_DETECTION_FACTOR = 1.5
+MODEL_ACCURACY_THRESHOLD = 0.8
+SEASONALITY_MIN_PERIOD = 14
+SEASONALITY_PATTERN_VARIANCE_THRESHOLD = 0.1
+TREND_MIN_PERIODS = 2
+TREND_CHANGE_THRESHOLD = 5.0
+ANOMALY_DEVIATION_THRESHOLD = 0.3
+HIGH_SEVERITY_DEVIATION_THRESHOLD = 0.5
+CRITICAL_Z_SCORE_THRESHOLD = 4.0
+HIGH_Z_SCORE_THRESHOLD = 3.0
+MEDIUM_Z_SCORE_THRESHOLD = 2.0
+MAJOR_DEVIATION_THRESHOLD = 50.0
+MODERATE_DEVIATION_THRESHOLD = 20.0
+AGGRESSIVE_OPTIMIZATION_THRESHOLD = 20.0
+BALANCED_OPTIMIZATION_THRESHOLD = 10.0
+
 
 def _z_score(confidence_level: float) -> float:
     return float(NormalDist().inv_cdf((1.0 + confidence_level) / 2.0))
@@ -128,7 +151,7 @@ class ForecastingService:
         sensitivity: float = 2.0,
     ) -> list[AnomalyDetection]:
         historical_data = await self._get_historical_data(subscription_id, days=lookback_days)
-        if len(historical_data) < 7:
+        if len(historical_data) < MINIMUM_HISTORICAL_DATA_POINTS:
             return []
 
         dates = [d["date"] for d in historical_data]
@@ -287,34 +310,42 @@ class ForecastingService:
         return wrapped_model, r2_score
 
     def _detect_seasonality(self, y: NDArray[np.floating]) -> bool:
-        if len(y) < 14:
+        if len(y) < SEASONALITY_MIN_PERIOD:
             return False
         weekly_pattern: list[float] = []
         for i in range(7):
             daily_values = y[i::7]
             if len(daily_values) > 1:
                 weekly_pattern.append(float(np.mean(daily_values)))
-        if len(weekly_pattern) >= 7:
+        if len(weekly_pattern) >= MINIMUM_HISTORICAL_DATA_POINTS:
             pattern_variance = float(np.var(weekly_pattern, ddof=0))
             total_variance = float(np.var(y, ddof=0))
-            return pattern_variance / total_variance > 0.1 if total_variance > 0.0 else False
+            return (
+                pattern_variance / total_variance > SEASONALITY_PATTERN_VARIANCE_THRESHOLD
+                if total_variance > 0.0
+                else False
+            )
         return False
 
     def _determine_trend(self, predictions: NDArray[np.floating]) -> str:
-        if len(predictions) < 2:
+        if len(predictions) < TREND_MIN_PERIODS:
             return "stable"
         first_week = (
-            float(np.mean(predictions[:7])) if len(predictions) >= 7 else float(predictions[0])
+            float(np.mean(predictions[:MINIMUM_HISTORICAL_DATA_POINTS]))
+            if len(predictions) >= MINIMUM_HISTORICAL_DATA_POINTS
+            else float(predictions[0])
         )
         last_week = (
-            float(np.mean(predictions[-7:])) if len(predictions) >= 7 else float(predictions[-1])
+            float(np.mean(predictions[-MINIMUM_HISTORICAL_DATA_POINTS:]))
+            if len(predictions) >= MINIMUM_HISTORICAL_DATA_POINTS
+            else float(predictions[-1])
         )
         change_percentage = (
             ((last_week - first_week) / first_week) * 100.0 if first_week > 0.0 else 0.0
         )
-        if change_percentage > 5.0:
+        if change_percentage > TREND_CHANGE_THRESHOLD:
             return "increasing"
-        if change_percentage < -5.0:
+        if change_percentage < -TREND_CHANGE_THRESHOLD:
             return "decreasing"
         return "stable"
 
@@ -334,7 +365,7 @@ class ForecastingService:
             actual = float(data_point["cost"])
             pred_val = float(prediction)
             deviation = abs(actual - pred_val) / pred_val if pred_val > 0.0 else 0.0
-            if deviation > 0.3:
+            if deviation > ANOMALY_DEVIATION_THRESHOLD:
                 anomalies.append(
                     {
                         "index": idx,
@@ -342,17 +373,19 @@ class ForecastingService:
                         "actual_cost": actual,
                         "expected_cost": pred_val,
                         "deviation_percentage": deviation * 100.0,
-                        "severity": "high" if deviation > 0.5 else "medium",
+                        "severity": (
+                            "high" if deviation > HIGH_SEVERITY_DEVIATION_THRESHOLD else "medium"
+                        ),
                     }
                 )
         return anomalies
 
     def _classify_severity(self, z_score_value: float) -> str:
-        if z_score_value > 4.0:
+        if z_score_value > CRITICAL_Z_SCORE_THRESHOLD:
             return "critical"
-        if z_score_value > 3.0:
+        if z_score_value > HIGH_Z_SCORE_THRESHOLD:
             return "high"
-        if z_score_value > 2.0:
+        if z_score_value > MEDIUM_Z_SCORE_THRESHOLD:
             return "medium"
         return "low"
 
@@ -362,11 +395,11 @@ class ForecastingService:
         ts: datetime,
         deviation: float,
     ) -> str:
-        if deviation > 50.0:
+        if deviation > MAJOR_DEVIATION_THRESHOLD:
             return "Major resource deployment or scaling event"
-        if deviation > 20.0:
+        if deviation > MODERATE_DEVIATION_THRESHOLD:
             return "Increased usage or new service activation"
-        if deviation < -20.0:
+        if deviation < -MODERATE_DEVIATION_THRESHOLD:
             return "Resource decommissioning or optimization applied"
         return "Normal variation or minor configuration change"
 
@@ -439,9 +472,9 @@ class ForecastingService:
         from app.tools.finops.optimization import OptimizationService, OptimizationStrategy
 
         optimizer = OptimizationService()
-        if target_percentage > 20.0:
+        if target_percentage > AGGRESSIVE_OPTIMIZATION_THRESHOLD:
             strategy = OptimizationStrategy.AGGRESSIVE
-        elif target_percentage > 10.0:
+        elif target_percentage > BALANCED_OPTIMIZATION_THRESHOLD:
             strategy = OptimizationStrategy.BALANCED
         else:
             strategy = OptimizationStrategy.CONSERVATIVE

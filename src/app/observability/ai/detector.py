@@ -35,11 +35,11 @@ class AnomalyDetector:
                             continue
                         first = series[0]
                         if isinstance(first, tuple):
-                            series_tuples = cast(Sequence[tuple[datetime, float]], series)
+                            series_tuples = cast("Sequence[tuple[datetime, float]]", series)
                             ts, last = series_tuples[-1]
                             values = [float(v) for _, v in series_tuples]
                         else:
-                            series_floats = cast(Sequence[float], series)
+                            series_floats = cast("Sequence[float]", series)
                             if not series_floats:
                                 continue
                             values = [float(x) for x in series_floats]

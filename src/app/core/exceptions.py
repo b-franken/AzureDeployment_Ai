@@ -561,8 +561,8 @@ def handle_errors(
                     raise
 
         if asyncio.iscoroutinefunction(func):
-            return cast(Callable[P, Any], async_wrapper)
-        return cast(Callable[P, Any], sync_wrapper)
+            return cast("Callable[P, Any]", async_wrapper)
+        return cast("Callable[P, Any]", sync_wrapper)
 
     return decorator
 
@@ -622,8 +622,8 @@ def retry_on_error(
             raise last
 
         if asyncio.iscoroutinefunction(func):
-            return cast(Callable[P, Any], async_wrapper)
-        return cast(Callable[P, Any], sync_wrapper)
+            return cast("Callable[P, Any]", async_wrapper)
+        return cast("Callable[P, Any]", sync_wrapper)
 
     return decorator
 

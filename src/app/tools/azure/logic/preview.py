@@ -32,21 +32,27 @@ def build_resource_preview(action: str, params: dict[str, Any]) -> dict[str, Any
             {
                 "SKU/Performance": params.get("sku", "Standard_LRS"),
                 "Access Tier": params.get("access_tier", "Hot"),
-                "Redundancy": "Locally Redundant" if params.get("sku") == "Standard_LRS" else "Standard",
+                "Redundancy": (
+                    "Locally Redundant" if params.get("sku") == "Standard_LRS" else "Standard"
+                ),
             }
         )
     elif action in ["create_webapp", "create_web_app"]:
         preview.update(
             {
                 "Runtime": params.get("runtime", "Not specified"),
-                "App Service Plan": params.get("plan", f"{params.get('name', 'app')}-{params.get('environment', 'dev')}-plan"),
+                "App Service Plan": params.get(
+                    "plan", f"{params.get('name', 'app')}-{params.get('environment', 'dev')}-plan"
+                ),
                 "HTTPS Only": params.get("https_only", True),
             }
         )
     elif action == "create_aks":
         preview.update(
             {
-                "DNS Prefix": params.get("dns_prefix", f"{params.get('name', 'aks')}-{params.get('environment', 'dev')}"),
+                "DNS Prefix": params.get(
+                    "dns_prefix", f"{params.get('name', 'aks')}-{params.get('environment', 'dev')}"
+                ),
                 "Node Count": params.get("node_count", 2),
                 "Node VM Size": params.get("node_vm_size", "Standard_DS2_v2"),
             }
@@ -79,7 +85,9 @@ def build_resource_definition(action: str, params: dict[str, Any]) -> dict[str, 
         "name": params.get("name", "unnamed-resource"),
         "type": resource_type_map.get(action, "Unknown"),
         "location": params.get("location", "westeurope"),
-        "properties": {k: v for k, v in params.items() if k not in ["name", "location", "resource_group"]},
+        "properties": {
+            k: v for k, v in params.items() if k not in ["name", "location", "resource_group"]
+        },
         "resource_group": params.get("resource_group"),
         "sku": params.get("sku"),
         "action": action,
@@ -117,15 +125,42 @@ def extract_resource_summary(payload: dict) -> dict[str, str]:
 
 def estimate_basic_cost(action: str, params: dict[str, Any]) -> dict[str, str]:
     cost_estimates = {
-        "create_rg": {"setup_cost": "$0.00", "monthly_estimate": "$0.00", "note": "Resource groups are free"},
-        "create_storage": {"setup_cost": "$0.00", "monthly_estimate": "$1-5", "note": "Depends on storage usage and redundancy"},
-        "create_webapp": {"setup_cost": "$0.00", "monthly_estimate": "$10-50", "note": "Depends on App Service Plan tier"},
-        "create_aks": {"setup_cost": "$0.00", "monthly_estimate": "$70-200", "note": "Based on node count and VM sizes"},
-        "create_vm": {"setup_cost": "$0.00", "monthly_estimate": "$30-100", "note": "Depends on VM size and usage hours"},
-        "create_acr": {"setup_cost": "$0.00", "monthly_estimate": "$5-20", "note": "Basic tier about $5/month, Standard about $20/month"},
+        "create_rg": {
+            "setup_cost": "$0.00",
+            "monthly_estimate": "$0.00",
+            "note": "Resource groups are free",
+        },
+        "create_storage": {
+            "setup_cost": "$0.00",
+            "monthly_estimate": "$1-5",
+            "note": "Depends on storage usage and redundancy",
+        },
+        "create_webapp": {
+            "setup_cost": "$0.00",
+            "monthly_estimate": "$10-50",
+            "note": "Depends on App Service Plan tier",
+        },
+        "create_aks": {
+            "setup_cost": "$0.00",
+            "monthly_estimate": "$70-200",
+            "note": "Based on node count and VM sizes",
+        },
+        "create_vm": {
+            "setup_cost": "$0.00",
+            "monthly_estimate": "$30-100",
+            "note": "Depends on VM size and usage hours",
+        },
+        "create_acr": {
+            "setup_cost": "$0.00",
+            "monthly_estimate": "$5-20",
+            "note": "Basic tier about $5/month, Standard about $20/month",
+        },
     }
     return cost_estimates.get(
         action,
-        {"setup_cost": "$0.00", "monthly_estimate": "Variable",
-            "note": "Use Azure pricing calculator for accurate estimates"},
+        {
+            "setup_cost": "$0.00",
+            "monthly_estimate": "Variable",
+            "note": "Use Azure pricing calculator for accurate estimates",
+        },
     )

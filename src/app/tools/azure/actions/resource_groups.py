@@ -20,8 +20,10 @@ async def create_resource_group(
     force: bool = False,
     **kwargs: Any,
 ) -> tuple[str, Any]:
-    logger.info(f"create_resource_group called: resource_group={resource_group}, location={location}, dry_run={dry_run}, force={force}")
-    
+    logger.info(
+        f"create_resource_group called: resource_group={resource_group}, location={location}, dry_run={dry_run}, force={force}"
+    )
+
     if not validate_location(location):
         available = ["westeurope", "northeurope", "uksouth", "eastus"]
         logger.error(f"Invalid location provided: {location}")
@@ -51,5 +53,5 @@ async def create_resource_group(
         logger.info(f"Resource group {resource_group} created successfully!")
         return "created", result.as_dict()
     except Exception as e:
-        logger.error(f"Failed to create resource group {resource_group}: {str(e)}")
-        return "error", f"Failed to create resource group: {str(e)}"
+        logger.error(f"Failed to create resource group {resource_group}: {e!s}")
+        return "error", f"Failed to create resource group: {e!s}"

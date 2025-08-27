@@ -139,13 +139,13 @@ class OpenAIAdapter:
                 "llm.vendor": "openai",
                 "llm.request.model": model,
                 "llm.request.type": "stream",
-            }
+            },
         ) as span:
             payload = self.build_payload(model, messages, stream=True, **kwargs)
             start_time = time.time()
-            
+
             logger.info("Starting OpenAI stream request", model=model, endpoint=self.endpoint())
-            
+
             try:
                 async with client.stream(
                     "POST", self.endpoint(), json=payload, headers=self.headers()
@@ -167,40 +167,46 @@ class OpenAIAdapter:
                                 chunk_count += 1
                                 yield str(piece)
                         except Exception as e:
-                            logger.debug("Failed to parse stream chunk", error=str(e), data=data[:100])
+                            logger.debug(
+                                "Failed to parse stream chunk", error=str(e), data=data[:100]
+                            )
                             continue
-                    
+
                     duration_ms = (time.time() - start_time) * 1000
-                    span.set_attributes({
-                        "llm.response.chunks": chunk_count,
-                        "llm.response.duration_ms": duration_ms,
-                    })
-                    
+                    span.set_attributes(
+                        {
+                            "llm.response.chunks": chunk_count,
+                            "llm.response.duration_ms": duration_ms,
+                        }
+                    )
+
                     logger.info(
                         "OpenAI stream request completed",
                         model=model,
                         chunks=chunk_count,
                         duration_ms=duration_ms,
                     )
-                    
+
                     app_insights.track_custom_event(
                         "openai_stream_completed",
                         {
                             "model": model,
                             "chunks": chunk_count,
                             "duration_ms": duration_ms,
-                        }
+                        },
                     )
-                    
+
             except httpx.HTTPStatusError as e:
                 duration_ms = (time.time() - start_time) * 1000
                 span.record_exception(e)
-                span.set_attributes({
-                    "llm.response.error": True,
-                    "llm.response.status_code": e.response.status_code,
-                    "llm.response.duration_ms": duration_ms,
-                })
-                
+                span.set_attributes(
+                    {
+                        "llm.response.error": True,
+                        "llm.response.status_code": e.response.status_code,
+                        "llm.response.duration_ms": duration_ms,
+                    }
+                )
+
                 logger.error(
                     "OpenAI stream request failed",
                     model=model,
@@ -208,21 +214,26 @@ class OpenAIAdapter:
                     duration_ms=duration_ms,
                     error_detail=e.response.text[:500],
                 )
-                
-                app_insights.track_exception(e, {
-                    "model": model,
-                    "duration_ms": duration_ms,
-                    "status_code": e.response.status_code,
-                })
+
+                app_insights.track_exception(
+                    e,
+                    {
+                        "model": model,
+                        "duration_ms": duration_ms,
+                        "status_code": e.response.status_code,
+                    },
+                )
                 raise
             except Exception as e:
                 duration_ms = (time.time() - start_time) * 1000
                 span.record_exception(e)
-                span.set_attributes({
-                    "llm.response.error": True,
-                    "llm.response.duration_ms": duration_ms,
-                })
-                
+                span.set_attributes(
+                    {
+                        "llm.response.error": True,
+                        "llm.response.duration_ms": duration_ms,
+                    }
+                )
+
                 logger.error(
                     "OpenAI stream request failed with exception",
                     model=model,
@@ -230,11 +241,14 @@ class OpenAIAdapter:
                     error_type=type(e).__name__,
                     error_message=str(e),
                 )
-                
-                app_insights.track_exception(e, {
-                    "model": model,
-                    "duration_ms": duration_ms,
-                })
+
+                app_insights.track_exception(
+                    e,
+                    {
+                        "model": model,
+                        "duration_ms": duration_ms,
+                    },
+                )
                 raise
 
     async def chat_raw(
@@ -247,7 +261,7 @@ class OpenAIAdapter:
                 "llm.request.model": model,
                 "llm.request.type": "chat",
                 "llm.request.messages": len(messages),
-            }
+            },
         ) as span:
             payload = self.build_payload(model, messages, **kwargs)
             start_time = time.time()
@@ -258,23 +272,25 @@ class OpenAIAdapter:
             try:
                 resp = await client.post(self.endpoint(), json=payload, headers=self.headers())
                 resp.raise_for_status()
-                
+
                 response_data = resp.json()
                 duration_ms = (time.time() - start_time) * 1000
-                
+
                 # Extract response metadata
                 usage = response_data.get("usage", {})
                 prompt_tokens = usage.get("prompt_tokens", 0)
                 completion_tokens = usage.get("completion_tokens", 0)
                 total_tokens = usage.get("total_tokens", 0)
-                
-                span.set_attributes({
-                    "llm.response.duration_ms": duration_ms,
-                    "llm.usage.prompt_tokens": prompt_tokens,
-                    "llm.usage.completion_tokens": completion_tokens,
-                    "llm.usage.total_tokens": total_tokens,
-                })
-                
+
+                span.set_attributes(
+                    {
+                        "llm.response.duration_ms": duration_ms,
+                        "llm.usage.prompt_tokens": prompt_tokens,
+                        "llm.usage.completion_tokens": completion_tokens,
+                        "llm.usage.total_tokens": total_tokens,
+                    }
+                )
+
                 logger.info(
                     "OpenAI chat request completed",
                     model=model,
@@ -283,7 +299,7 @@ class OpenAIAdapter:
                     completion_tokens=completion_tokens,
                     total_tokens=total_tokens,
                 )
-                
+
                 app_insights.track_custom_event(
                     "openai_chat_completed",
                     {
@@ -292,21 +308,23 @@ class OpenAIAdapter:
                         "prompt_tokens": prompt_tokens,
                         "completion_tokens": completion_tokens,
                         "total_tokens": total_tokens,
-                    }
+                    },
                 )
-                
+
                 return response_data
 
             except httpx.HTTPStatusError as e:
                 duration_ms = (time.time() - start_time) * 1000
                 error_detail = resp.text
-                
+
                 span.record_exception(e)
-                span.set_attributes({
-                    "llm.response.error": True,
-                    "llm.response.status_code": resp.status_code,
-                    "llm.response.duration_ms": duration_ms,
-                })
+                span.set_attributes(
+                    {
+                        "llm.response.error": True,
+                        "llm.response.status_code": resp.status_code,
+                        "llm.response.duration_ms": duration_ms,
+                    }
+                )
 
                 logger.error(
                     "OpenAI API HTTP error",
@@ -326,26 +344,31 @@ class OpenAIAdapter:
                 except Exception:
                     logger.debug("Failed to parse OpenAI error response as JSON")
 
-                app_insights.track_exception(e, {
-                    "model": model,
-                    "status_code": resp.status_code,
-                    "duration_ms": duration_ms,
-                })
+                app_insights.track_exception(
+                    e,
+                    {
+                        "model": model,
+                        "status_code": resp.status_code,
+                        "duration_ms": duration_ms,
+                    },
+                )
 
                 raise httpx.HTTPStatusError(
                     f"OpenAI API error: {resp.status_code} - {error_detail}",
                     request=e.request,
                     response=e.response,
                 ) from e
-                
+
             except Exception as e:
                 duration_ms = (time.time() - start_time) * 1000
-                
+
                 span.record_exception(e)
-                span.set_attributes({
-                    "llm.response.error": True,
-                    "llm.response.duration_ms": duration_ms,
-                })
+                span.set_attributes(
+                    {
+                        "llm.response.error": True,
+                        "llm.response.duration_ms": duration_ms,
+                    }
+                )
 
                 logger.error(
                     "OpenAI chat request failed with exception",
@@ -355,9 +378,12 @@ class OpenAIAdapter:
                     error_message=str(e),
                 )
 
-                app_insights.track_exception(e, {
-                    "model": model,
-                    "duration_ms": duration_ms,
-                })
-                
+                app_insights.track_exception(
+                    e,
+                    {
+                        "model": model,
+                        "duration_ms": duration_ms,
+                    },
+                )
+
                 raise

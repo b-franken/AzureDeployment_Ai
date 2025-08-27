@@ -23,6 +23,7 @@ tracer = trace.get_tracer(__name__)
 
 try:
     from app.api.routes import auth as auth_module
+
     AUTH_AVAILABLE = True
 except ImportError:
     auth_module = None
@@ -82,8 +83,7 @@ async def chat(
                 return StreamingResponse(
                     _stream_plain_chat(req, current_user),
                     media_type="text/event-stream",
-                    headers={"Cache-Control": "no-cache",
-                             "X-Accel-Buffering": "no"},
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
                 )
             correlation_id = getattr(request.state, "correlation_id", None)
             thread_id = getattr(req, "thread_id", None) or correlation_id
@@ -113,7 +113,9 @@ async def chat(
         except Exception as exc:
             span.set_status(Status(StatusCode.ERROR, str(exc)))
             logger.exception("chat failed user=%s", user_email)
-            return JSONResponse(content=ChatResponse(output="Failed to process request.").model_dump())
+            return JSONResponse(
+                content=ChatResponse(output="Failed to process request.").model_dump()
+            )
 
 
 @router.post("/v2")
@@ -184,8 +186,7 @@ async def _stream_plain_chat(req: ChatRequest, user: dict[str, Any]) -> AsyncGen
         try:
             llm, model = await get_provider_and_model(req.provider, req.model)
             memory = [m.model_dump() for m in req.memory or []]
-            messages = [{"role": m["role"], "content": m["content"]}
-                        for m in memory]
+            messages = [{"role": m["role"], "content": m["content"]} for m in memory]
             messages.append({"role": "user", "content": req.input})
             if not hasattr(llm, "chat_stream"):
                 text = await run_chat(
@@ -200,7 +201,7 @@ async def _stream_plain_chat(req: ChatRequest, user: dict[str, Any]) -> AsyncGen
                 )
                 chunk = 2048
                 for i in range(0, len(text), chunk):
-                    yield f"data: {text[i: i + chunk]}\n\n".encode()
+                    yield f"data: {text[i : i + chunk]}\n\n".encode()
                     await asyncio.sleep(0)
                 yield b"data: [DONE]\n\n"
                 return
@@ -212,8 +213,7 @@ async def _stream_plain_chat(req: ChatRequest, user: dict[str, Any]) -> AsyncGen
         except BaseApplicationException as exc:
             msg = exc.user_message or "Failed to process request."
             span.set_status(Status(StatusCode.ERROR, msg))
-            logger.exception(
-                "chat stream failed user=%s msg=%s", user_email, msg)
+            logger.exception("chat stream failed user=%s msg=%s", user_email, msg)
             yield f"data: {msg}\n\n".encode()
             yield b"data: [DONE]\n\n"
         except Exception:

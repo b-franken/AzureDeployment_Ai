@@ -37,7 +37,7 @@ class InjectionToken[T]:
     def __hash__(self) -> int:
         return hash(self.name)
 
-    def __eq__(self, other: Any) -> bool:
+    def __eq__(self, other: object) -> bool:
         return isinstance(other, InjectionToken) and self.name == other.name
 
 
@@ -149,12 +149,12 @@ class Container(ServiceProvider):
         raise RuntimeError("sync resolution is not allowed inside a running event loop")
 
     def get(self, service_type: type[T] | InjectionToken[T], scope_context: Any = None) -> T:
-        return cast(T, self._sync_await(self.aget(service_type, scope_context)))
+        return cast("T", self._sync_await(self.aget(service_type, scope_context)))
 
     def get_all(
         self, service_type: type[T] | InjectionToken[T], scope_context: Any = None
     ) -> list[T]:
-        return cast(list[T], self._sync_await(self.aget_all(service_type, scope_context)))
+        return cast("list[T]", self._sync_await(self.aget_all(service_type, scope_context)))
 
     async def aget(self, service_type: type[T] | InjectionToken[T], scope_context: Any = None) -> T:
         instances = await self.aget_all(service_type, scope_context)
@@ -179,7 +179,7 @@ class Container(ServiceProvider):
             instances: list[T] = []
             for descriptor in descriptors:
                 instance = await self._resolve_instance(descriptor, scope_context)
-                instances.append(cast(T, instance))
+                instances.append(cast("T", instance))
             return instances
         finally:
             self._resolving.discard(service_type)
@@ -306,7 +306,7 @@ def injectable(
     token: InjectionToken[Any] | None = None,
 ) -> Callable[[type[T]], type[T]]:
     def decorator(cls: type[T]) -> type[T]:
-        c = cast(Any, cls)
+        c = cast("Any", cls)
         c.__injection_scope__ = scope
         c.__injection_token__ = token
         return cls

@@ -321,7 +321,7 @@ class SdkBackend(Backend):
             if "resource_group" in args:
                 key_params.append(f"rg={args['resource_group']}")
             if "name" in args:
-                key_params.append(f"name={cast(dict[str, Any], args)['name']}")
+                key_params.append(f"name={cast('dict[str, Any]', args)['name']}")
             if "location" in args:
                 key_params.append(f"location={args['location']}")
             lines.append(f"{i}. {action} ({', '.join(key_params)})")

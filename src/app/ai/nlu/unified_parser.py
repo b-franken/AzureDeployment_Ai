@@ -103,18 +103,18 @@ def _to_scores_list(x: Any) -> list[float]:
         import numpy as np
 
         if isinstance(x, np.ndarray):
-            return cast(list[float], x.tolist()[0])
+            return cast("list[float]", x.tolist()[0])
     except Exception:
         pass
     if hasattr(x, "detach"):
         try:
-            return cast(list[float], x.detach().cpu().tolist()[0])
+            return cast("list[float]", x.detach().cpu().tolist()[0])
         except Exception:
             return []
     if isinstance(x, list):
         if x and isinstance(x[0], list):
-            return cast(list[float], x[0])
-        return cast(list[float], x)
+            return cast("list[float]", x[0])
+        return cast("list[float]", x)
     return []
 
 

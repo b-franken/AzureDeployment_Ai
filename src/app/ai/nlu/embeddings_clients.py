@@ -91,7 +91,7 @@ class AzureOpenAIClient(EmbeddingClient):
                     r = s.post(url, headers=headers, params=params, json=payload)
                     r.raise_for_status()
                     data = r.json()
-                    out.extend([cast(list[float], d["embedding"]) for d in data["data"]])
+                    out.extend([cast("list[float]", d["embedding"]) for d in data["data"]])
         except Exception as e:
             raise RuntimeError(f"azure embeddings request failed: {e}") from e
         return np.asarray(out, dtype=np.float32)
@@ -130,7 +130,7 @@ class OpenAIClient(EmbeddingClient):
                     r = s.post(url, headers=headers, json=payload)
                     r.raise_for_status()
                     data = r.json()
-                    out.extend([cast(list[float], d["embedding"]) for d in data["data"]])
+                    out.extend([cast("list[float]", d["embedding"]) for d in data["data"]])
         except Exception as e:
             raise RuntimeError(f"openai embeddings request failed: {e}") from e
         return np.asarray(out, dtype=np.float32)
@@ -179,7 +179,7 @@ class CohereClient(EmbeddingClient):
                         vecs = emb_container
                     if vecs is None:
                         raise RuntimeError("invalid embeddings response from Cohere")
-                    out.extend(cast(list[list[float]], vecs))
+                    out.extend(cast("list[list[float]]", vecs))
         except Exception as e:
             raise RuntimeError(f"cohere embeddings request failed: {e}") from e
         return np.asarray(out, dtype=np.float32)
@@ -221,9 +221,9 @@ class VoyageClient(EmbeddingClient):
                     r.raise_for_status()
                     data = r.json()
                     if "data" in data and "embeddings" in data["data"][0]:
-                        out.extend(cast(list[list[float]], data["data"][0]["embeddings"]))
+                        out.extend(cast("list[list[float]]", data["data"][0]["embeddings"]))
                     else:
-                        out.extend(cast(list[list[float]], data["embeddings"]))
+                        out.extend(cast("list[list[float]]", data["embeddings"]))
         except Exception as e:
             raise RuntimeError(f"voyage embeddings request failed: {e}") from e
         return np.asarray(out, dtype=np.float32)
@@ -251,7 +251,7 @@ class MistralClient(EmbeddingClient):
                     r = s.post(url, headers=headers, json=payload)
                     r.raise_for_status()
                     data = r.json()
-                    out.extend([cast(list[float], d["embedding"]) for d in data["data"]])
+                    out.extend([cast("list[float]", d["embedding"]) for d in data["data"]])
         except Exception as e:
             raise RuntimeError(f"mistral embeddings request failed: {e}") from e
         return np.asarray(out, dtype=np.float32)

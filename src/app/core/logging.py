@@ -179,7 +179,7 @@ class LoggerFactory:
             structlog.stdlib.add_log_level,
             structlog.processors.TimeStamper(fmt="iso", key="@timestamp"),
         ]
-        pre_chain: Sequence[PreProcessor] = cast(Sequence[PreProcessor], pre_chain_raw)
+        pre_chain: Sequence[PreProcessor] = cast("Sequence[PreProcessor]", pre_chain_raw)
 
         structlog.configure(
             processors=[
@@ -422,12 +422,12 @@ def clear_context() -> None:
 
 
 __all__ = [
-    "configure_logging",
-    "get_logger",
-    "add_context",
-    "clear_context",
+    "AuditLogger",
     "LoggerFactory",
     "LoggingMiddleware",
-    "AuditLogger",
+    "add_context",
+    "clear_context",
+    "configure_logging",
+    "get_logger",
     "install_log_record_sanitizer",
 ]

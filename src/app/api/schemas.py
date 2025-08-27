@@ -101,8 +101,7 @@ class CostAnalysisResponse(BaseModel):
 
 class StructuredChatRequest(BaseModel):
     input: str = Field(..., min_length=1)
-    schema_: dict[str, Any] = Field(..., validation_alias="schema",
-                                    serialization_alias="schema")
+    schema_: dict[str, Any] = Field(..., validation_alias="schema", serialization_alias="schema")
     provider: str | None = None
     model: str | None = None
 
@@ -112,18 +111,18 @@ class StructuredChatResponse(BaseModel):
 
 
 __all__ = [
+    "AuthRequest",
     "ChatMessage",
     "ChatRequest",
-    "ChatResponse",
     "ChatRequestV2",
+    "ChatResponse",
+    "CostAnalysisRequest",
+    "CostAnalysisResponse",
+    "DeploymentRequest",
+    "LogsResponse",
     "ReviewRequest",
     "ReviewResponse",
-    "TokenData",
-    "AuthRequest",
-    "DeploymentRequest",
-    "CostAnalysisRequest",
-    "LogsResponse",
-    "CostAnalysisResponse",
     "StructuredChatRequest",
     "StructuredChatResponse",
+    "TokenData",
 ]

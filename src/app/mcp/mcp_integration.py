@@ -55,7 +55,7 @@ class MCPContextProvider:
 
     async def get_deployment_context(self) -> dict[str, Any]:
         deployments = cast(
-            list[Any],
+            "list[Any]",
             await self.client.get_resource("deployments://active"),
         )
         return {

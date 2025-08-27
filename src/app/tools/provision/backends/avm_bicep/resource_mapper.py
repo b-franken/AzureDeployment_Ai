@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from app.ai.nlu.unified_parser import UnifiedParseResult
 
 
 class ResourceMapper:
@@ -20,10 +23,10 @@ class ResourceMapper:
             "acr": self._map_acr,
         }
 
-    def map_nlu_to_avm(self, nlu_result: dict[str, Any]) -> dict[str, Any]:
-        resource_type = nlu_result.get("resource_type", "")
-        parameters = nlu_result.get("parameters", {})
-        context = nlu_result.get("context", {})
+    def map_nlu_to_avm(self, nlu_result: UnifiedParseResult) -> dict[str, Any]:
+        resource_type = nlu_result.resource_type or ""
+        parameters = nlu_result.parameters or {}
+        context = nlu_result.context or {}
 
         mapper = self.resource_mappings.get(resource_type)
         if not mapper:

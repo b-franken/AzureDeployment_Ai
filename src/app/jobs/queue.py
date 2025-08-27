@@ -170,7 +170,7 @@ class JobQueue:
                 job = self._deserialize_job(data)
                 if job and self._should_process_job(job):
                     return job
-                elif job:
+                if job:
                     await self.cache.lpush(queue_key, self._serialize_job(job))
         return None
 
@@ -255,7 +255,7 @@ class JobQueue:
             parsed = json.loads(data)
             if not isinstance(parsed, dict):
                 raise ValueError("invalid job data")
-            d = cast(dict[str, Any], parsed)
+            d = cast("dict[str, Any]", parsed)
         else:
             d = data
 

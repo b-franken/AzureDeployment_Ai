@@ -127,7 +127,7 @@ class Clients:
             except Exception as e:
                 # Log individual client close errors but don't fail the whole cleanup
                 logger.debug(f"Error closing client {attr}: {e}")
-                
+
         # Close credentials last
         try:
             cclose = getattr(self.cred, "close", None)
@@ -135,7 +135,7 @@ class Clients:
                 await cclose()
         except Exception as e:
             logger.debug(f"Error closing async credential: {e}")
-            
+
         try:
             sclose = getattr(self.cred_sync, "close", None)
             if callable(sclose):
@@ -186,7 +186,7 @@ async def _build_clients(sid: str) -> tuple[Clients, int]:
         token = await cred_async.get_token(_TOKEN_SCOPE)
         expiry = int(token.expires_on) - _EXPIRY_MARGIN_SECONDS
         cred_sync = build_credential(use_cache=False)
-        
+
         clients = Clients(
             subscription_id=sid,
             cred=cred_async,
@@ -245,18 +245,18 @@ async def get_clients(subscription_id: str | None) -> Clients:
                 _CACHE.move_to_end(sid)
                 logger.debug("azure_clients.cache.hit", extra={"subscription_id": sid})
                 return clients
-        
+
         # Build new clients
         try:
             clients, expiry = await _build_clients(sid)
             _CACHE[sid] = (clients, expiry)
             _CACHE.move_to_end(sid)
-            
+
             # Clean up old entries asynchronously
             while len(_CACHE) > _CACHE_MAX_SIZE:
                 _, (old_clients, _) = _CACHE.popitem(last=False)
                 asyncio.create_task(_dispose(old_clients))
-            
+
             logger.debug("azure_clients.cache.miss", extra={"subscription_id": sid})
             return clients
         except Exception as exc:

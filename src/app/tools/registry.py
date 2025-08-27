@@ -92,4 +92,4 @@ async def run_cmd(
         return {"ok": False, "summary": "timeout", "output": out}
 
 
-__all__ = ["register", "list_tools", "get_tool", "ensure_tools_loaded", "run_cmd"]
+__all__ = ["ensure_tools_loaded", "get_tool", "list_tools", "register", "run_cmd"]

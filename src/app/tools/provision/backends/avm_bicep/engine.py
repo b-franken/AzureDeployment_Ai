@@ -81,7 +81,7 @@ class BicepAvmBackend:
                     ctx.resource_group, str(bicep_path), ctx.subscription_id
                 )
             except Exception as e:
-                what_if = f"What-if analysis failed: {str(e)}"
+                what_if = f"What-if analysis failed: {e!s}"
 
             cost_estimate = self._cost_estimator.estimate_monthly_cost(spec)
 
@@ -173,7 +173,7 @@ class BicepAvmBackend:
 
     def _emitters(self) -> Sequence[Emitter]:
         if not self._emitters_cache:
-            base_emitters: list[Emitter] = list(cast(Sequence[Emitter], EMITTERS))
+            base_emitters: list[Emitter] = list(cast("Sequence[Emitter]", EMITTERS))
             base_emitters.extend([CosmosEmitter(), AksEmitter()])
             self._emitters_cache = base_emitters
         return self._emitters_cache

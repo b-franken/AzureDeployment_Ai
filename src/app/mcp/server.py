@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+# Import OpenTelemetry fixes early to prevent deprecation warnings
+from app.observability.otel_fixes import ensure_proper_otel_initialization
+
+ensure_proper_otel_initialization()
+
 import asyncio
 import json
 import logging
@@ -18,6 +23,9 @@ from app.core.cache.dependency import get_cache
 from app.core.streams import StreamingHandler
 from app.mcp.extensions import register_extensions
 from app.mcp.schemas import AzureQueryParams, DeploymentRequest, ToolExecutionRequest
+from app.mcp.tools.cost_intelligence import register_cost_intelligence_tool
+from app.mcp.tools.integrated_analytics import register_integrated_analytics_tool
+from app.mcp.tools.security_advisor import register_security_advisor_tool
 from app.mcp.tools.what_if import register as register_what_if
 from app.platform.audit.logger import AuditLogger
 from app.tools.registry import ensure_tools_loaded, list_tools
@@ -61,6 +69,9 @@ class MCPServer:
         self._setup_prompts()
         register_extensions(self)
         register_what_if(self.mcp)
+        register_integrated_analytics_tool(self.mcp)
+        register_security_advisor_tool(self.mcp)
+        register_cost_intelligence_tool(self.mcp)
         logger.info("MCP server created", extra={"event": "mcp_created"})
         return self
 
@@ -110,7 +121,7 @@ class MCPServer:
                                 "correlation_id": request.correlation_id,
                             },
                         )
-                        return cast(dict[str, Any], cached_result)
+                        return cast("dict[str, Any]", cached_result)
                 result = await maybe_call_tool(
                     user_input=request.input_text,
                     memory=request.memory,
@@ -222,7 +233,7 @@ class MCPServer:
                             "Azure query cache hit",
                             extra={"event": "azure_query_cache_hit"},
                         )
-                        return cast(dict[str, Any], cached)
+                        return cast("dict[str, Any]", cached)
                 result = await self._execute_azure_query(params)
                 if params.cache_ttl > 0:
                     await self.cache.set(cache_key, result, ttl=params.cache_ttl)
@@ -409,7 +420,7 @@ class MCPServer:
                 await stream.send(f"Completed: {step_name}")
             except Exception as e:
                 results.append({"step": step_name, "status": "failed", "error": str(e)})
-                await stream.send(f"Failed: {step_name} - {str(e)}")
+                await stream.send(f"Failed: {step_name} - {e!s}")
                 if not request.continue_on_error:
                     break
         status = "completed" if all(r["status"] == "success" for r in results) else "failed"
@@ -425,11 +436,11 @@ class MCPServer:
         request = QueryRequest(
             query=params.kql,
             subscriptions=params.subscriptions or self._get_allowed_subscriptions(),
-            options=QueryRequestOptions(
-                top=params.top, skip=params.skip, skip_token=params.skip_token
-            )
-            if params.top or params.skip or params.skip_token
-            else None,
+            options=(
+                QueryRequestOptions(top=params.top, skip=params.skip, skip_token=params.skip_token)
+                if params.top or params.skip or params.skip_token
+                else None
+            ),
         )
         result = await asyncio.to_thread(rg_client.resources, request)
         data = result.data[: params.top] if params.top else result.data
@@ -681,7 +692,7 @@ class MCPServer:
 
 async def amain() -> MCPServer:
     transport = cast(
-        Literal["stdio", "sse", "streamable-http"],
+        "Literal['stdio', 'sse', 'streamable-http']",
         os.getenv("MCP_TRANSPORT", "sse").lower(),
     )
     try:

@@ -31,7 +31,7 @@ async def bounded_gather(*aws: Awaitable[R], limit: int = 8) -> list[R]:
         logger.debug(
             "bounded_gather completed", tasks=len(tasks), limit=lim, duration_ms=duration_ms
         )
-        return cast(list[R], results)
+        return cast("list[R]", results)
     except Exception as exc:
         logger.error(
             "bounded_gather failed",

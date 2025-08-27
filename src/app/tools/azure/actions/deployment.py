@@ -36,7 +36,6 @@ async def confirm_deployment(
     """
     Confirm and proceed with a pending deployment.
     """
-    action_input = kwargs.get("action", "")
     deployment_id = kwargs.get("deployment_id")
 
     if not deployment_id:
@@ -95,7 +94,7 @@ async def confirm_deployment(
                     "Consider setting up monitoring and alerts",
                 ],
             }
-        elif result_context.state == DeploymentState.FAILED:
+        if result_context.state == DeploymentState.FAILED:
             return "failed", {
                 "deployment_id": deployment_id,
                 "status": "failed",
@@ -106,13 +105,12 @@ async def confirm_deployment(
                     "Contact support if the issue persists",
                 ],
             }
-        else:
-            return "in_progress", {
-                "deployment_id": deployment_id,
-                "status": result_context.state.value,
-                "progress": f"State: {result_context.state.value}",
-                "checkpoints": result_context.checkpoints,
-            }
+        return "in_progress", {
+            "deployment_id": deployment_id,
+            "status": result_context.state.value,
+            "progress": f"State: {result_context.state.value}",
+            "checkpoints": result_context.checkpoints,
+        }
 
     except Exception as e:
         logger.error(f"Deployment execution failed: {e}")
@@ -173,7 +171,8 @@ def store_pending_deployment(deployment_id: str, deployment_data: dict[str, Any]
     deployment_data["status"] = "pending_confirmation"
     _PENDING_DEPLOYMENTS[deployment_id] = deployment_data
     logger.info(
-        f"Stored pending deployment {deployment_id} with {len(deployment_data.get('resources', []))} resources"
+        f"Stored pending deployment {deployment_id} with "
+        f"{len(deployment_data.get('resources', []))} resources"
     )
 
 

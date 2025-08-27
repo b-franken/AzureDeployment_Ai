@@ -48,8 +48,7 @@ class EmbeddingsService:
         # Use batch processor if enabled
         if self._batch_processor:
             return await self._batch_processor.embed(texts)
-        else:
-            return await self._direct_embed(texts)
+        return await self._direct_embed(texts)
 
     async def _direct_embed(self, texts: list[str]) -> list[list[float]]:
         """Direct embedding method without batch processing (used by batch processor)."""

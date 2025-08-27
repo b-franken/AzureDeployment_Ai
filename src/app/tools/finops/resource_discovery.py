@@ -36,18 +36,18 @@ class ResourceDiscoveryService:
         key = f"resource_{subscription_id}"
         if key not in self._clients:
             self._clients[key] = ResourceManagementClient(self._credential, subscription_id)
-        return cast(ResourceManagementClient, self._clients[key])
+        return cast("ResourceManagementClient", self._clients[key])
 
     def _get_graph_client(self) -> ResourceGraphClient:
         if "graph" not in self._clients:
             self._clients["graph"] = ResourceGraphClient(self._credential)
-        return cast(ResourceGraphClient, self._clients["graph"])
+        return cast("ResourceGraphClient", self._clients["graph"])
 
     def _get_monitor_client(self, subscription_id: str) -> MonitorManagementClient:
         key = f"monitor_{subscription_id}"
         if key not in self._clients:
             self._clients[key] = MonitorManagementClient(self._credential, subscription_id)
-        return cast(MonitorManagementClient, self._clients[key])
+        return cast("MonitorManagementClient", self._clients[key])
 
     def _normalize_tags(self, tags: Any) -> dict[str, str]:
         if isinstance(tags, dict):
@@ -59,7 +59,7 @@ class ResourceDiscoveryService:
             return dt.isoformat()
         try:
             # type: ignore[redundant-cast]
-            return cast(datetime, dt).isoformat()
+            return cast("datetime", dt).isoformat()
         except Exception:
             return datetime.utcnow().isoformat()
 
@@ -71,7 +71,7 @@ class ResourceDiscoveryService:
         resource_type: str | None = None,
         tags: dict[str, str] | None = None,
     ) -> list[dict[str, Any]]:
-        cache_key = f"{subscription_id}:{resource_group}:{resource_type}:{str(tags)}"
+        cache_key = f"{subscription_id}:{resource_group}:{resource_type}:{tags!s}"
         cached = self._cache.get(cache_key)
         if cached:
             data, ts = cached
@@ -278,11 +278,11 @@ class ResourceDiscoveryService:
                 try:
                     result = await asyncio.to_thread(client.resources, request)
                     data = getattr(result, "data", None) or []
-                    all_results.extend(cast(list[dict[str, Any]], data))
+                    all_results.extend(cast("list[dict[str, Any]]", data))
                     token = getattr(result, "skip_token", None)
                     if not token or len(all_results) >= max_results:
                         break
-                    skip_token = cast(str | None, token)
+                    skip_token = cast("str | None", token)
                 except AzureError as e:
                     err = ExternalServiceException(f"Failed to execute graph query: {e}")
                     current = trace.get_current_span()

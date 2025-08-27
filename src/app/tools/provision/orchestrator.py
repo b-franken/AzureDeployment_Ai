@@ -157,10 +157,9 @@ class ProvisionOrchestrator(Tool):
 
                         if plan_only:
                             return _ok("AVM Bicep plan generated from natural language", result)
-                        else:
-                            deploy_result = await avm_backend.apply(ctx, preview.bicep_path)
-                            result["deployment"] = deploy_result
-                            return _ok("AVM Bicep deployment executed", result)
+                        deploy_result = await avm_backend.apply(ctx, preview.bicep_path)
+                        result["deployment"] = deploy_result
+                        return _ok("AVM Bicep deployment executed", result)
 
                 orchestrator_args = nlu_result.to_orchestrator_args()
                 if orchestrator_args:
@@ -186,7 +185,7 @@ class ProvisionOrchestrator(Tool):
                 spec = ProvisionSpec(
                     product=product,
                     env=env,
-                    backend=cast(BackendLiteral, backend if backend != "avm" else "auto"),
+                    backend=cast("BackendLiteral", backend if backend != "avm" else "auto"),
                     plan_only=plan_only,
                     parameters=parameters,
                 ).dict()
@@ -195,7 +194,7 @@ class ProvisionOrchestrator(Tool):
 
             chosen: BackendName = pick_backend(
                 env=spec["env"],
-                requested=cast(BackendLiteral, backend if backend != "avm" else "auto"),
+                requested=cast("BackendLiteral", backend if backend != "avm" else "auto"),
                 plan_only=spec["plan_only"],
             )
 

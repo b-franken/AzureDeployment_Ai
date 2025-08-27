@@ -98,33 +98,45 @@ async def get_provider_and_model(
 
     if selected_provider not in available:
         logger.warning(
-            f"Requested provider '{selected_provider}' not in available providers {available}. Using OpenAI as fallback instead of Ollama."
+            f"Requested provider '{selected_provider}' not in available providers {available}. "
+            "Using OpenAI as fallback instead of Ollama."
         )
         selected_provider = "openai" if "openai" in available else available[0]
 
     logger.info(
-        f"Selected LLM provider: {selected_provider} (requested: {provider}, config default: {LLM_PROVIDER})"
+        f"Selected LLM provider: {selected_provider} "
+        f"(requested: {provider}, config default: {LLM_PROVIDER})"
     )
 
     def select_model(available: list[str], configured: str, requested: str | None) -> str:
         logger.info(
-            f"Model selection: requested='{requested}', configured='{configured}', available={available}"
+            "Model selection: requested='%s', configured='%s', available=%s",
+            requested,
+            configured,
+            available,
         )
 
         if requested and requested in available:
             logger.info(f"Using requested model: {requested}")
             return requested
-        elif requested:
+        if requested:
             logger.warning(
-                f"Requested model '{requested}' not in available models {available}. Falling back to configured model."
+                (
+                    "Requested model '%s' not in available models %s. "
+                    "Falling back to configured model."
+                ),
+                requested,
+                available,
             )
 
         if configured in available:
             logger.info(f"Using configured model: {configured}")
             return configured
-        elif configured:
+        if configured:
             logger.warning(
-                f"Configured model '{configured}' not in available models {available}. Using first available model."
+                ("Configured model '%s' not in available models %s. Using first available model."),
+                configured,
+                available,
             )
 
         fallback = available[0] if available else configured

@@ -114,8 +114,7 @@ class PrivateEndpointEmitter:
                         + "' } },",
                     ]
                 )
-            if lines[-1].endswith(","):
-                lines[-1] = lines[-1][:-1]
+            lines[-1] = lines[-1].removesuffix(",")
             lines.extend(
                 [
                     "    ]",

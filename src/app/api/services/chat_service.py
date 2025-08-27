@@ -3,21 +3,24 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Sequence
-from typing import Any, Dict, List, Optional
 
 from app.ai.reviewer import senior_review
 from app.ai.tools_router import ToolExecutionContext, maybe_call_tool
-from app.core.config import settings
 from app.api.services.memory_service import get_memory_service
+from app.core.config import settings
 
 # Global cache for capturing rich tool outputs when orchestrator fails
 _rich_output_cache: dict[str, str] = {}
 
+
 def cache_rich_output(correlation_id: str, output: str) -> None:
     """Cache rich tool output for potential use if orchestrator returns generic response."""
-    if correlation_id and ("## Bicep Infrastructure Code" in output or "## Terraform Infrastructure Code" in output):
+    if correlation_id and (
+        "## Bicep Infrastructure Code" in output or "## Terraform Infrastructure Code" in output
+    ):
         _rich_output_cache[correlation_id] = output
         logger.info(f"Cached rich output for correlation {correlation_id}")
+
 
 logger = logging.getLogger(__name__)
 
@@ -41,14 +44,14 @@ async def run_chat(
 ) -> str:
     memory_service = get_memory_service()
     effective_correlation_id = correlation_id or str(uuid.uuid4())
-    
+
     # Retrieve user's conversation history if no memory provided and store_conversation is enabled
     if store_conversation and (not memory or len(memory) == 0):
         try:
             historical_memory = await memory_service.get_user_conversation_history(
                 user_id=user_id,
                 limit=10,  # Last 10 messages for context
-                thread_id=thread_id
+                thread_id=thread_id,
             )
             mem = list(historical_memory)
             logger.info(f"Retrieved {len(mem)} messages from user memory for context")
@@ -57,7 +60,7 @@ async def run_chat(
             mem = list(memory or [])
     else:
         mem = list(memory or [])
-    
+
     # Store user message if conversation storage is enabled
     user_message_id = None
     if store_conversation:
@@ -71,13 +74,13 @@ async def run_chat(
                     "provider": provider,
                     "model": model,
                     "tools_enabled": enable_tools,
-                    "environment": environment
-                }
+                    "environment": environment,
+                },
             )
             logger.info(f"Stored user message with ID: {user_message_id}")
         except Exception as exc:
             logger.error(f"Failed to store user message: {exc}")
-    
+
     effective_subscription_id = subscription_id or settings.azure.subscription_id
     context = (
         ToolExecutionContext(
@@ -95,12 +98,13 @@ async def run_chat(
     )
     if context:
         logger.info(
-            f"Created tool execution context: correlation_id={context.correlation_id}, max_executions={context.max_tool_executions}, subscription_id={context.subscription_id}"
+            f"Created tool execution context: correlation_id={context.correlation_id}, "
+            f"max_executions={context.max_tool_executions}, subscription_id={context.subscription_id}"
         )
-    
+
     # Track tools that will be used for metadata
-    tools_used: List[str] = []
-    
+    tools_used: list[str] = []
+
     result = await maybe_call_tool(
         input_text,
         mem,
@@ -111,36 +115,50 @@ async def run_chat(
         allowlist=list(allowlist or []),
         context=context,
     )
-    
+
     # Extract tool usage information if available from context
-    if context and hasattr(context, 'executed_tools'):
+    if context and hasattr(context, "executed_tools"):
         tools_used = list(context.executed_tools)
     elif enable_tools and "azure" in result.lower() and "deploy" in result.lower():
         tools_used = ["azure_provision"]  # Infer tool usage from response content
-    
+
     # Check if we got a generic response when tools were enabled and the input suggests deployment
-    if (enable_tools and 
-        isinstance(result, str) and 
-        ("Please hold on for a moment" in result or "I'll create" in result or "I'll proceed" in result) and
-        len(result) < 300 and
-        ("create" in input_text.lower() and ("resource" in input_text.lower() or "deploy" in input_text.lower()))):
-        
-        logger.warning(f"Detected generic response '{result[:100]}...' for deployment request - this suggests orchestrator issue")
-        
+    if (
+        enable_tools
+        and isinstance(result, str)
+        and (
+            "Please hold on for a moment" in result
+            or "I'll create" in result
+            or "I'll proceed" in result
+        )
+        and len(result) < 300
+        and (
+            "create" in input_text.lower()
+            and ("resource" in input_text.lower() or "deploy" in input_text.lower())
+        )
+    ):
+        logger.warning(
+            f"Detected generic response '{result[:100]}...' for deployment request - "
+            "this suggests orchestrator issue"
+        )
+
         # Check multiple sources for rich output
         correlation_id = correlation_id or (context.correlation_id if context else None)
-        
+
         # First try context cache
-        if context and hasattr(context, 'last_tool_output') and context.last_tool_output:
+        if context and hasattr(context, "last_tool_output") and context.last_tool_output:
             logger.info("Using cached tool output from context instead of generic response")
             return context.last_tool_output
-            
+
         # Then try global cache by correlation ID
         if correlation_id and correlation_id in _rich_output_cache:
-            logger.info(f"Using cached rich output for correlation {correlation_id} instead of generic response")
+            logger.info(
+                f"Using cached rich output for correlation {correlation_id} "
+                "instead of generic response"
+            )
             cached_output = _rich_output_cache.pop(correlation_id)  # Remove after use
             return cached_output
-    
+
     # Store assistant response if conversation storage is enabled
     if store_conversation:
         try:
@@ -149,22 +167,19 @@ async def run_chat(
                 content=result,
                 thread_id=thread_id,
                 session_id=effective_correlation_id,
-                model_info={
-                    "provider": provider,
-                    "model": model
-                },
+                model_info={"provider": provider, "model": model},
                 tools_used=tools_used,
                 metadata={
                     "user_message_id": user_message_id,
                     "response_length": len(result),
                     "tools_enabled": enable_tools,
-                    "environment": environment
-                }
+                    "environment": environment,
+                },
             )
             logger.info(f"Stored assistant response with ID: {assistant_message_id}")
         except Exception as exc:
             logger.error(f"Failed to store assistant response: {exc}")
-    
+
     return result
 
 

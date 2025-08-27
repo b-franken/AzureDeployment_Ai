@@ -11,8 +11,6 @@ from app.tools.base import Tool, ToolResult
 from .actions.deployment import store_pending_deployment
 from .actions.registry import action_names_with_aliases, resolve_action
 from .clients import get_clients
-from .tags import standard_tags
-
 from .codegen.bicep import generate_bicep_code
 from .codegen.terraform import generate_terraform_code
 from .logic.defaults import apply_intelligent_defaults
@@ -26,6 +24,7 @@ from .logic.preview import (
 from .logic.resolve import resolve_action_intelligently
 from .logic.suggestions import provide_helpful_suggestions
 from .logic.validate import validate_and_suggest
+from .tags import standard_tags
 from .utils.response import err, ok
 from .validation import DeploymentValidator, ValidationLevel
 
@@ -90,11 +89,9 @@ class AzureProvision(Tool):
     async def run(self, action: str, **kwargs: Any) -> ToolResult:
         try:
             params = dict(kwargs)
-            logger.info(
-                "Azure provision tool called with action='%s' params=%s", action, params)
+            logger.info("Azure provision tool called with action='%s' params=%s", action, params)
 
-            env_in = str(params.get("env") or params.get(
-                "environment") or "dev")
+            env_in = str(params.get("env") or params.get("environment") or "dev")
             try:
                 canon_env = normalize_env(env_in)
             except Exception:
@@ -115,29 +112,26 @@ class AzureProvision(Tool):
 
             apply_intelligent_defaults(canonical_action, params)
 
-            is_valid, validation_msg = validate_and_suggest(
-                canonical_action, params)
+            is_valid, validation_msg = validate_and_suggest(canonical_action, params)
             if not is_valid:
                 return err("Invalid parameters", validation_msg)
 
-            logger.info(f"Tool execution check: dry_run={params.get('dry_run', True)}, params={params}")
-            
+            logger.info(
+                f"Tool execution check: dry_run={params.get('dry_run', True)}, params={params}"
+            )
+
             if params.get("dry_run", True):
                 logger.info("Entering DRY RUN mode - generating preview only")
                 deployment_id = str(uuid.uuid4())[:8]
                 bicep_code = generate_bicep_code(canonical_action, params)
-                terraform_code = generate_terraform_code(
-                    canonical_action, params)
-                resource_preview = build_resource_preview(
-                    canonical_action, params)
+                terraform_code = generate_terraform_code(canonical_action, params)
+                resource_preview = build_resource_preview(canonical_action, params)
                 cost_estimate = estimate_basic_cost(canonical_action, params)
 
-                resource_def = build_resource_definition(
-                    canonical_action, params)
+                resource_def = build_resource_definition(canonical_action, params)
                 validation_summary: dict[str, Any] | None = None
                 try:
-                    validator = DeploymentValidator(
-                        level=ValidationLevel.STANDARD)
+                    validator = DeploymentValidator(level=ValidationLevel.STANDARD)
                     report = await validator.validate_deployment(
                         resources=[resource_def],
                         context={
@@ -154,7 +148,10 @@ class AzureProvision(Tool):
                         "errors": report.errors,
                         "critical": report.critical,
                         "recommendations": report.recommendations[:5],
-                        "failed": [{"rule": r.rule_id, "message": r.message, "severity": r.severity} for r in top],
+                        "failed": [
+                            {"rule": r.rule_id, "message": r.message, "severity": r.severity}
+                            for r in top
+                        ],
                     }
                 except Exception as e:
                     validation_summary = {"error": str(e)}
@@ -180,7 +177,7 @@ class AzureProvision(Tool):
                     "location": params.get("location"),
                 }
                 return ok(f"Deployment Preview: {canonical_action}", summary)
-            
+
             logger.info("DRY RUN check passed - proceeding with ACTUAL DEPLOYMENT")
             logger.info(f"Creating Azure clients for subscription: {params.get('subscription_id')}")
             clients = await get_clients(params.get("subscription_id"))
@@ -193,11 +190,12 @@ class AzureProvision(Tool):
             if not action_func:
                 logger.error(f"Action function not found for: {canonical_action}")
                 return err("Action not implemented", f"Action {canonical_action} is not available")
-            
-            logger.info(f"Action function resolved: {action_func.__name__} for action: {canonical_action}")
 
-            resource_definition = build_resource_definition(
-                canonical_action, params)
+            logger.info(
+                f"Action function resolved: {action_func.__name__} for action: {canonical_action}"
+            )
+
+            resource_definition = build_resource_definition(canonical_action, params)
             deployment_id = str(uuid.uuid4())[:8]
             deployment_data = {
                 "action": canonical_action,
@@ -235,7 +233,7 @@ class AzureProvision(Tool):
             terraform_code = generate_terraform_code(canonical_action, params)
             resource_preview = build_resource_preview(canonical_action, params)
             cost_estimate = estimate_basic_cost(canonical_action, params)
-            
+
             executed = {
                 "deployment_id": deployment_id,
                 "action": canonical_action,

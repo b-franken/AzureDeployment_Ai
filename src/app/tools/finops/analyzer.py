@@ -120,9 +120,7 @@ class CostManagementSystem:
                 else (
                     row.get("preTaxCost")
                     if row.get("preTaxCost") is not None
-                    else row.get("Cost")
-                    if row.get("Cost") is not None
-                    else row.get("cost")
+                    else row.get("Cost") if row.get("Cost") is not None else row.get("cost")
                 )
             )
             try:
@@ -378,10 +376,10 @@ class CostManagementSystem:
 
         scope = f"/subscriptions/{subscription_id}"
 
-        current_month_usage: (
-            list[dict[str, Any]] | None
-        ) = await self.cost_ingestion.get_usage_details(
-            scope, current_month_start, now, granularity="None"
+        current_month_usage: list[dict[str, Any]] | None = (
+            await self.cost_ingestion.get_usage_details(
+                scope, current_month_start, now, granularity="None"
+            )
         )
         current_month_costs = sum(float(item.get("Cost", 0)) for item in current_month_usage or [])
 
@@ -401,10 +399,10 @@ class CostManagementSystem:
             subscription_id, target_reduction_percentage=10.0
         )
 
-        optimization_opportunities: list[
-            OptimizationRecommendation
-        ] = await self.optimization.analyze_optimization_opportunities(
-            subscription_id, OptimizationStrategy.BALANCED, min_savings_threshold=0
+        optimization_opportunities: list[OptimizationRecommendation] = (
+            await self.optimization.analyze_optimization_opportunities(
+                subscription_id, OptimizationStrategy.BALANCED, min_savings_threshold=0
+            )
         )
 
         quick_wins = [
@@ -418,9 +416,9 @@ class CostManagementSystem:
             if rec.implementation_effort == "low"
         ]
 
-        reservation_recs: (
-            list[Any] | None
-        ) = await self.cost_ingestion.get_reservation_recommendations(scope)
+        reservation_recs: list[Any] | None = (
+            await self.cost_ingestion.get_reservation_recommendations(scope)
+        )
         ri_coverage = len(reservation_recs) * 0.15 if reservation_recs else 0.0
 
         insights: dict[str, Any] = {
@@ -441,24 +439,23 @@ class CostManagementSystem:
     def _categorize_resource(self, resource_type: str) -> ResourceCategory:
         if "Compute" in resource_type or "VirtualMachines" in resource_type:
             return ResourceCategory.COMPUTE
-        elif "Storage" in resource_type:
+        if "Storage" in resource_type:
             return ResourceCategory.STORAGE
-        elif "Network" in resource_type:
+        if "Network" in resource_type:
             return ResourceCategory.NETWORK
-        elif "Sql" in resource_type or "Database" in resource_type:
+        if "Sql" in resource_type or "Database" in resource_type:
             return ResourceCategory.DATABASE
-        elif "Analytics" in resource_type or "Synapse" in resource_type:
+        if "Analytics" in resource_type or "Synapse" in resource_type:
             return ResourceCategory.ANALYTICS
-        elif "CognitiveServices" in resource_type:
+        if "CognitiveServices" in resource_type:
             return ResourceCategory.AI_ML
-        elif "KeyVault" in resource_type or "Security" in resource_type:
+        if "KeyVault" in resource_type or "Security" in resource_type:
             return ResourceCategory.SECURITY
-        elif "Monitor" in resource_type or "Insights" in resource_type:
+        if "Monitor" in resource_type or "Insights" in resource_type:
             return ResourceCategory.MONITORING
-        elif "Backup" in resource_type or "RecoveryServices" in resource_type:
+        if "Backup" in resource_type or "RecoveryServices" in resource_type:
             return ResourceCategory.BACKUP
-        else:
-            return ResourceCategory.OTHER
+        return ResourceCategory.OTHER
 
     def _group_by_category(self, costs: list[ResourceCost]) -> dict[str, float]:
         grouped: dict[str, float] = {}
@@ -569,14 +566,13 @@ class CostAnalyzer:
     def _categorize_resource(self, resource_type: str) -> ResourceCategory:
         if "Compute" in resource_type or "VirtualMachines" in resource_type:
             return ResourceCategory.COMPUTE
-        elif "Storage" in resource_type:
+        if "Storage" in resource_type:
             return ResourceCategory.STORAGE
-        elif "Network" in resource_type:
+        if "Network" in resource_type:
             return ResourceCategory.NETWORK
-        elif "Sql" in resource_type or "Database" in resource_type:
+        if "Sql" in resource_type or "Database" in resource_type:
             return ResourceCategory.DATABASE
-        else:
-            return ResourceCategory.OTHER
+        return ResourceCategory.OTHER
 
 
 class CostOptimizer:
@@ -714,9 +710,7 @@ class BudgetManager:
         time_grain = (
             "Monthly"
             if period == "monthly"
-            else "Quarterly"
-            if period == "quarterly"
-            else "Annually"
+            else "Quarterly" if period == "quarterly" else "Annually"
         )
         return await self.cost_ingestion.create_budget(
             scope, budget_name, amount, time_grain=time_grain

@@ -113,7 +113,7 @@ async def create_traffic_manager_profile(
     except HttpResponseError as exc:
         logger.error("Traffic manager profile create_or_update failed: %s", exc.message)
         return "error", {"code": exc.status_code, "message": exc.message}
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.exception("Unexpected error while creating traffic manager profile")
         return "error", {"message": str(exc)}
     finally:

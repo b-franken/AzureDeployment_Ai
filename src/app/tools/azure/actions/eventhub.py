@@ -72,7 +72,7 @@ async def create_eventhub(
     except HttpResponseError as exc:
         logger.error("Event Hub namespace create_or_update failed: %s", exc.message)
         return "error", {"code": exc.status_code, "message": exc.message}
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.exception("Unexpected error while creating Event Hub namespace")
         return "error", {"message": str(exc)}
     finally:

@@ -23,7 +23,8 @@ class _AsyncToSyncCredential(TokenCredential):
         try:
             asyncio.set_event_loop(loop)
             return cast(
-                AccessToken, loop.run_until_complete(self._async_cred.get_token(*scopes, **kwargs))
+                "AccessToken",
+                loop.run_until_complete(self._async_cred.get_token(*scopes, **kwargs)),
             )
         finally:
             loop.close()
@@ -166,10 +167,10 @@ async def create_policy_assignment(
             return "error", {"code": exc.status_code, "message": exc.message}
 
     ncm_typed = cast(
-        list[NonComplianceMessage] | None,
+        "list[NonComplianceMessage] | None",
         non_compliance_messages,
     )
-    identity_typed = cast(Identity | None, identity)
+    identity_typed = cast("Identity | None", identity)
 
     policy_assignment = PolicyAssignment(
         display_name=display_name,
@@ -245,11 +246,11 @@ async def create_initiative_definition(
             return "error", {"code": exc.status_code, "message": exc.message}
 
     policy_definitions_typed = cast(
-        list[PolicyDefinitionReference] | None,
+        "list[PolicyDefinitionReference] | None",
         policy_definitions,
     )
     policy_definition_groups_typed = cast(
-        list[PolicyDefinitionGroup] | None,
+        "list[PolicyDefinitionGroup] | None",
         policy_definition_groups,
     )
 

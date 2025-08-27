@@ -17,21 +17,25 @@ def validate_and_suggest(action: str, params: dict[str, Any]) -> tuple[bool, str
         "create_keyvault": ["resource_group", "location", "vault_name", "tenant_id"],
         "create_aks": ["resource_group", "location", "name", "dns_prefix"],
         "create_acr": ["resource_group", "location", "name"],
-        "create_sql": ["resource_group", "location", "server_name", "sql_admin_user", "sql_admin_password"],
+        "create_sql": [
+            "resource_group",
+            "location",
+            "server_name",
+            "sql_admin_user",
+            "sql_admin_password",
+        ],
         "create_vnet": ["resource_group", "location", "name", "address_prefix"],
     }
 
     if action not in required_by_action:
         return True, ""
 
-    missing = [p for p in required_by_action[action]
-               if p not in params or not params[p]]
+    missing = [p for p in required_by_action[action] if p not in params or not params[p]]
     if missing:
         suggestions = []
         for param in missing:
             if param == "location":
-                suggestions.append(
-                    "location: westeurope, eastus, northeurope, uksouth")
+                suggestions.append("location: westeurope, eastus, northeurope, uksouth")
             elif param == "resource_group":
                 suggestions.append("resource_group: your-project-dev-rg")
             elif param == "name":

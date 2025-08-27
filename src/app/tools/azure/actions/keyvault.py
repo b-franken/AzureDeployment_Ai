@@ -90,7 +90,7 @@ async def set_keyvault_secret(
     except HttpResponseError as exc:
         logger.error("Failed to set secret: %s", exc.message)
         return "error", {"code": exc.status_code, "message": exc.message}
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.exception("Unexpected error while setting secret")
         return "error", {"message": str(exc)}
     finally:

@@ -95,7 +95,7 @@ def patch_opentelemetry_attributes() -> None:
                                 if is_logger_object(val):
                                     return False
 
-                        if isinstance(value, (list, tuple)) and not isinstance(value, (str, bytes)):
+                        if isinstance(value, list | tuple) and not isinstance(value, str | bytes):
                             for item in value:
                                 if is_logger_object(item):
                                     return False
@@ -135,7 +135,7 @@ def patch_opentelemetry_attributes() -> None:
 
             def filtered_warn(message, category=None, stacklevel=1, source=None):
                 if isinstance(message, str) and "_FixedFindCallerLogger" in message:
-                    return
+                    return None
                 return original_warn(message, category, stacklevel, source)
 
             warnings.warn = filtered_warn
@@ -192,7 +192,7 @@ def patch_logging_handlers() -> None:
                     if not str(k).startswith("_") and not is_logger_object(v)
                 }
 
-            if isinstance(value, (list, tuple)) and not isinstance(value, (str, bytes)):
+            if isinstance(value, list | tuple) and not isinstance(value, str | bytes):
                 cleaned = [clean_value(item) for item in value if not is_logger_object(item)]
                 return type(value)(cleaned) if cleaned else []
 

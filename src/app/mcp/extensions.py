@@ -49,7 +49,7 @@ def _safe_usage_record(item: Any) -> UsageRecord:
             "limit": _coerce_int(limit_val),
             "unit": str(unit_val) if unit_val is not None else None,
         }
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.exception(
             "quota_item.normalize_error", extra={"event": "azure_quotas.normalize_error"}
         )
@@ -73,7 +73,7 @@ def _get_sync_client(
             },
         )
         return None
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.exception(
             "azure_sdk.client_init_error",
             extra={
@@ -119,7 +119,7 @@ async def _fetch_compute_usages(
             exc_info=True,
         )
         return []
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.exception(
             "azure_quotas.compute.unexpected_error",
             extra={
@@ -163,7 +163,7 @@ async def _fetch_network_usages(
             exc_info=True,
         )
         return []
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.exception(
             "azure_quotas.network.unexpected_error",
             extra={
@@ -192,7 +192,7 @@ def register_extensions(server: Any) -> None:
         errors: list[str] = []
         try:
             cred = build_credential()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.exception(
                 "azure_quotas.credential_error",
                 extra={

@@ -159,7 +159,7 @@ return allowed
                 str(float(window)),
                 str(int(burst)),
             )
-            res: Any = await cast(Awaitable[Any], call)
+            res: Any = await cast("Awaitable[Any]", call)
         except (NoScriptError, ResponseError):
             self._sha = await client.script_load(self._script)
             sha2 = self._sha
@@ -174,7 +174,7 @@ return allowed
                 str(float(window)),
                 str(int(burst)),
             )
-            res = await cast(Awaitable[Any], call2)
+            res = await cast("Awaitable[Any]", call2)
         return bool(int(res))
 
 

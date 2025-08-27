@@ -26,7 +26,7 @@ _ALIASES: dict[str, Env] = {
 def normalize_env(value: str) -> Env:
     v = (value or "").strip().lower()
     if v in ALLOWED_ENVS:
-        return cast(Env, v)
+        return cast("Env", v)
     mapped = _ALIASES.get(v)
     if mapped:
         return mapped

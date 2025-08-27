@@ -81,7 +81,7 @@ class CostIngestionService:
             self._consumption_client_sub_id = sub_id
         return self._consumption_client
 
-    @retry_on_error(max_retries=3, delay=1.0, exceptions=(AzureError,))
+    @retry_on_error(max_retries=3, base_delay=1.0, exceptions=(AzureError,))
     async def get_usage_details(
         self,
         scope: str,
@@ -373,7 +373,7 @@ class CostIngestionService:
             recurrence_value: str | None = None
             schedule_any = getattr(result, "schedule", None)
             if schedule_any is not None:
-                schedule = cast(ExportSchedule, schedule_any)
+                schedule = cast("ExportSchedule", schedule_any)
                 status = getattr(schedule, "status", None)
                 recurrence_value = getattr(schedule, "recurrence", None)
             return {

@@ -20,6 +20,7 @@ from app.api.routes.chat import router as chat_router
 from app.api.routes.cost import router as cost_router
 from app.api.routes.deploy import router as deploy_router
 from app.api.routes.health import router as health_router
+from app.api.routes.memory import router as memory_router
 from app.api.routes.metrics import router as metrics_router
 from app.api.routes.review import router as review_router
 from app.api.routes.status import router as status_router
@@ -122,6 +123,7 @@ def _routes() -> list[str]:
 
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(chat_router, prefix="/api/chat", tags=["chat"])
+app.include_router(memory_router, prefix="/api", tags=["memory"])
 app.include_router(review_router, prefix="/api/review", tags=["review"])
 app.include_router(deploy_router, prefix="/api/deploy", tags=["deploy"])
 app.include_router(cost_router, prefix="/api/cost", tags=["cost"])

@@ -60,6 +60,11 @@ class DataStore(ABC):
 
 class PostgresStore(DataStore):
     def __init__(self, dsn: str) -> None:
+        # Convert SQLAlchemy-style DSN to asyncpg-compatible format
+        if dsn.startswith("postgresql+asyncpg://"):
+            dsn = dsn.replace("postgresql+asyncpg://", "postgresql://")
+        elif dsn.startswith("postgres+asyncpg://"):
+            dsn = dsn.replace("postgres+asyncpg://", "postgres://")
         self.dsn = dsn
         self._pool: asyncpg.Pool | None = None
         self._lock = asyncio.Lock()
@@ -287,6 +292,33 @@ class UnifiedDataLayer:
     async def cache_delete(self, key: str) -> None:
         if self._redis:
             await self._redis.delete(key)
+    
+    # Delegation methods for AsyncMemoryStore compatibility
+    async def execute(self, query: str, *args: Any) -> str:
+        if not self._postgres:
+            raise RuntimeError("postgres not configured")
+        return await self._postgres.execute(query, *args)
+    
+    async def fetch(self, query: str, *args: Any) -> list[asyncpg.Record]:
+        if not self._postgres:
+            raise RuntimeError("postgres not configured") 
+        return await self._postgres.fetch(query, *args)
+    
+    async def fetchrow(self, query: str, *args: Any) -> asyncpg.Record | None:
+        if not self._postgres:
+            raise RuntimeError("postgres not configured")
+        return await self._postgres.fetchrow(query, *args)
+    
+    async def fetchval(self, query: str, *args: Any) -> Any:
+        if not self._postgres:
+            raise RuntimeError("postgres not configured")
+        return await self._postgres.fetchval(query, *args)
+    
+    @asynccontextmanager
+    async def connection(self) -> AsyncIterator[asyncpg.Connection]:
+        # Alias for transaction for backward compatibility
+        async with self.transaction() as conn:
+            yield conn
 
     @property
     def pg(self) -> PostgresStore:

@@ -88,7 +88,7 @@ def _error_response(
 ) -> JSONResponse:
     payload: dict[str, Any] = {
         "error_code": error_code,
-        "message": message,
+        "error_message": message,
         "detail": detail,
     }
     headers: dict[str, str] = {}
@@ -179,7 +179,7 @@ def install_error_handlers(app: FastAPI) -> None:
             "Application error",
             extra={
                 "error_code": exc.__class__.__name__,
-                "message": str(exc),
+                "error_message": str(exc),
                 "detail": exc.details,
                 "http_status": status_code,
             },
@@ -216,7 +216,7 @@ def install_error_handlers(app: FastAPI) -> None:
             "HTTP exception",
             extra={
                 "error_code": error_code,
-                "message": message,
+                "error_message": message,
                 "detail": detail_obj if isinstance(detail_obj, (dict | list | tuple)) else None,
                 "http_status": exc.status_code,
             },
@@ -290,7 +290,7 @@ def install_error_handlers(app: FastAPI) -> None:
             "Azure SDK exception",
             extra={
                 "error_code": error_code,
-                "message": message,
+                "error_message": message,
                 "detail": {"type": type(exc).__name__, "message": str(exc)},
                 "http_status": status_code,
             },

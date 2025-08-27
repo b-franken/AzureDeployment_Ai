@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -132,7 +133,7 @@ class AsyncMemoryStore:
                 user_id,
                 role.value,
                 content,
-                merged if merged else None,
+                json.dumps(merged) if merged else None,
             )
         message_id = int(row["id"])
         await self.trim_user_memory(user_id)

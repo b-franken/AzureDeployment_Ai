@@ -3,10 +3,12 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Sequence
+from typing import Any, Dict, List, Optional
 
 from app.ai.reviewer import senior_review
 from app.ai.tools_router import ToolExecutionContext, maybe_call_tool
 from app.core.config import settings
+from app.api.services.memory_service import get_memory_service
 
 # Global cache for capturing rich tool outputs when orchestrator fails
 _rich_output_cache: dict[str, str] = {}
@@ -34,13 +36,53 @@ async def run_chat(
     resource_group: str | None = None,
     environment: str = "dev",
     dry_run: bool = True,
+    store_conversation: bool = True,
+    thread_id: str | None = None,
 ) -> str:
-    mem = list(memory or [])
+    memory_service = get_memory_service()
+    effective_correlation_id = correlation_id or str(uuid.uuid4())
+    
+    # Retrieve user's conversation history if no memory provided and store_conversation is enabled
+    if store_conversation and (not memory or len(memory) == 0):
+        try:
+            historical_memory = await memory_service.get_user_conversation_history(
+                user_id=user_id,
+                limit=10,  # Last 10 messages for context
+                thread_id=thread_id
+            )
+            mem = list(historical_memory)
+            logger.info(f"Retrieved {len(mem)} messages from user memory for context")
+        except Exception as exc:
+            logger.warning(f"Failed to retrieve user memory, using provided memory: {exc}")
+            mem = list(memory or [])
+    else:
+        mem = list(memory or [])
+    
+    # Store user message if conversation storage is enabled
+    user_message_id = None
+    if store_conversation:
+        try:
+            user_message_id = await memory_service.store_user_message(
+                user_id=user_id,
+                content=input_text,
+                thread_id=thread_id,
+                session_id=effective_correlation_id,
+                metadata={
+                    "provider": provider,
+                    "model": model,
+                    "tools_enabled": enable_tools,
+                    "environment": environment
+                }
+            )
+            logger.info(f"Stored user message with ID: {user_message_id}")
+        except Exception as exc:
+            logger.error(f"Failed to store user message: {exc}")
+    
     effective_subscription_id = subscription_id or settings.azure.subscription_id
     context = (
         ToolExecutionContext(
             user_id=user_id,
-            correlation_id=correlation_id or str(uuid.uuid4()),
+            correlation_id=effective_correlation_id,
             subscription_id=effective_subscription_id,
             resource_group=resource_group,
             environment=environment,
@@ -55,6 +97,10 @@ async def run_chat(
         logger.info(
             f"Created tool execution context: correlation_id={context.correlation_id}, max_executions={context.max_tool_executions}, subscription_id={context.subscription_id}"
         )
+    
+    # Track tools that will be used for metadata
+    tools_used: List[str] = []
+    
     result = await maybe_call_tool(
         input_text,
         mem,
@@ -65,6 +111,12 @@ async def run_chat(
         allowlist=list(allowlist or []),
         context=context,
     )
+    
+    # Extract tool usage information if available from context
+    if context and hasattr(context, 'executed_tools'):
+        tools_used = list(context.executed_tools)
+    elif enable_tools and "azure" in result.lower() and "deploy" in result.lower():
+        tools_used = ["azure_provision"]  # Infer tool usage from response content
     
     # Check if we got a generic response when tools were enabled and the input suggests deployment
     if (enable_tools and 
@@ -88,6 +140,30 @@ async def run_chat(
             logger.info(f"Using cached rich output for correlation {correlation_id} instead of generic response")
             cached_output = _rich_output_cache.pop(correlation_id)  # Remove after use
             return cached_output
+    
+    # Store assistant response if conversation storage is enabled
+    if store_conversation:
+        try:
+            assistant_message_id = await memory_service.store_assistant_message(
+                user_id=user_id,
+                content=result,
+                thread_id=thread_id,
+                session_id=effective_correlation_id,
+                model_info={
+                    "provider": provider,
+                    "model": model
+                },
+                tools_used=tools_used,
+                metadata={
+                    "user_message_id": user_message_id,
+                    "response_length": len(result),
+                    "tools_enabled": enable_tools,
+                    "environment": environment
+                }
+            )
+            logger.info(f"Stored assistant response with ID: {assistant_message_id}")
+        except Exception as exc:
+            logger.error(f"Failed to store assistant response: {exc}")
     
     return result
 

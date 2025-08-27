@@ -20,7 +20,9 @@ type ChatMsg = {
     timestamp: Date
 }
 
-type ChatInterfaceProps = { onBack: () => void }
+type ChatInterfaceProps = {
+    onBack: () => void
+}
 
 function splitModel(id: string): { provider: string | null; model: string | null } {
     if (!id) return { provider: null, model: null }
@@ -38,15 +40,19 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
     const [chatHeight, setChatHeight] = useState(500)
     const [isResizing, setIsResizing] = useState(false)
     const [deployToolsEnabled, setDeployToolsEnabled] = useState(false)
+    const [threadId] = useState(() => crypto.randomUUID()) // Persistent thread for memory
+
     const scrollRef = useRef<HTMLDivElement>(null)
     const inputRef = useRef<HTMLTextAreaElement>(null)
     const abortControllerRef = useRef<AbortController | null>(null)
 
     const transport = useMemo<"sse" | "ws">(
-        () => (process.env.NEXT_PUBLIC_CHAT_TRANSPORT || "sse").toLowerCase() === "ws" ? "ws" : "sse",
+        () =>
+            (process.env.NEXT_PUBLIC_CHAT_TRANSPORT || "sse").toLowerCase() === "ws"
+                ? "ws"
+                : "sse",
         []
     )
-
     const wsRef = useRef<ChatSocket | null>(null)
 
     useEffect(() => {
@@ -60,10 +66,12 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
             setChatHeight(next)
         }
         const handleMouseUp = () => setIsResizing(false)
+
         if (isResizing) {
             document.addEventListener("mousemove", handleMouseMove)
             document.addEventListener("mouseup", handleMouseUp)
         }
+
         return () => {
             document.removeEventListener("mousemove", handleMouseMove)
             document.removeEventListener("mouseup", handleMouseUp)
@@ -82,59 +90,105 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
 
     const handleSend = async () => {
         if (!input.trim() || isLoading) return
+
         if (abortControllerRef.current) abortControllerRef.current.abort()
 
         const now = new Date()
-        const userMessage: ChatMsg = { id: crypto.randomUUID(), role: "user", content: input, timestamp: now }
+        const userMessage: ChatMsg = {
+            id: crypto.randomUUID(),
+            role: "user",
+            content: input,
+            timestamp: now,
+        }
         setMessages((prev) => [...prev, userMessage])
         setInput("")
         setIsLoading(true)
 
-        // create assistant placeholder message before starting network calls
         const assistantId = crypto.randomUUID()
-        setMessages((prev) => [...prev, { id: assistantId, role: "assistant", content: "", timestamp: new Date() }])
+        setMessages((prev) => [
+            ...prev,
+            { id: assistantId, role: "assistant", content: "", timestamp: new Date() },
+        ])
 
         try {
-            const history = [...messages, userMessage].map((m) => ({ role: m.role, content: m.content }))
+            // For memory-enabled conversations, we send less history since backend retrieves it
+            const history = messages.length > 5 
+                ? [...messages.slice(-3), userMessage].map((m) => ({
+                    role: m.role,
+                    content: m.content,
+                }))
+                : [...messages, userMessage].map((m) => ({
+                    role: m.role,
+                    content: m.content,
+                }))
             const { provider, model } = splitModel(modelId)
-
-            const intentDeploy = /\b(proceed|confirm|deploy confirmed)\b/i.test(userMessage.content)
+            const intentDeploy = /\b(proceed|confirm|deploy confirmed)\b/i.test(
+                userMessage.content
+            )
             const doDeploy = deployToolsEnabled || intentDeploy
 
             if (!doDeploy) {
                 abortControllerRef.current = new AbortController()
                 const fullContent = await chatStream(
                     API_BASE_URL,
-                    { input: userMessage.content, memory: history.slice(0, -1), provider, model, enable_tools: false },
+                    {
+                        input: userMessage.content,
+                        memory: history.slice(0, -1),
+                        provider,
+                        model,
+                        enable_tools: false,
+                    },
                     (delta: string) => {
-                        setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + delta } : m)))
+                        setMessages((prev) =>
+                            prev.map((m) =>
+                                m.id === assistantId ? { ...m, content: m.content + delta } : m
+                            )
+                        )
                     },
                     abortControllerRef.current.signal
                 )
                 setMessages((prev) =>
-                    prev.map((m) => (m.id === assistantId ? { ...m, content: fullContent, timestamp: new Date() } : m))
+                    prev.map((m) =>
+                        m.id === assistantId
+                            ? { ...m, content: fullContent, timestamp: new Date() }
+                            : m
+                    )
                 )
             } else {
                 try {
-                    const reply = await call_chat(
-                        userMessage.content,
-                        history.slice(0, -1),
-                        { provider, model, enable_tools: true, dry_run: false }
-                    )
+                    const reply = await call_chat(userMessage.content, history.slice(0, -1), {
+                        provider,
+                        model,
+                        enable_tools: true,
+                        dry_run: false,
+                    })
                     setMessages((prev) =>
-                        prev.map((m) => (m.id === assistantId ? { ...m, content: reply, timestamp: new Date() } : m))
+                        prev.map((m) =>
+                            m.id === assistantId
+                                ? { ...m, content: reply, timestamp: new Date() }
+                                : m
+                        )
                     )
                 } catch (deployError: any) {
-                    const errorMsg = `Deployment failed: ${deployError?.message || 'Unknown error'}.\n\nPlease try again or check your Azure configuration.`
+                    const errorMsg = `Deployment failed: ${deployError?.message || "Unknown error"
+                        }.\n\nPlease try again or check your Azure configuration.`
                     setMessages((prev) =>
-                        prev.map((m) => (m.id === assistantId ? { ...m, content: errorMsg, timestamp: new Date() } : m))
+                        prev.map((m) =>
+                            m.id === assistantId
+                                ? { ...m, content: errorMsg, timestamp: new Date() }
+                                : m
+                        )
                     )
                 }
             }
         } catch (error: any) {
-            const errorMsg = `Request failed: ${error?.message || 'Unknown error'}`
+            const errorMsg = `Request failed: ${error?.message || "Unknown error"}`
             setMessages((prev) =>
-                prev.map((m) => (m.id === assistantId ? { ...m, content: errorMsg, timestamp: new Date() } : m))
+                prev.map((m) =>
+                    m.id === assistantId
+                        ? { ...m, content: errorMsg, timestamp: new Date() }
+                        : m
+                )
             )
         } finally {
             setIsLoading(false)
@@ -156,10 +210,16 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
         }
     }
 
-    const lastUserMsg = messages.filter((m) => m.role === "user").slice(-1)[0]?.content ?? ""
+    const lastUserMsg =
+        messages.filter((m) => m.role === "user").slice(-1)[0]?.content ?? ""
 
     const handleReviewComplete = (text: string) => {
-        const reviewMessage: ChatMsg = { id: crypto.randomUUID(), role: "assistant", content: `Review:\n${text}`, timestamp: new Date() }
+        const reviewMessage: ChatMsg = {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: `Review:\n${text}`,
+            timestamp: new Date(),
+        }
         setMessages((prev) => [...prev, reviewMessage])
     }
 
@@ -168,20 +228,34 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
             <div className="glass overflow-hidden rounded-2xl shadow-2xl">
                 <div className="flex items-center justify-between border-b border-white/10 p-4">
                     <div className="flex items-center gap-3">
-                        <Button variant="ghost" size="icon" onClick={onBack} className="glass-hover">
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={onBack}
+                            className="glass-hover"
+                        >
                             <ArrowLeft className="h-5 w-5" />
                         </Button>
                         <div className="flex items-center gap-2">
                             <div className="h-2 w-2 animate-pulse rounded-full bg-green-500" />
-                            <span className="text-sm text-muted-foreground">AI Assistant Online</span>
+                            <span className="text-sm text-muted-foreground">
+                                AI Assistant Online
+                            </span>
                         </div>
                     </div>
                     <div className="flex items-center gap-3">
                         <LLMSelector value={modelId} onChange={setModelId} />
                         <div className="hidden sm:flex items-center gap-3">
-                            <DeployButton enabled={deployToolsEnabled} onToggle={setDeployToolsEnabled} />
+                            <DeployButton
+                                enabled={deployToolsEnabled}
+                                onToggle={setDeployToolsEnabled}
+                            />
                             <ReviewButton
-                                getPayload={() => ({ chatId: "main", message: lastUserMsg || input, model: modelId })}
+                                getPayload={() => ({
+                                    chatId: "main",
+                                    message: lastUserMsg || input,
+                                    model: modelId,
+                                })}
                                 onComplete={handleReviewComplete}
                             />
                         </div>
@@ -191,7 +265,13 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
                 <ScrollArea className="p-4" style={{ height: `${chatHeight}px` }}>
                     <div className="space-y-4">
                         {messages.map((message) => (
-                            <div key={message.id} className={cn("flex gap-3", message.role === "user" ? "justify-end" : "justify-start")}>
+                            <div
+                                key={message.id}
+                                className={cn(
+                                    "flex gap-3",
+                                    message.role === "user" ? "justify-end" : "justify-start"
+                                )}
+                            >
                                 {message.role === "assistant" && (
                                     <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500">
                                         <Bot className="h-4 w-4 text-white" />
@@ -200,9 +280,9 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
                                 <div
                                     className={cn(
                                         "relative rounded-xl px-4 py-3 group",
-                                        message.role === "user" 
-                                            ? "max-w-[80%] bg-blue-500 text-white" 
-                                            : "max-w-[95%] bg-blue-600 text-black"
+                                        message.role === "user"
+                                            ? "max-w-[80%] bg-gradient-to-br from-blue-500/80 to-cyan-500/80 text-white backdrop-blur-sm"
+                                            : "max-w-[95%] bg-gradient-to-br from-white/80 to-gray-100/80 text-black backdrop-blur-sm border border-white/20"
                                     )}
                                 >
                                     <MessageContent
@@ -217,7 +297,11 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
                                             className="h-6 w-6 opacity-0 transition-opacity group-hover:opacity-100"
                                             onClick={() => handleCopy(message.content, message.id)}
                                         >
-                                            {copiedId === message.id ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                                            {copiedId === message.id ? (
+                                                <Check className="h-3 w-3" />
+                                            ) : (
+                                                <Copy className="h-3 w-3" />
+                                            )}
                                         </Button>
                                     </div>
                                 </div>
@@ -228,12 +312,13 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
                                 )}
                             </div>
                         ))}
+
                         {isLoading && messages[messages.length - 1]?.content === "" && (
                             <div className="flex gap-3">
                                 <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500">
                                     <Bot className="h-4 w-4 text-white" />
                                 </div>
-                                <div className="glass rounded-xl px-4 py-3">
+                                <div className="bg-gradient-to-br from-white/80 to-gray-100/80 backdrop-blur-sm border border-white/20 rounded-xl px-4 py-3">
                                     <div className="flex gap-1">
                                         <div className="h-2 w-2 animate-bounce rounded-full bg-blue-400" />
                                         <div className="animation-delay-200 h-2 w-2 animate-bounce rounded-full bg-blue-400" />
@@ -274,7 +359,9 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
                     </div>
                     <div className="mt-3 flex items-center gap-4">
                         <span className="text-xs text-muted-foreground">
-                            {deployToolsEnabled && "Deploy tools enabled • "}Press Enter to send, Shift+Enter for new line
+                            {deployToolsEnabled &&
+                                "Deploy tools enabled • "}Press Enter to send, Shift+Enter for new
+                            line
                         </span>
                     </div>
                 </div>

@@ -86,6 +86,7 @@ async def chat(
                              "X-Accel-Buffering": "no"},
                 )
             correlation_id = getattr(request.state, "correlation_id", None)
+            thread_id = getattr(req, "thread_id", None) or correlation_id
             text = await run_chat(
                 req.input,
                 [m.model_dump() for m in req.memory or []],
@@ -100,6 +101,8 @@ async def chat(
                 resource_group=req.resource_group,
                 environment=req.environment,
                 dry_run=req.dry_run,
+                store_conversation=True,
+                thread_id=thread_id,
             )
             return JSONResponse(content=ChatResponse(output=text).model_dump())
         except BaseApplicationException as exc:
@@ -126,6 +129,7 @@ async def chat_v2(
         span.set_attribute("correlation_id", body.correlation_id)
         start = time.time()
         try:
+            thread_id = getattr(body, "thread_id", None) or body.correlation_id
             out = await run_chat(
                 input_text=body.input,
                 memory=body.memory,
@@ -140,6 +144,8 @@ async def chat_v2(
                 resource_group=body.resource_group,
                 environment=body.environment,
                 dry_run=body.dry_run,
+                store_conversation=True,
+                thread_id=thread_id,
             )
             took = time.time() - start
             return {

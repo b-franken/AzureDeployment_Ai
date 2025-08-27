@@ -95,6 +95,7 @@ class Clients:
         return await asyncio.to_thread(fn, *args, **kwargs)
 
     async def close(self) -> None:
+        # Close client connections first
         for attr in (
             "res",
             "stor",
@@ -113,19 +114,34 @@ class Clients:
             "redis",
             "pdns",
         ):
-            obj = getattr(self, attr, None)
-            close = getattr(obj, "close", None)
-            if callable(close):
-                if inspect.iscoroutinefunction(close):
-                    await close()
-                else:
-                    await asyncio.to_thread(close)
-        cclose = getattr(self.cred, "close", None)
-        if callable(cclose):
-            await cclose()
-        sclose = getattr(self.cred_sync, "close", None)
-        if callable(sclose):
-            await asyncio.to_thread(sclose)
+            try:
+                obj = getattr(self, attr, None)
+                if obj is None:
+                    continue
+                close = getattr(obj, "close", None)
+                if callable(close):
+                    if inspect.iscoroutinefunction(close):
+                        await close()
+                    else:
+                        await asyncio.to_thread(close)
+            except Exception as e:
+                # Log individual client close errors but don't fail the whole cleanup
+                logger.debug(f"Error closing client {attr}: {e}")
+                
+        # Close credentials last
+        try:
+            cclose = getattr(self.cred, "close", None)
+            if callable(cclose):
+                await cclose()
+        except Exception as e:
+            logger.debug(f"Error closing async credential: {e}")
+            
+        try:
+            sclose = getattr(self.cred_sync, "close", None)
+            if callable(sclose):
+                await asyncio.to_thread(sclose)
+        except Exception as e:
+            logger.debug(f"Error closing sync credential: {e}")
 
 
 _CACHE: OrderedDict[str, tuple[Clients, int]] = OrderedDict()
@@ -151,8 +167,10 @@ class AzureOperationError(Exception):
 
 async def _dispose(clients: Clients) -> None:
     try:
+        # Close all client connections gracefully
         await clients.close()
     except Exception as exc:
+        # Log but don't propagate disposal errors as they're not critical
         logger.warning(
             "azure_clients.dispose_error",
             extra={"subscription_id": clients.subscription_id, "error": str(exc)},
@@ -162,11 +180,13 @@ async def _dispose(clients: Clients) -> None:
 
 async def _build_clients(sid: str) -> tuple[Clients, int]:
     logger.debug("azure_clients.build.start", extra={"subscription_id": sid})
-    cred_async = await _credential_async()
-    token = await cred_async.get_token(_TOKEN_SCOPE)
-    expiry = int(token.expires_on) - _EXPIRY_MARGIN_SECONDS
-    cred_sync = _credential_sync()
+    # Create fresh credentials for each client instance to avoid shared transport issues
+    cred_async = await build_async_credential(use_cache=False)
     try:
+        token = await cred_async.get_token(_TOKEN_SCOPE)
+        expiry = int(token.expires_on) - _EXPIRY_MARGIN_SECONDS
+        cred_sync = build_credential(use_cache=False)
+        
         clients = Clients(
             subscription_id=sid,
             cred=cred_async,
@@ -194,14 +214,13 @@ async def _build_clients(sid: str) -> tuple[Clients, int]:
         )
         return clients, expiry
     except Exception as exc:
+        # Only close credentials if client creation failed
         try:
             close_async = getattr(cred_async, "close", None)
             if callable(close_async):
                 await close_async()
-        finally:
-            close_sync = getattr(cred_sync, "close", None)
-            if callable(close_sync):
-                await asyncio.to_thread(close_sync)
+        except Exception:
+            pass  # Ignore cleanup errors
         logger.error(
             "azure_clients.build.error",
             extra={"subscription_id": sid, "error_type": type(exc).__name__, "error": str(exc)},
@@ -218,21 +237,35 @@ async def get_clients(subscription_id: str | None) -> Clients:
         if entry:
             clients, expiry = entry
             if expiry <= now:
-                await _dispose(clients)
+                # Schedule disposal asynchronously to avoid blocking
+                asyncio.create_task(_dispose(clients))
                 _CACHE.pop(sid, None)
                 logger.debug("azure_clients.cache.expired", extra={"subscription_id": sid})
             else:
                 _CACHE.move_to_end(sid)
                 logger.debug("azure_clients.cache.hit", extra={"subscription_id": sid})
                 return clients
-        clients, expiry = await _build_clients(sid)
-        _CACHE[sid] = (clients, expiry)
-        _CACHE.move_to_end(sid)
-        while len(_CACHE) > _CACHE_MAX_SIZE:
-            _, (old_clients, _) = _CACHE.popitem(last=False)
-            await _dispose(old_clients)
-        logger.debug("azure_clients.cache.miss", extra={"subscription_id": sid})
-        return clients
+        
+        # Build new clients
+        try:
+            clients, expiry = await _build_clients(sid)
+            _CACHE[sid] = (clients, expiry)
+            _CACHE.move_to_end(sid)
+            
+            # Clean up old entries asynchronously
+            while len(_CACHE) > _CACHE_MAX_SIZE:
+                _, (old_clients, _) = _CACHE.popitem(last=False)
+                asyncio.create_task(_dispose(old_clients))
+            
+            logger.debug("azure_clients.cache.miss", extra={"subscription_id": sid})
+            return clients
+        except Exception as exc:
+            logger.error(
+                "azure_clients.get_clients.error",
+                extra={"subscription_id": sid, "error_type": type(exc).__name__, "error": str(exc)},
+                exc_info=True,
+            )
+            raise
 
 
 def _http_status(e: BaseException) -> int | None:

@@ -74,6 +74,10 @@ class ApplicationInsights:
                 "django": {"enabled": False},
                 "flask": {"enabled": False},
                 "azure_sdk": {"enabled": True},
+                "httpx": {"enabled": True},
+                "requests": {"enabled": True},
+                "urllib": {"enabled": True},
+                "urllib3": {"enabled": True},
             },
         )
 

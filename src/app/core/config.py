@@ -218,6 +218,7 @@ class Settings(BaseSettings):
     app_version: str = "2.0.0"
     environment: Literal["development", "staging", "production"] = "development"
     debug: bool = False
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 
     api_host: str = "0.0.0.0"
     api_port: int = Field(default=8000, ge=1024, le=65535)

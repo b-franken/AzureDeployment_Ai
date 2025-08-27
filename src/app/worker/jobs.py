@@ -2,7 +2,7 @@
 import asyncio
 from typing import Any
 
-from app.tools.provision.terraform_runner import plan_and_apply
+from app.tools.azure.utils.terraform_runner import plan_and_apply
 
 
 def run() -> None:

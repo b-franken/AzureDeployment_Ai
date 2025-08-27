@@ -98,7 +98,11 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
         
         // Check for duplicate requests (same content already pending)
         if (pendingRequestRef.current === currentInput) {
-            console.warn("Duplicate request detected, skipping")
+            console.warn("Duplicate request detected, skipping", {
+                currentInput,
+                isLoading,
+                timestamp: new Date().toISOString(),
+            })
             return
         }
 

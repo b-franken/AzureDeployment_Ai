@@ -77,7 +77,22 @@ class ApplicationInsights:
                     "record_exception": True,
                     "capture_headers": True,
                 },
-                "psycopg2": {"enabled": True},
+                "psycopg2": {
+                    "enabled": True,
+                    "record_exception": True,
+                    "capture_query": True,
+                    "capture_parameters": False,  # Security: don't capture sensitive data
+                },
+                "asyncpg": {
+                    "enabled": True,
+                    "record_exception": True,
+                    "capture_query": True,
+                    "capture_parameters": False,  # Security: don't capture sensitive data
+                },
+                "postgresql": {
+                    "enabled": True,
+                    "record_exception": True,
+                },
                 "django": {"enabled": False},
                 "flask": {"enabled": False},
                 "azure_sdk": {
@@ -110,6 +125,10 @@ class ApplicationInsights:
 
         # Explicitly instrument HTTP clients for OpenAI visibility
         self._setup_http_instrumentation()
+        
+        # Explicitly instrument database connections for PostgreSQL visibility
+        self._setup_database_instrumentation()
+        
         self._setup_custom_metrics()
         self._configure_logger_levels()
 
@@ -259,6 +278,47 @@ class ApplicationInsights:
             
         except Exception as e:
             logger.warning(f"Failed to configure HTTP instrumentation: {e}")
+
+    def _setup_database_instrumentation(self) -> None:
+        """Explicitly set up database instrumentation for PostgreSQL visibility in Application Map."""
+        try:
+            # Import and instrument AsyncPG if available
+            try:
+                from opentelemetry.instrumentation.asyncpg import AsyncPGInstrumentor
+                
+                AsyncPGInstrumentor().instrument(
+                    tracer_provider=trace.get_tracer_provider(),
+                    enable_commenter=True,
+                    commenter_options={
+                        "db_driver": True,
+                        "dbapi_threadsafety": True,
+                        "dbapi_level": True,
+                        "libpq_version": True,
+                        "driver_paramstyle": True,
+                    },
+                )
+                logger.info("AsyncPG database instrumentation configured successfully")
+                
+            except ImportError:
+                logger.debug("AsyncPG instrumentation not available, skipping")
+            
+            # Import and instrument psycopg2 if available (fallback)
+            try:
+                from opentelemetry.instrumentation.psycopg2 import Psycopg2Instrumentor
+                
+                Psycopg2Instrumentor().instrument(
+                    tracer_provider=trace.get_tracer_provider(),
+                    enable_commenter=True,
+                )
+                logger.info("Psycopg2 database instrumentation configured successfully")
+                
+            except ImportError:
+                logger.debug("Psycopg2 instrumentation not available, skipping")
+                
+            logger.info("Database instrumentation setup completed")
+            
+        except Exception as e:
+            logger.warning(f"Failed to configure database instrumentation: {e}")
 
     def _http_request_hook(self, span: Any, request: Any) -> None:
         """Hook to enrich HTTP request spans with additional context."""

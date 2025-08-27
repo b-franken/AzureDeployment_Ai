@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...provision.terraform_runner import TerraformError, plan_and_apply
+from ...azure.utils.terraform_runner import TerraformError, plan_and_apply
 from .base import Backend
 
 

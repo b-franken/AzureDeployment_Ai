@@ -1,4 +1,3 @@
-# src/app/api/routes/chat.py
 from __future__ import annotations
 
 import asyncio
@@ -24,7 +23,6 @@ tracer = trace.get_tracer(__name__)
 
 try:
     from app.api.routes import auth as auth_module
-
     AUTH_AVAILABLE = True
 except ImportError:
     auth_module = None
@@ -36,7 +34,6 @@ if IS_DEVELOPMENT:
 
 
 async def get_optional_user(request: Request) -> dict[str, Any]:
-    """Get user info as a dict to avoid serialization issues."""
     if IS_DEVELOPMENT:
         auth_header = request.headers.get("authorization", "")
         if not auth_header:
@@ -46,7 +43,6 @@ async def get_optional_user(request: Request) -> dict[str, Any]:
                 "subscription_id": "12345678-1234-1234-1234-123456789012",
                 "is_active": True,
             }
-
     if AUTH_AVAILABLE and auth_module is not None:
         token_data = await auth_module.auth_required(request)
         return {
@@ -55,16 +51,13 @@ async def get_optional_user(request: Request) -> dict[str, Any]:
             "subscription_id": token_data.subscription_id,
             "is_active": True,
         }
-
     auth_header = request.headers.get("authorization", "")
     if not auth_header:
         raise AuthenticationException("Authentication required")
-
     return {"email": "token-user", "roles": ["user"], "subscription_id": None, "is_active": True}
 
 
 def get_user_email(user: dict[str, Any] | Any) -> str:
-    """Safely extract email from user object."""
     if isinstance(user, dict):
         return user.get("email", "anonymous")
     return getattr(user, "email", "anonymous")
@@ -84,31 +77,15 @@ async def chat(
         span.set_attribute("llm.model.requested", req.model or "")
         span.set_attribute("chat.stream", bool(stream))
         span.set_attribute("chat.tools.enabled", bool(req.enable_tools))
-
         try:
             if stream and not req.enable_tools:
-                logger.info(
-                    "chat stream start user=%s provider=%s model=%s",
-                    user_email,
-                    req.provider,
-                    req.model,
-                )
                 return StreamingResponse(
                     _stream_plain_chat(req, current_user),
                     media_type="text/event-stream",
-                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+                    headers={"Cache-Control": "no-cache",
+                             "X-Accel-Buffering": "no"},
                 )
-
-            logger.info(
-                "chat request user=%s provider=%s model=%s",
-                user_email,
-                req.provider,
-                req.model,
-            )
-
-            # Get correlation ID from middleware or create new one
             correlation_id = getattr(request.state, "correlation_id", None)
-
             text = await run_chat(
                 req.input,
                 [m.model_dump() for m in req.memory or []],
@@ -116,31 +93,24 @@ async def chat(
                 req.model,
                 req.enable_tools,
                 req.preferred_tool,
-                req.allowlist,
+                list(req.allowlist or []),
                 user_id=user_email,
-                correlation_id=correlation_id,
+                correlation_id=correlation_id or req.correlation_id,
+                subscription_id=req.subscription_id,
+                resource_group=req.resource_group,
+                environment=req.environment,
+                dry_run=req.dry_run,
             )
-
-            logger.info(
-                "chat completed user=%s bytes=%d",
-                user_email,
-                len(text or ""),
-            )
-
             return JSONResponse(content=ChatResponse(output=text).model_dump())
-
         except BaseApplicationException as exc:
             msg = exc.user_message or "Failed to process request."
             span.set_status(Status(StatusCode.ERROR, msg))
             logger.exception("chat failed user=%s msg=%s", user_email, msg)
             return JSONResponse(content=ChatResponse(output=msg).model_dump())
-
         except Exception as exc:
             span.set_status(Status(StatusCode.ERROR, str(exc)))
             logger.exception("chat failed user=%s", user_email)
-            return JSONResponse(
-                content=ChatResponse(output="Failed to process request.").model_dump()
-            )
+            return JSONResponse(content=ChatResponse(output="Failed to process request.").model_dump())
 
 
 @router.post("/v2")
@@ -155,7 +125,6 @@ async def chat_v2(
         span.set_attribute("llm.model.requested", body.model or "")
         span.set_attribute("correlation_id", body.correlation_id)
         start = time.time()
-
         try:
             out = await run_chat(
                 input_text=body.input,
@@ -167,25 +136,18 @@ async def chat_v2(
                 allowlist=None,
                 user_id=user_email,
                 correlation_id=body.correlation_id,
+                subscription_id=body.subscription_id,
+                resource_group=body.resource_group,
+                environment=body.environment,
+                dry_run=body.dry_run,
             )
-
             took = time.time() - start
-            span.set_attribute("chat.processing_time_ms", int(took * 1000))
-
-            logger.info(
-                "chat_v2 completed user=%s ms=%d bytes=%d",
-                user_email,
-                int(took * 1000),
-                len(out or ""),
-            )
-
             return {
                 "response": out,
                 "correlation_id": body.correlation_id,
                 "processing_time": took,
                 "user": user_email,
             }
-
         except BaseApplicationException as exc:
             msg = exc.user_message or "Failed to process request."
             span.set_status(Status(StatusCode.ERROR, msg))
@@ -196,7 +158,6 @@ async def chat_v2(
                 "processing_time": time.time() - start,
                 "user": user_email,
             }
-
         except Exception as exc:
             span.set_status(Status(StatusCode.ERROR, str(exc)))
             logger.exception("chat_v2 failed user=%s", user_email)
@@ -214,13 +175,12 @@ async def _stream_plain_chat(req: ChatRequest, user: dict[str, Any]) -> AsyncGen
         span.set_attribute("auth.user", user_email)
         span.set_attribute("llm.provider.requested", req.provider or "")
         span.set_attribute("llm.model.requested", req.model or "")
-
         try:
             llm, model = await get_provider_and_model(req.provider, req.model)
             memory = [m.model_dump() for m in req.memory or []]
-            messages = [{"role": m["role"], "content": m["content"]} for m in memory]
+            messages = [{"role": m["role"], "content": m["content"]}
+                        for m in memory]
             messages.append({"role": "user", "content": req.input})
-
             if not hasattr(llm, "chat_stream"):
                 text = await run_chat(
                     req.input,
@@ -230,29 +190,28 @@ async def _stream_plain_chat(req: ChatRequest, user: dict[str, Any]) -> AsyncGen
                     req.enable_tools,
                     req.preferred_tool,
                     req.allowlist,
+                    dry_run=req.dry_run,
                 )
                 chunk = 2048
                 for i in range(0, len(text), chunk):
-                    yield f"data: {text[i : i + chunk]}\n\n".encode()
+                    yield f"data: {text[i: i + chunk]}\n\n".encode()
                     await asyncio.sleep(0)
                 yield b"data: [DONE]\n\n"
                 return
-
             async for token in llm.chat_stream(model=model, messages=messages):
                 if token:
                     yield f"data: {token}\n\n".encode()
                     await asyncio.sleep(0)
             yield b"data: [DONE]\n\n"
-
         except BaseApplicationException as exc:
             msg = exc.user_message or "Failed to process request."
             span.set_status(Status(StatusCode.ERROR, msg))
-            logger.exception("chat stream failed user=%s msg=%s", user_email, msg)
+            logger.exception(
+                "chat stream failed user=%s msg=%s", user_email, msg)
             yield f"data: {msg}\n\n".encode()
             yield b"data: [DONE]\n\n"
-
-        except Exception as exc:
-            span.set_status(Status(StatusCode.ERROR, str(exc)))
+        except Exception:
+            span.set_status(Status(StatusCode.ERROR, "stream.error"))
             logger.exception("chat stream failed user=%s", user_email)
             yield b"data: Failed to process request.\n\n"
             yield b"data: [DONE]\n\n"

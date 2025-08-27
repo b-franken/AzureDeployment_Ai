@@ -224,10 +224,7 @@ class AzureProvision(Tool):
                         "location": params.get("location"),
                         "cost_warning": "This will create real Azure resources and may incur charges",
                     }
-                    return ok(
-                        f"Deployment Plan Ready - {canonical_action} (ID: {deployment_id})",
-                        detailed_plan,
-                    )
+                    return ok(f"Deployment Plan Ready - {canonical_action} (ID: {deployment_id})", detailed_plan)
 
                 estimated_cost = estimate_basic_cost(canonical_action, params)
                 detailed_preview = {
@@ -245,10 +242,7 @@ class AzureProvision(Tool):
                     "environment": env,
                     "cost_warning": "This will create real Azure resources and may incur charges",
                 }
-                return ok(
-                    f"Deployment Preview Ready - {canonical_action} (ID: {deployment_id})",
-                    detailed_preview,
-                )
+                return ok(f"Deployment Preview Ready - {canonical_action} (ID: {deployment_id})", detailed_preview)
             except Exception as e:
                 estimated_cost = estimate_basic_cost(canonical_action, params)
                 fallback_preview = {
@@ -267,10 +261,7 @@ class AzureProvision(Tool):
                     "environment": env,
                     "cost_warning": "This will create real Azure resources and may incur charges",
                 }
-                return ok(
-                    f"Basic Preview Ready - {canonical_action} (ID: {deployment_id})",
-                    fallback_preview,
-                )
+                return ok(f"Basic Preview Ready - {canonical_action} (ID: {deployment_id})", fallback_preview)
         except Exception as e:
             msg = str(e)
             if "AccountKey" in msg or "password" in msg.lower():

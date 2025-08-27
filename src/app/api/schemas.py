@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Sequence
-from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 
 class ChatMessage(BaseModel):
@@ -21,6 +20,11 @@ class ChatRequest(BaseModel):
     enable_tools: bool = False
     preferred_tool: str | None = None
     allowlist: Sequence[str] | None = None
+    dry_run: bool = True
+    correlation_id: str | None = None
+    subscription_id: str | None = None
+    resource_group: str | None = None
+    environment: str = "dev"
 
 
 class ChatResponse(BaseModel):
@@ -34,6 +38,10 @@ class ChatRequestV2(BaseModel):
     model: str | None = None
     enable_tools: bool = True
     correlation_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    dry_run: bool = True
+    subscription_id: str | None = None
+    resource_group: str | None = None
+    environment: str = "dev"
 
 
 class ReviewRequest(BaseModel):
@@ -52,7 +60,6 @@ class TokenData(BaseModel):
     email: str
     subscription_id: str | None = None
     roles: list[str] = Field(default_factory=list)
-    expires_at: datetime
 
 
 class AuthRequest(BaseModel):
@@ -65,25 +72,17 @@ class DeploymentRequest(BaseModel):
     request: str = Field(..., min_length=1, max_length=5000)
     subscription_id: str = Field(..., pattern=r"^[a-f0-9-]{36}$")
     resource_group: str | None = None
-    environment: str = "development"
+    environment: str = "dev"
     dry_run: bool = True
     cost_limit: float | None = Field(default=None, ge=0)
     tags: dict[str, str] = Field(default_factory=dict)
     correlation_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
 
-    @field_validator("environment")
-    @classmethod
-    def validate_environment(cls, v: str) -> str:
-        allowed = ["development", "staging", "production"]
-        if v not in allowed:
-            raise ValueError("environment must be one of development, staging, production")
-        return v
-
 
 class CostAnalysisRequest(BaseModel):
     subscription_id: str
-    start_date: datetime
-    end_date: datetime
+    start_date: str
+    end_date: str
     group_by: list[str] | None = None
     include_forecast: bool = False
     include_recommendations: bool = False
@@ -102,12 +101,8 @@ class CostAnalysisResponse(BaseModel):
 
 class StructuredChatRequest(BaseModel):
     input: str = Field(..., min_length=1)
-    schema_: dict[str, Any] = Field(
-        ...,
-        description="JSON Schema for the expected output",
-        validation_alias="schema",
-        serialization_alias="schema",
-    )
+    schema_: dict[str, Any] = Field(..., validation_alias="schema",
+                                    serialization_alias="schema")
     provider: str | None = None
     model: str | None = None
 

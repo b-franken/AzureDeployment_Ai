@@ -24,11 +24,10 @@ async def run_chat(
     subscription_id: str | None = None,
     resource_group: str | None = None,
     environment: str = "dev",
+    dry_run: bool = True,
 ) -> str:
     mem = list(memory or [])
-
     effective_subscription_id = subscription_id or settings.azure.subscription_id
-
     context = (
         ToolExecutionContext(
             user_id=user_id,
@@ -37,18 +36,16 @@ async def run_chat(
             resource_group=resource_group,
             environment=environment,
             audit_enabled=True,
-            dry_run=True,
+            dry_run=bool(dry_run),
             max_tool_executions=5,
         )
         if enable_tools
         else None
     )
-
     if context:
         logger.info(
             f"Created tool execution context: correlation_id={context.correlation_id}, max_executions={context.max_tool_executions}, subscription_id={context.subscription_id}"
         )
-
     return await maybe_call_tool(
         input_text,
         mem,

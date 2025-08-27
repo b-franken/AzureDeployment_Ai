@@ -14,7 +14,6 @@ export class ApiError extends Error {
 }
 
 export type ChatMsg = { role: "user" | "assistant" | "system"; content: string }
-
 type JSONObject = Record<string, unknown>
 
 class APIClient {
@@ -157,6 +156,10 @@ export type ChatRequest = {
   enable_tools?: boolean
   preferred_tool?: string | null
   allowlist?: string[] | null
+  dry_run?: boolean
+  subscription_id?: string | null
+  resource_group?: string | null
+  environment?: string
 }
 
 export type ReviewRequest = {
@@ -192,6 +195,10 @@ export async function chat(
     enable_tools?: boolean
     preferred_tool?: string | null
     allowlist?: string[] | null
+    dry_run?: boolean
+    subscription_id?: string | null
+    resource_group?: string | null
+    environment?: string
   },
   model?: string | null,
   enable_tools?: boolean,
@@ -204,6 +211,10 @@ export async function chat(
   const tools = isOpts ? !!providerOrOpts.enable_tools : !!enable_tools
   const pref = isOpts ? providerOrOpts.preferred_tool ?? null : preferred_tool ?? null
   const allow = isOpts ? providerOrOpts.allowlist ?? [] : allowlist ?? []
+  const dry = isOpts ? providerOrOpts.dry_run : undefined
+  const sub = isOpts ? providerOrOpts.subscription_id : undefined
+  const rg = isOpts ? providerOrOpts.resource_group : undefined
+  const env = isOpts ? providerOrOpts.environment : undefined
   const data = await apiClient.post<{ output: string }>(
     "/api/chat?stream=false",
     {
@@ -213,7 +224,11 @@ export async function chat(
       model: mdl,
       enable_tools: tools,
       preferred_tool: pref,
-      allowlist: allow
+      allowlist: allow,
+      dry_run: dry,
+      subscription_id: sub,
+      resource_group: rg,
+      environment: env,
     },
     { context: "chat" }
   )
@@ -230,6 +245,10 @@ export async function chatV2(
     model?: string | null
     enable_tools?: boolean
     correlation_id?: string
+    dry_run?: boolean
+    subscription_id?: string | null
+    resource_group?: string | null
+    environment?: string
   }
 ): Promise<ChatV2Response> {
   const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {}
@@ -243,12 +262,7 @@ export async function review_once(
 ): Promise<string> {
   const data = await apiClient.post<{ output: string }>(
     "/api/review",
-    {
-      user_input,
-      assistant_reply,
-      provider: opts?.provider,
-      model: opts?.model
-    },
+    { user_input, assistant_reply, provider: opts?.provider, model: opts?.model },
     { context: "review" }
   )
   if (!data || typeof data.output !== "string") throw new ApiError("review response malformed")
@@ -263,13 +277,15 @@ export async function apiStatus(): Promise<any> {
   return apiClient.get("/api/status", { context: "status" })
 }
 
-export async function login(email: string, password: string): Promise<AuthResult> {
-  return {
-    access_token: "dev-token",
-    token_type: "bearer",
-    expires_in: 3600,
-    user: { id: "dev", email, roles: ["user"] }
-  }
+export type LoginResult = {
+  access_token: string
+  token_type: "bearer"
+  expires_in: number
+  user: { id: string; email: string; roles: string[] }
+}
+
+export async function login(email: string, password: string): Promise<LoginResult> {
+  return { access_token: "dev-token", token_type: "bearer", expires_in: 3600, user: { id: "dev", email, roles: ["user"] } }
 }
 
 export async function logout(): Promise<{ message: string }> {
@@ -279,11 +295,10 @@ export async function logout(): Promise<{ message: string }> {
 export async function refresh(token: string): Promise<{ access_token: string; expires_in: number }> {
   try {
     const headers: HeadersInit = { Authorization: `Bearer ${token}` }
-    const res = await apiClient.post<{ access_token: string; expires_in: number }>("/api/auth/refresh", undefined, {
+    return await apiClient.post<{ access_token: string; expires_in: number }>("/api/auth/refresh", undefined, {
       headers,
-      context: "auth/refresh"
+      context: "auth/refresh",
     })
-    return res
   } catch {
     return { access_token: "dev-token", expires_in: 3600 }
   }

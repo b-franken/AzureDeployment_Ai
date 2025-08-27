@@ -253,7 +253,7 @@ async def _run_tool(
         elif is_provisioning_tool and tool_signature in context.executed_tools:
             logger.info(
                 f"Re-executing provisioning tool {name} - this is allowed for deployment operations.")
-        
+
             context.executed_tools.add(tool_signature)
 
     logger.info(
@@ -262,22 +262,30 @@ async def _run_tool(
 
     merged_args = dict(args or {})
     if context:
-        logger.info(f"Merging context into tool args. Context subscription_id: {context.subscription_id}, args subscription_id: {args.get('subscription_id') if args else None}")
+        logger.info(
+            "Merging context into tool args. context.subscription_id=%s args.subscription_id=%s",
+            getattr(context, "subscription_id", None),
+            (args or {}).get("subscription_id"),
+        )
         if "dry_run" not in merged_args:
-            merged_args["dry_run"] = bool(context.dry_run)
-        if "subscription_id" not in merged_args and context.subscription_id:
+            merged_args["dry_run"] = bool(getattr(context, "dry_run", True))
+        if "subscription_id" not in merged_args and getattr(context, "subscription_id", None):
             merged_args["subscription_id"] = context.subscription_id
-            logger.info(f"Added subscription_id from context: {context.subscription_id}")
+            logger.info("Added subscription_id from context: %s",
+                        context.subscription_id)
         elif "subscription_id" in merged_args:
-            logger.info(f"subscription_id already in args: {merged_args['subscription_id']}")
-        elif not context.subscription_id:
-            logger.warning(f"Context has no subscription_id to merge")
-        if "resource_group" not in merged_args and context.resource_group:
+            logger.info("subscription_id already in args: %s",
+                        merged_args["subscription_id"])
+        else:
+            logger.warning("Context has no subscription_id to merge")
+        if "resource_group" not in merged_args and getattr(context, "resource_group", None):
             merged_args["resource_group"] = context.resource_group
-        if "environment" not in merged_args and context.environment:
+        if "environment" not in merged_args and getattr(context, "environment", None):
             merged_args["environment"] = context.environment
-        if "correlation_id" not in merged_args and context.correlation_id:
+        if "correlation_id" not in merged_args and getattr(context, "correlation_id", None):
             merged_args["correlation_id"] = context.correlation_id
+        if "confirmed" not in merged_args and merged_args.get("dry_run") is False:
+            merged_args["confirmed"] = True
 
     tool = get_tool(name)
     if not tool:

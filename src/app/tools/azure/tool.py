@@ -211,8 +211,9 @@ class AzureProvision(Tool):
             store_pending_deployment(deployment_id, deployment_data)
 
             params["dry_run"] = False
-            logger.info(f"Calling action function with params: {params}")
-            status, payload = await action_func(clients=clients, tags=tags, **params)
+            params_without_tags = {k: v for k, v in params.items() if k != "tags"}
+            logger.info(f"Calling action function with params: {params_without_tags}")
+            status, payload = await action_func(clients=clients, tags=tags, **params_without_tags)
             logger.info(f"Action function returned: status={status}, payload={payload}")
             if status == "plan":
                 detailed_plan = {

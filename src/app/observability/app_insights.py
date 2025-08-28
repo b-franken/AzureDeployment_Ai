@@ -11,7 +11,7 @@ from azure.monitor.opentelemetry import configure_azure_monitor
 import logging
 import os
 from typing import Any
-
+from urllib.parse import urlparse
 
 from app.observability.otel_fixes import ensure_proper_otel_initialization
 
@@ -377,8 +377,10 @@ class ApplicationInsights:
                 else:
                     span.set_attribute("http.response.success", False)
 
-            if hasattr(request, "url") and "api.openai.com" in str(request.url):
-                if hasattr(response, "content"):
+            if hasattr(request, "url"):
+                host = urlparse(str(request.url)).hostname
+                if host and host.lower() == "api.openai.com":
+                    if hasattr(response, "content"):
                     try:
                         import json
 

@@ -37,7 +37,7 @@ class DynamicBatchProcessor:
     ) -> None:
         self._embed_fn = embed_fn
         self._batch_size = batch_size
-        self._batch_wait_ms = batch_wait_ms / 1000.0  # Convert to seconds
+        self._batch_wait_ms = batch_wait_ms / 1000.0
         self._max_queue_size = max_queue_size
 
         self._queue: list[BatchRequest] = []
@@ -63,19 +63,19 @@ class DynamicBatchProcessor:
     async def embed(self, texts: list[str]) -> list[list[float]]:
         """Request embeddings for texts, will be batched with other concurrent requests."""
         if self._shutdown:
-            # Fallback to direct embedding if processor is shut down
+
             return await self._embed_fn(texts)
 
         future: asyncio.Future[list[list[float]]] = asyncio.Future()
-        request = BatchRequest(texts=texts, future=future, timestamp=time.time())
+        request = BatchRequest(
+            texts=texts, future=future, timestamp=time.time())
 
         async with self._queue_lock:
             if len(self._queue) >= self._max_queue_size:
-                # Queue full, process immediately
+
                 await self._process_immediate_batch()
             self._queue.append(request)
 
-        # Wait for the result
         return await future
 
     async def _process_batches(self) -> None:
@@ -93,20 +93,17 @@ class DynamicBatchProcessor:
             if not self._queue:
                 return
 
-            # Take all current requests
             requests = self._queue.copy()
             self._queue.clear()
 
-        # Group requests into batches
         batches = self._create_batches(requests)
 
-        # Process each batch
         for batch in batches:
             try:
                 await self._process_batch(batch)
             except Exception as e:
                 logger.error(f"Error processing batch: {e}")
-                # Mark all futures in this batch as failed
+
                 for request in batch:
                     if not request.future.done():
                         request.future.set_exception(e)
@@ -116,9 +113,8 @@ class DynamicBatchProcessor:
         if not self._queue:
             return
 
-        # Take up to batch_size requests
         batch_requests = self._queue[: self._batch_size]
-        self._queue = self._queue[self._batch_size :]
+        self._queue = self._queue[self._batch_size:]
 
         try:
             await self._process_batch(batch_requests)
@@ -140,7 +136,6 @@ class DynamicBatchProcessor:
         for request in requests:
             text_count = len(request.texts)
 
-            # If adding this request would exceed batch size, start new batch
             if current_batch and current_batch_size + text_count > self._batch_size:
                 batches.append(current_batch)
                 current_batch = []
@@ -149,7 +144,6 @@ class DynamicBatchProcessor:
             current_batch.append(request)
             current_batch_size += text_count
 
-        # Add the last batch if not empty
         if current_batch:
             batches.append(current_batch)
 
@@ -160,9 +154,8 @@ class DynamicBatchProcessor:
         if not requests:
             return
 
-        # Combine all texts from all requests
         all_texts: list[str] = []
-        request_indices: list[tuple[int, int]] = []  # (start_idx, end_idx) for each request
+        request_indices: list[tuple[int, int]] = []
 
         for request in requests:
             start_idx = len(all_texts)
@@ -171,30 +164,26 @@ class DynamicBatchProcessor:
             request_indices.append((start_idx, end_idx))
 
         if not all_texts:
-            # No texts to process
             for request in requests:
                 if not request.future.done():
                     request.future.set_result([])
             return
 
         try:
-            # Get embeddings for all texts in one API call
             all_embeddings = await self._embed_fn(all_texts)
 
-            # Distribute results back to individual requests
             for request, (start_idx, end_idx) in zip(requests, request_indices, strict=False):
                 if not request.future.done():
                     request_embeddings = all_embeddings[start_idx:end_idx]
                     request.future.set_result(request_embeddings)
 
         except Exception as e:
-            # Mark all futures as failed
+
             for request in requests:
                 if not request.future.done():
                     request.future.set_exception(e)
 
 
-# Global batch processor instance
 _batch_processor: DynamicBatchProcessor | None = None
 
 
@@ -206,5 +195,6 @@ def get_batch_processor(
     """Get or create a global batch processor instance."""
     global _batch_processor
     if _batch_processor is None:
-        _batch_processor = DynamicBatchProcessor(embed_fn, batch_size, batch_wait_ms)
+        _batch_processor = DynamicBatchProcessor(
+            embed_fn, batch_size, batch_wait_ms)
     return _batch_processor

@@ -76,11 +76,13 @@ class OpenAIAdapter:
         for k, v in kwargs.items():
             if k in allowed and v is not None and v != "":
                 if is_gpt5 and k in gpt5_unsupported:
-                    logger.debug("GPT-5 parameter unsupported, skipping", model=model, parameter=k)
+                    logger.debug(
+                        "GPT-5 parameter unsupported, skipping", model=model, parameter=k)
                     continue
 
                 if k == "temperature" and not is_gpt5 and v == 0:
-                    logger.debug("Converting temperature=0 to 0.01", model=model)
+                    logger.debug(
+                        "Converting temperature=0 to 0.01", model=model)
                     out[k] = 0.01
                 else:
                     out[k] = v
@@ -88,7 +90,8 @@ class OpenAIAdapter:
         if not out.get("stream"):
             out.pop("stream", None)
 
-        logger.debug("Sanitized OpenAI parameters", model=model, parameters=list(out.keys()))
+        logger.debug("Sanitized OpenAI parameters",
+                     model=model, parameters=list(out.keys()))
         return out
 
     def build_payload(self, model: str, messages: list[Message], **kwargs: Any) -> dict[str, Any]:
@@ -141,10 +144,12 @@ class OpenAIAdapter:
                 "llm.request.type": "stream",
             },
         ) as span:
-            payload = self.build_payload(model, messages, stream=True, **kwargs)
+            payload = self.build_payload(
+                model, messages, stream=True, **kwargs)
             start_time = time.time()
 
-            logger.info("Starting OpenAI stream request", model=model, endpoint=self.endpoint())
+            logger.info("Starting OpenAI stream request",
+                        model=model, endpoint=self.endpoint())
 
             try:
                 async with client.stream(
@@ -266,8 +271,10 @@ class OpenAIAdapter:
             payload = self.build_payload(model, messages, **kwargs)
             start_time = time.time()
 
-            logger.info("Starting OpenAI chat request", model=model, endpoint=self.endpoint())
-            logger.debug("OpenAI request payload", payload_keys=list(payload.keys()))
+            logger.info("Starting OpenAI chat request",
+                        model=model, endpoint=self.endpoint())
+            logger.debug("OpenAI request payload",
+                         payload_keys=list(payload.keys()))
 
             try:
                 resp = await client.post(self.endpoint(), json=payload, headers=self.headers())
@@ -276,7 +283,6 @@ class OpenAIAdapter:
                 response_data = resp.json()
                 duration_ms = (time.time() - start_time) * 1000
 
-                # Extract response metadata
                 usage = response_data.get("usage", {})
                 prompt_tokens = usage.get("prompt_tokens", 0)
                 completion_tokens = usage.get("completion_tokens", 0)
@@ -338,11 +344,15 @@ class OpenAIAdapter:
                     error_json = resp.json()
                     if "error" in error_json:
                         error_info = error_json["error"]
-                        logger.error("OpenAI error details", error_info=error_info)
-                        span.set_attribute("llm.response.error_type", error_info.get("type"))
-                        span.set_attribute("llm.response.error_code", error_info.get("code"))
+                        logger.error("OpenAI error details",
+                                     error_info=error_info)
+                        span.set_attribute(
+                            "llm.response.error_type", error_info.get("type"))
+                        span.set_attribute(
+                            "llm.response.error_code", error_info.get("code"))
                 except Exception:
-                    logger.debug("Failed to parse OpenAI error response as JSON")
+                    logger.debug(
+                        "Failed to parse OpenAI error response as JSON")
 
                 app_insights.track_exception(
                     e,

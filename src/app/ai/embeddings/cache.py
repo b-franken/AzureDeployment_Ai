@@ -11,22 +11,20 @@ try:
 except Exception:  # noqa: BLE001
     Redis = None  # type: ignore[assignment,misc]
 
-# Normalize text for better cache hits
+
 _normalize_re = re.compile(r"\s+")
 
 
 def normalize_query(text: str) -> str:
     """Normalize query text to improve cache hit rates."""
-    # Convert to lowercase, normalize whitespace, strip punctuation
     normalized = text.lower().strip()
     normalized = _normalize_re.sub(" ", normalized)
-    # Remove common punctuation that doesn't affect semantic meaning
     normalized = re.sub(r"[.,!?;:]", "", normalized)
     return normalized
 
 
 def normkey(text: str) -> str:
-    # Use normalized text for cache key to improve hit rates
+
     normalized = normalize_query(text)
     return hashlib.blake2b(normalized.encode("utf-8"), digest_size=16).hexdigest()
 
@@ -51,7 +49,7 @@ class RedisCache:
             try:
                 out[k] = json.loads(v)
             except (json.JSONDecodeError, TypeError):
-                # Invalid cache entry, skip it
+
                 continue
         return out
 
@@ -60,8 +58,8 @@ class RedisCache:
             return
         pipe = self._r.pipeline()
         for k, v in kv.items():
-            # Use longer TTL for frequently accessed embeddings
-            ttl = self._ttl * 2  # Double the TTL for better caching
+
+            ttl = self._ttl * 2
             pipe.set(k, json.dumps(v).encode("utf-8"), ex=ttl)
         await pipe.execute()
 

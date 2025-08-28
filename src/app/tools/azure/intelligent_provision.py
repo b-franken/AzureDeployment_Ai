@@ -137,7 +137,7 @@ class IntelligentAzureProvision(Tool):
                 "output": "Azure subscription ID is required for provisioning",
             }
 
-        requested_rg = kwargs.get("resource_group") or None
+        requested_rg = kwargs.get("resource_group")
 
         with tracer.start_as_current_span(
             "intelligent_azure_provision",
@@ -167,7 +167,15 @@ class IntelligentAzureProvision(Tool):
             try:
                 await self._store_user_context(user_id, request_text, correlation_id)
 
-                nlu_result = await self._parse_request_with_context(user_id, request_text)\n                logger.info(\n                    \"NLU parsing result\",\n                    resource_type=getattr(nlu_result, \"resource_type\", None),\n                    resource_name=getattr(nlu_result, \"resource_name\", None),\n                    context=getattr(nlu_result, \"context\", None),\n                    parameters=getattr(nlu_result, \"parameters\", None),\n                    correlation_id=correlation_id,\n                )
+                nlu_result = await self._parse_request_with_context(user_id, request_text)
+                logger.info(
+                    "NLU parsing result",
+                    resource_type=getattr(nlu_result, "resource_type", None),
+                    resource_name=getattr(nlu_result, "resource_name", None),
+                    context=getattr(nlu_result, "context", None),
+                    parameters=getattr(nlu_result, "parameters", None),
+                    correlation_id=correlation_id,
+                )
                 span.set_attributes(
                     {
                         "nlu.intent": (
@@ -179,20 +187,21 @@ class IntelligentAzureProvision(Tool):
                     }
                 )
 
-                logger.debug(\n                    \"Resource group extraction check\",\n                    requested_rg=requested_rg,\n                    will_extract=not requested_rg,\n                    correlation_id=correlation_id,\n                )\n                \n                if not requested_rg:
+                if not requested_rg:
                     context = getattr(nlu_result, "context", {}) or {}
                     parameters = getattr(nlu_result, "parameters", {}) or {}
-                    
+
                     if getattr(nlu_result, "resource_type", "") == "resource_group":
-                        inferred_rg = getattr(nlu_result, "resource_name", None)
+                        inferred_rg = getattr(
+                            nlu_result, "resource_name", None)
                     else:
                         inferred_rg = (
-                            context.get("resource_group") or 
+                            context.get("resource_group") or
                             parameters.get("resource_group") or
-                            context.get("rg") or 
+                            context.get("rg") or
                             parameters.get("rg")
                         )
-                    
+
                     if not inferred_rg:
                         import re
                         rg_patterns = [
@@ -201,11 +210,12 @@ class IntelligentAzureProvision(Tool):
                             r"rg[\s=:]+([\w-]+)",
                         ]
                         for pattern in rg_patterns:
-                            match = re.search(pattern, request_text, re.IGNORECASE)
+                            match = re.search(
+                                pattern, request_text, re.IGNORECASE)
                             if match:
                                 inferred_rg = match.group(1)
                                 break
-                    
+
                     if inferred_rg:
                         kwargs["resource_group"] = inferred_rg
                         requested_rg = inferred_rg

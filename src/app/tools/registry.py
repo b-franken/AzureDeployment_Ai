@@ -45,13 +45,21 @@ def ensure_tools_loaded() -> None:
         return
     registry: list[tuple[str, str]] = [
         ("app.tools.azure.intelligent_provision", "IntelligentAzureProvision"),
+        ("app.tools.provision.orchestrator", "ProvisionOrchestrator"),
         ("app.tools.finops.cost_tool", "AzureCosts"),
         ("app.tools.azure.quota_check", "AzureQuotaCheck"),
     ]
     for module_path, class_name in registry:
-        tool = _import_tool(module_path, class_name)
-        if tool is not None:
-            register(tool)
+        try:
+            logger.info(f"Loading tool: {module_path}.{class_name}")
+            tool = _import_tool(module_path, class_name)
+            if tool is not None:
+                register(tool)
+                logger.info(f"Successfully registered tool: {tool.name}")
+            else:
+                logger.error(f"Tool creation failed for {module_path}.{class_name}")
+        except Exception as e:
+            logger.error(f"Failed to load tool {module_path}.{class_name}: {e}", exc_info=True)
     _LOADED = True
 
 

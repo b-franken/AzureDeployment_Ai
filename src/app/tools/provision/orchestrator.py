@@ -87,7 +87,7 @@ class ProvisionOrchestrator(Tool):
                 "default": "auto",
             },
             "env": {"type": "string", "enum": list(ALLOWED_ENVS), "default": "dev"},
-            "plan_only": {"type": "boolean", "default": True},
+            "plan_only": {"type": "boolean", "default": False},
             "parameters": {"type": "object", "additionalProperties": True},
             "subscription_id": {"type": "string"},
             "resource_group": {"type": "string"},
@@ -104,7 +104,7 @@ class ProvisionOrchestrator(Tool):
         parameters: dict[str, Any] | None = None,
         backend: str = "auto",
         env: Env = "dev",
-        plan_only: bool = True,
+        plan_only: bool = False,
         subscription_id: str | None = None,
         resource_group: str | None = None,
         location: str | None = None,
@@ -128,50 +128,84 @@ class ProvisionOrchestrator(Tool):
                     )
 
                 if backend in ["avm", "auto"] and nlu_result.confidence > 0.5:
-                    mode, avm_backend = _choose_bicep_backend()
-                    if mode == "avm":
-                        from .backends.avm_bicep import ProvisionContext
+                    try:
+                        mode, avm_backend = _choose_bicep_backend()
+                        if mode == "avm":
+                            from .backends.avm_bicep import ProvisionContext
 
-                        ctx = ProvisionContext(
-                            subscription_id=subscription_id or "",
-                            resource_group=resource_group
-                            or nlu_result.parameters.get("resource_group", ""),
-                            location=location or nlu_result.context.get("location", "westeurope"),
-                            environment=env,
-                            tags=nlu_result.context.get("tags", {}),
+                            ctx = ProvisionContext(
+                                subscription_id=subscription_id or "",
+                                resource_group=resource_group
+                                or nlu_result.parameters.get("resource_group", ""),
+                                location=location or nlu_result.context.get("location", "westeurope"),
+                                environment=env,
+                                tags=nlu_result.context.get("tags", {}),
+                            )
+
+                            preview = await avm_backend.plan_from_nlu(
+                                nlu_result.__dict__, ctx, plan_only
+                            )
+
+                            result = {
+                                "backend": "avm-bicep",
+                                "environment": env,
+                                "bicep": preview.rendered,
+                                "what_if": preview.what_if,
+                            }
+
+                            if include_cost_estimate and preview.cost_estimate:
+                                result["cost_estimate"] = preview.cost_estimate
+
+                            if plan_only:
+                                return _ok("AVM Bicep plan generated from natural language", result)
+                            deploy_result = await avm_backend.apply(ctx, preview.bicep_path)
+                            result["deployment"] = deploy_result
+                            return _ok("AVM Bicep deployment executed", result)
+                    except Exception as avm_error:
+                        logger.warning(
+                            "AVM backend failed, attempting intelligent fallback",
+                            error=str(avm_error),
+                            confidence=nlu_result.confidence,
+                            exc_info=True,
+                        )
+                        return await self._intelligent_fallback(
+                            request=request,
+                            subscription_id=subscription_id,
+                            resource_group=resource_group,
+                            location=location,
+                            env=env,
+                            plan_only=plan_only,
+                            include_cost_estimate=include_cost_estimate,
                         )
 
-                        preview = await avm_backend.plan_from_nlu(
-                            nlu_result.__dict__, ctx, plan_only
+                try:
+                    orchestrator_args = nlu_result.to_orchestrator_args()
+                    if orchestrator_args:
+                        return await self.run(
+                            product=orchestrator_args["product"],
+                            parameters=orchestrator_args["parameters"],
+                            backend=orchestrator_args.get("backend", backend),
+                            env=orchestrator_args.get("env", env),
+                            plan_only=orchestrator_args.get("plan_only", plan_only),
+                            subscription_id=subscription_id,
+                            resource_group=resource_group,
+                            location=location,
+                            include_cost_estimate=include_cost_estimate,
                         )
-
-                        result = {
-                            "backend": "avm-bicep",
-                            "environment": env,
-                            "bicep": preview.rendered,
-                            "what_if": preview.what_if,
-                        }
-
-                        if include_cost_estimate and preview.cost_estimate:
-                            result["cost_estimate"] = preview.cost_estimate
-
-                        if plan_only:
-                            return _ok("AVM Bicep plan generated from natural language", result)
-                        deploy_result = await avm_backend.apply(ctx, preview.bicep_path)
-                        result["deployment"] = deploy_result
-                        return _ok("AVM Bicep deployment executed", result)
-
-                orchestrator_args = nlu_result.to_orchestrator_args()
-                if orchestrator_args:
-                    return await self.run(
-                        product=orchestrator_args["product"],
-                        parameters=orchestrator_args["parameters"],
-                        backend=orchestrator_args.get("backend", backend),
-                        env=orchestrator_args.get("env", env),
-                        plan_only=orchestrator_args.get("plan_only", plan_only),
+                except Exception as orchestrator_error:
+                    logger.warning(
+                        "Orchestrator args processing failed, attempting intelligent fallback",
+                        error=str(orchestrator_error),
+                        args=orchestrator_args if 'orchestrator_args' in locals() else None,
+                        exc_info=True,
+                    )
+                    return await self._intelligent_fallback(
+                        request=request,
                         subscription_id=subscription_id,
                         resource_group=resource_group,
                         location=location,
+                        env=env,
+                        plan_only=plan_only,
                         include_cost_estimate=include_cost_estimate,
                     )
 
@@ -254,7 +288,101 @@ class ProvisionOrchestrator(Tool):
                 else _err(f"{chosen_label} apply failed", apply_out)
             )
         except Exception as e:
-            return _err("orchestrator error", str(e))
+            logger.warning(
+                "Primary backend failed, attempting intelligent fallback",
+                chosen=chosen_label,
+                error=str(e),
+                exc_info=True,
+            )
+            return await self._intelligent_fallback(
+                request=request,
+                subscription_id=subscription_id,
+                resource_group=resource_group,
+                location=location,
+                env=env,
+                plan_only=plan_only,
+                include_cost_estimate=include_cost_estimate,
+            )
+
+
+    async def _intelligent_fallback(
+        self,
+        request: str | None,
+        subscription_id: str | None,
+        resource_group: str | None,
+        location: str | None,
+        env: Env,
+        plan_only: bool,
+        include_cost_estimate: bool,
+    ) -> ToolResult:
+        """Fallback to intelligent Azure provisioning with agents when primary backends fail."""
+        try:
+            from app.tools.azure.intelligent_provision import IntelligentAzureProvision
+            
+            logger.info(
+                "Falling back to intelligent Azure provisioning with agents",
+                request=request,
+                subscription_id=subscription_id,
+                resource_group=resource_group,
+                location=location,
+                environment=env,
+            )
+            
+            intelligent_tool = IntelligentAzureProvision()
+            
+            fallback_result = await intelligent_tool.run(
+                request=request or "",
+                subscription_id=subscription_id,
+                resource_group=resource_group,
+                location=location,
+                environment=env,
+                dry_run=plan_only,
+                confirmed=not plan_only,
+                include_cost_estimate=include_cost_estimate,
+            )
+            
+            if fallback_result.get("ok"):
+                logger.info(
+                    "Intelligent fallback succeeded",
+                    summary=fallback_result.get("summary"),
+                )
+                
+                enhanced_result = fallback_result.copy()
+                enhanced_result["backend"] = "intelligent-agents-fallback"
+                enhanced_result["fallback_reason"] = "Primary AVM/Terraform/Bicep backends failed"
+                
+                return enhanced_result
+            else:
+                logger.error(
+                    "Intelligent fallback also failed",
+                    summary=fallback_result.get("summary"),
+                    output=fallback_result.get("output"),
+                )
+                return _err(
+                    "All provisioning methods failed",
+                    {
+                        "primary_backend_error": "AVM/Terraform/Bicep failed",
+                        "fallback_error": fallback_result.get("output"),
+                        "suggestion": (
+                            "Check Azure credentials, subscription access, "
+                            "and resource naming constraints"
+                        ),
+                    },
+                )
+                
+        except Exception as fallback_error:
+            logger.error(
+                "Critical error in intelligent fallback",
+                error=str(fallback_error),
+                exc_info=True,
+            )
+            return _err(
+                "Critical provisioning failure",
+                {
+                    "error": "Both primary and fallback provisioning methods failed",
+                    "details": str(fallback_error),
+                },
+            )
 
 
 logger = logging.getLogger(__name__)

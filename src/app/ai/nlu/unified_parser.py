@@ -93,7 +93,7 @@ class UnifiedParseResult:
             "product": product,
             "backend": "auto",
             "env": env,
-            "plan_only": True,
+            "plan_only": False,
             "parameters": spec_params,
         }
 
@@ -473,7 +473,7 @@ def maybe_map_provision(text: str) -> dict[str, object] | None:
     args = r.to_orchestrator_args()
     if not isinstance(args, dict):
         return None
-    return {"tool": "provision_orchestrator", "args": args}
+    return {"tool": "azure_provision", "args": {"request": text}}
 
 
 async def maybe_map_provision_async(text: str) -> dict[str, object] | None:
@@ -482,14 +482,14 @@ async def maybe_map_provision_async(text: str) -> dict[str, object] | None:
     if r.confidence >= 0.5:  # Higher threshold for rule-based confidence
         args = r.to_orchestrator_args()
         if isinstance(args, dict):
-            return {"tool": "provision_orchestrator", "args": args}
+            return {"tool": "azure_provision", "args": {"request": text}}
 
     # Only use embeddings if rule-based parsing has low confidence
     r = parse_provision_request(text)
     if r.confidence >= 0.3:
         args = r.to_orchestrator_args()
         if isinstance(args, dict):
-            return {"tool": "provision_orchestrator", "args": args}
+            return {"tool": "azure_provision", "args": {"request": text}}
 
     # LLM parsing as final fallback (this doesn't use embeddings for classification)
     from app.ai.nlu.llm_parser import parse_with_llm
@@ -498,4 +498,4 @@ async def maybe_map_provision_async(text: str) -> dict[str, object] | None:
     args2 = r2.to_orchestrator_args()
     if not isinstance(args2, dict):
         return None
-    return {"tool": "provision_orchestrator", "args": args2}
+    return {"tool": "azure_provision", "args": {"request": text}}

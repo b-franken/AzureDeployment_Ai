@@ -9,6 +9,13 @@ from enum import Enum
 from typing import Any, Protocol
 
 import redis.asyncio as redis
+from opentelemetry import trace
+
+from app.core.logging import get_logger
+from app.tools.azure.deployment.intelligent_error_handler import IntelligentErrorHandler
+
+logger = get_logger(__name__)
+tracer = trace.get_tracer(__name__)
 
 
 class DeploymentState(Enum):
@@ -70,6 +77,7 @@ class StateHandler(Protocol):
 class DeploymentStateMachine:
     def __init__(self, redis_client: redis.Redis | None = None):
         self.redis_client = redis_client
+        self.intelligent_error_handler = IntelligentErrorHandler()
         self.state_handlers: dict[DeploymentState, StateHandler] = {}
         self.transitions: dict[tuple[DeploymentState, StateTransition], DeploymentState] = {
             (DeploymentState.PENDING, StateTransition.VALIDATE): DeploymentState.VALIDATING,
@@ -91,77 +99,141 @@ class DeploymentStateMachine:
         self._initialize_handlers()
 
     def _initialize_handlers(self) -> None:
-        self.state_handlers[DeploymentState.VALIDATING] = ValidationHandler()
-        self.state_handlers[DeploymentState.APPROVED] = ApprovalHandler()
-        self.state_handlers[DeploymentState.PROVISIONING] = ProvisioningHandler()
-        self.state_handlers[DeploymentState.CONFIGURING] = ConfigurationHandler()
-        self.state_handlers[DeploymentState.VERIFYING] = VerificationHandler()
-        self.state_handlers[DeploymentState.ROLLING_BACK] = RollbackHandler()
+        self.state_handlers[DeploymentState.VALIDATING] = ValidationHandler(self.intelligent_error_handler)
+        self.state_handlers[DeploymentState.APPROVED] = ApprovalHandler(self.intelligent_error_handler)
+        self.state_handlers[DeploymentState.PROVISIONING] = ProvisioningHandler(self.intelligent_error_handler)
+        self.state_handlers[DeploymentState.CONFIGURING] = ConfigurationHandler(self.intelligent_error_handler)
+        self.state_handlers[DeploymentState.VERIFYING] = VerificationHandler(self.intelligent_error_handler)
+        self.state_handlers[DeploymentState.ROLLING_BACK] = RollbackHandler(self.intelligent_error_handler)
 
     async def execute(self, context: DeploymentContext) -> DeploymentContext:
-        start_time = datetime.utcnow()
-        timeout = timedelta(minutes=context.timeout_minutes)
+        with tracer.start_as_current_span(
+            "deployment_state_machine_execute",
+            attributes={
+                "deployment_id": context.deployment_id,
+                "environment": context.environment,
+                "initial_state": context.state.value,
+                "resources_count": len(context.resources),
+            },
+        ) as span:
+            start_time = datetime.utcnow()
+            timeout = timedelta(minutes=context.timeout_minutes)
 
-        while context.state not in [
-            DeploymentState.COMPLETED,
-            DeploymentState.FAILED,
-            DeploymentState.ROLLED_BACK,
-            DeploymentState.CANCELLED,
-        ]:
-            if datetime.utcnow() - start_time > timeout:
-                context.state = DeploymentState.FAILED
-                context.error_details = {"reason": "Deployment timeout exceeded"}
-                await self._save_context(context)
-                break
+            logger.info(
+                "Starting deployment state machine execution",
+                deployment_id=context.deployment_id,
+                initial_state=context.state.value,
+                environment=context.environment,
+                resources_count=len(context.resources),
+                timeout_minutes=context.timeout_minutes,
+            )
 
-            await self._save_checkpoint(context)
-            next_transition = self._determine_next_transition(context)
+            while context.state not in [
+                DeploymentState.COMPLETED,
+                DeploymentState.FAILED,
+                DeploymentState.ROLLED_BACK,
+                DeploymentState.CANCELLED,
+            ]:
+                if datetime.utcnow() - start_time > timeout:
+                    logger.warning(
+                        "Deployment timeout exceeded",
+                        deployment_id=context.deployment_id,
+                        elapsed_minutes=(datetime.utcnow() - start_time).total_seconds() / 60,
+                    )
+                    context.state = DeploymentState.FAILED
+                    context.error_details = {"reason": "Deployment timeout exceeded"}
+                    await self._save_context(context)
+                    break
 
-            if not next_transition:
-                break
+                await self._save_checkpoint(context)
+                next_transition = self._determine_next_transition(context)
 
-            next_state = self.transitions.get((context.state, next_transition))
-            if not next_state:
-                context.state = DeploymentState.FAILED
-                context.error_details = {
-                    "reason": f"Invalid transition: {context.state} -> {next_transition}"
-                }
-                await self._save_context(context)
-                break
+                if not next_transition:
+                    break
 
-            context.state_history.append((context.state, datetime.utcnow()))
-            context.state = next_state
-            await self._save_context(context)
-
-            handler = self.state_handlers.get(context.state)
-            if handler:
-                try:
-                    success, context = await handler.handle(context)
-                    if not success and context.retry_count < context.max_retries:
-                        context.retry_count += 1
-                        await asyncio.sleep(2**context.retry_count)
-                        context.state = (
-                            context.state_history[-1][0]
-                            if context.state_history
-                            else DeploymentState.PENDING
-                        )
-                    elif not success:
-                        if context.rollback_enabled and context.state != DeploymentState.VALIDATING:
-                            context.state = DeploymentState.ROLLING_BACK
-                        else:
-                            context.state = DeploymentState.FAILED
-                except Exception as e:
+                next_state = self.transitions.get((context.state, next_transition))
+                if not next_state:
+                    logger.error(
+                        "Invalid state transition attempted",
+                        deployment_id=context.deployment_id,
+                        current_state=context.state.value,
+                        attempted_transition=next_transition.value,
+                    )
+                    context.state = DeploymentState.FAILED
                     context.error_details = {
-                        "exception": str(e),
-                        "state": context.state.value,
+                        "reason": f"Invalid transition: {context.state} -> {next_transition}"
                     }
-                    if context.rollback_enabled and context.deployed_resources:
-                        context.state = DeploymentState.ROLLING_BACK
-                    else:
-                        context.state = DeploymentState.FAILED
+                    await self._save_context(context)
+                    break
 
-        await self._save_context(context)
-        return context
+                context.state_history.append((context.state, datetime.utcnow()))
+                context.state = next_state
+                await self._save_context(context)
+
+                logger.debug(
+                    "State transition executed",
+                    deployment_id=context.deployment_id,
+                    new_state=context.state.value,
+                    transition=next_transition.value,
+                )
+
+                handler = self.state_handlers.get(context.state)
+                if handler:
+                    try:
+                        success, context = await handler.handle(context)
+                        if not success and context.retry_count < context.max_retries:
+                            logger.warning(
+                                "Handler failed, attempting retry",
+                                deployment_id=context.deployment_id,
+                                state=context.state.value,
+                                retry_count=context.retry_count + 1,
+                                max_retries=context.max_retries,
+                            )
+                            context.retry_count += 1
+                            await asyncio.sleep(2**context.retry_count)
+                            context.state = (
+                                context.state_history[-1][0]
+                                if context.state_history
+                                else DeploymentState.PENDING
+                            )
+                        elif not success:
+                            logger.error(
+                                "Handler failed after all retries",
+                                deployment_id=context.deployment_id,
+                                state=context.state.value,
+                                retry_count=context.retry_count,
+                            )
+                            if context.rollback_enabled and context.state != DeploymentState.VALIDATING:
+                                context.state = DeploymentState.ROLLING_BACK
+                            else:
+                                context.state = DeploymentState.FAILED
+                    except Exception as e:
+                        logger.error(
+                            "Handler exception occurred",
+                            deployment_id=context.deployment_id,
+                            state=context.state.value,
+                            error=str(e),
+                            exc_info=True,
+                        )
+                        
+                        await self._handle_intelligent_error_recovery(context, e)
+
+            span.set_attributes({
+                "final_state": context.state.value,
+                "retry_count": context.retry_count,
+                "execution_time_minutes": (datetime.utcnow() - start_time).total_seconds() / 60,
+            })
+
+            logger.info(
+                "Deployment state machine execution completed",
+                deployment_id=context.deployment_id,
+                final_state=context.state.value,
+                retry_count=context.retry_count,
+                execution_time_minutes=(datetime.utcnow() - start_time).total_seconds() / 60,
+            )
+
+            await self._save_context(context)
+            return context
 
     def _determine_next_transition(self, context: DeploymentContext) -> StateTransition | None:
         transitions_map = {
@@ -236,8 +308,194 @@ class DeploymentStateMachine:
                 return json.loads(value)
         return None
 
+    async def _handle_intelligent_error_recovery(
+        self, context: DeploymentContext, error: Exception
+    ) -> None:
+        with tracer.start_as_current_span(
+            "intelligent_error_recovery",
+            attributes={
+                "deployment_id": context.deployment_id,
+                "error_type": type(error).__name__,
+                "current_state": context.state.value,
+            },
+        ) as span:
+            logger.info(
+                "Starting intelligent error recovery",
+                deployment_id=context.deployment_id,
+                error_type=type(error).__name__,
+                current_state=context.state.value,
+            )
+
+            error_context = {
+                "resource_type": self._extract_primary_resource_type(context),
+                "location": context.location,
+                "environment": context.environment,
+                "subscription_id": context.subscription_id,
+                "resource_group": context.resource_group,
+                "deployment_state": context.state.value,
+                "retry_count": context.retry_count,
+            }
+
+            deployment_history = [
+                {
+                    "state": state.value,
+                    "timestamp": timestamp.isoformat(),
+                }
+                for state, timestamp in context.state_history
+            ]
+
+            try:
+                analysis = await self.intelligent_error_handler.analyze_error(
+                    error, error_context, deployment_history
+                )
+                
+                remediation_plan = await self.intelligent_error_handler.generate_remediation_plan(
+                    analysis, error_context
+                )
+
+                context.error_details = {
+                    "original_error": str(error),
+                    "error_type": type(error).__name__,
+                    "analysis": {
+                        "category": analysis.error_category,
+                        "severity": analysis.severity,
+                        "root_cause": analysis.root_cause,
+                        "retry_feasible": analysis.retry_feasible,
+                        "manual_intervention_required": analysis.requires_manual_intervention,
+                    },
+                    "remediation": {
+                        "primary_action": remediation_plan.primary_action,
+                        "backup_actions": remediation_plan.backup_actions,
+                        "success_probability": remediation_plan.estimated_success_probability,
+                        "configuration_adjustments": remediation_plan.configuration_adjustments,
+                    },
+                    "intelligent_suggestions": analysis.suggested_actions,
+                }
+
+                span.set_attributes({
+                    "analysis_category": analysis.error_category,
+                    "analysis_severity": analysis.severity,
+                    "retry_feasible": analysis.retry_feasible,
+                    "success_probability": remediation_plan.estimated_success_probability,
+                })
+
+                if analysis.retry_feasible and remediation_plan.estimated_success_probability > 0.6:
+                    logger.info(
+                        "Applying intelligent configuration adjustments",
+                        deployment_id=context.deployment_id,
+                        adjustments=remediation_plan.configuration_adjustments,
+                        success_probability=remediation_plan.estimated_success_probability,
+                    )
+                    
+                    await self._apply_configuration_adjustments(context, remediation_plan)
+                    
+                    if context.retry_count < context.max_retries:
+                        context.retry_count += 1
+                        context.state = (
+                            context.state_history[-1][0]
+                            if context.state_history
+                            else DeploymentState.PENDING
+                        )
+                        logger.info(
+                            "Intelligent recovery applied, retrying deployment",
+                            deployment_id=context.deployment_id,
+                            retry_count=context.retry_count,
+                        )
+                    else:
+                        logger.warning(
+                            "Max retries exceeded, moving to failure state",
+                            deployment_id=context.deployment_id,
+                        )
+                        self._handle_failure_state(context)
+                else:
+                    logger.warning(
+                        "Intelligent recovery not feasible or low success probability",
+                        deployment_id=context.deployment_id,
+                        retry_feasible=analysis.retry_feasible,
+                        success_probability=remediation_plan.estimated_success_probability,
+                    )
+                    self._handle_failure_state(context)
+
+            except Exception as recovery_error:
+                logger.error(
+                    "Intelligent error recovery failed",
+                    deployment_id=context.deployment_id,
+                    recovery_error=str(recovery_error),
+                    exc_info=True,
+                )
+                context.error_details = {
+                    "original_error": str(error),
+                    "recovery_error": str(recovery_error),
+                    "recovery_failed": True,
+                }
+                self._handle_failure_state(context)
+
+    def _extract_primary_resource_type(self, context: DeploymentContext) -> str:
+        if context.resources:
+            return context.resources[0].get("type", "unknown")
+        return "unknown"
+
+    async def _apply_configuration_adjustments(
+        self, context: DeploymentContext, remediation_plan: Any
+    ) -> None:
+        adjustments = remediation_plan.configuration_adjustments
+        
+        if "location" in adjustments:
+            context.location = adjustments["location"]
+            for resource in context.resources:
+                resource["location"] = adjustments["location"]
+            
+            logger.info(
+                "Applied location adjustment",
+                deployment_id=context.deployment_id,
+                new_location=adjustments["location"],
+            )
+
+        if "sku" in adjustments:
+            for resource in context.resources:
+                if resource.get("type") in ["virtual_machine", "app_service"]:
+                    resource["sku"] = adjustments["sku"]
+            
+            logger.info(
+                "Applied SKU adjustment",
+                deployment_id=context.deployment_id,
+                new_sku=adjustments["sku"],
+            )
+
+        if "address_space" in adjustments:
+            for resource in context.resources:
+                if "network" in resource.get("type", "").lower():
+                    resource["address_space"] = adjustments["address_space"]
+                    if "subnet_cidr" in adjustments:
+                        resource["subnet_cidr"] = adjustments["subnet_cidr"]
+            
+            logger.info(
+                "Applied network configuration adjustment",
+                deployment_id=context.deployment_id,
+                address_space=adjustments["address_space"],
+            )
+
+        context.metadata["intelligent_adjustments_applied"] = adjustments
+
+    def _handle_failure_state(self, context: DeploymentContext) -> None:
+        if context.rollback_enabled and context.deployed_resources:
+            context.state = DeploymentState.ROLLING_BACK
+            logger.info(
+                "Moving to rollback state due to failure",
+                deployment_id=context.deployment_id,
+            )
+        else:
+            context.state = DeploymentState.FAILED
+            logger.info(
+                "Moving to failed state",
+                deployment_id=context.deployment_id,
+            )
+
 
 class ValidationHandler:
+    def __init__(self, error_handler: IntelligentErrorHandler) -> None:
+        self.error_handler = error_handler
+
     async def handle(self, context: DeploymentContext) -> tuple[bool, DeploymentContext]:
         validators = [
             self._validate_subscription,
@@ -346,6 +604,9 @@ class ValidationHandler:
 
 
 class ApprovalHandler:
+    def __init__(self, error_handler: IntelligentErrorHandler) -> None:
+        self.error_handler = error_handler
+
     async def handle(self, context: DeploymentContext) -> tuple[bool, DeploymentContext]:
         if context.environment in ["dev", "test"]:
             return True, context
@@ -361,6 +622,9 @@ class ApprovalHandler:
 
 
 class ProvisioningHandler:
+    def __init__(self, error_handler: IntelligentErrorHandler) -> None:
+        self.error_handler = error_handler
+
     async def handle(self, context: DeploymentContext) -> tuple[bool, DeploymentContext]:
         from app.tools.azure.clients import get_clients
 
@@ -425,6 +689,9 @@ class ProvisioningHandler:
 
 
 class ConfigurationHandler:
+    def __init__(self, error_handler: IntelligentErrorHandler) -> None:
+        self.error_handler = error_handler
+
     async def handle(self, context: DeploymentContext) -> tuple[bool, DeploymentContext]:
         for resource in context.deployed_resources:
             config_result = await self._configure_resource(resource, context)
@@ -443,6 +710,9 @@ class ConfigurationHandler:
 
 
 class VerificationHandler:
+    def __init__(self, error_handler: IntelligentErrorHandler) -> None:
+        self.error_handler = error_handler
+
     async def handle(self, context: DeploymentContext) -> tuple[bool, DeploymentContext]:
         verifications = [
             self._verify_resource_state,
@@ -478,6 +748,9 @@ class VerificationHandler:
 
 
 class RollbackHandler:
+    def __init__(self, error_handler: IntelligentErrorHandler) -> None:
+        self.error_handler = error_handler
+
     async def handle(self, context: DeploymentContext) -> tuple[bool, DeploymentContext]:
         from app.tools.azure.clients import get_clients
 

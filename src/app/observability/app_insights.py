@@ -64,6 +64,9 @@ class ApplicationInsights:
                 "deployment.environment": settings.environment,
                 "cloud.provider": "azure",
                 "cloud.platform": "azure_app_service",
+                "telemetry.sdk.name": "opentelemetry",
+                "telemetry.sdk.language": "python",
+                "service.namespace": "ai.agents",
             }
         )
 

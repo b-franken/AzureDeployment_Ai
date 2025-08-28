@@ -65,14 +65,23 @@ class UnifiedAgent(Agent[dict[str, Any], dict[str, Any]]):
 
     async def execute(self, plan: ExecutionPlan) -> ExecutionResult[dict[str, Any]]:
         tasks: list[asyncio.Task[ExecutionResult[dict[str, Any]]]] = []
+        
         if AgentCapability.ORCHESTRATION in self.capabilities:
-            tasks.append(asyncio.create_task(self._execute_orchestration(plan)))
+            async with self.tracer.trace_operation("orchestration", {"capability": "orchestration"}):
+                tasks.append(asyncio.create_task(self._execute_orchestration(plan)))
         if AgentCapability.PROVISIONING in self.capabilities:
-            tasks.append(asyncio.create_task(self._execute_provisioning(plan)))
+            async with self.tracer.trace_operation("provisioning", {"capability": "provisioning"}):
+                tasks.append(asyncio.create_task(self._execute_provisioning(plan)))
         if AgentCapability.MONITORING in self.capabilities:
-            tasks.append(asyncio.create_task(self._execute_monitoring(plan)))
+            async with self.tracer.trace_operation("monitoring", {"capability": "monitoring"}):
+                tasks.append(asyncio.create_task(self._execute_monitoring(plan)))
 
-        done = await asyncio.gather(*tasks, return_exceptions=True)
+        async with self.tracer.trace_operation(
+            "capability_execution", 
+            {"capabilities_count": len(self.capabilities), "tasks_count": len(tasks)}
+        ):
+            done = await asyncio.gather(*tasks, return_exceptions=True)
+        
         merged = self._merge_results(done)
         for p in self.plugins:
             merged = await p.process_result(merged)

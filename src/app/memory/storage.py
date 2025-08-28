@@ -357,16 +357,195 @@ class AsyncMemoryStore:
             result = await conn.execute("DELETE FROM messages WHERE user_id = $1", user_id)
         return int(result.split()[-1]) if result else 0
 
+    async def get_deployment_patterns(self, user_id: str) -> list[dict[str, Any]]:
+        with tracer.start_as_current_span(
+            "get_deployment_patterns",
+            attributes={"user_id": user_id},
+        ) as span:
+            logger.debug("Retrieving deployment patterns", user_id=user_id)
+            
+            from app.memory.deployment_learning import get_deployment_learning_service
+            
+            learning_service = await get_deployment_learning_service()
+            patterns = await learning_service.get_deployment_patterns(user_id)
+            
+            result = []
+            for pattern in patterns:
+                result.append({
+                    "pattern_id": pattern.pattern_id,
+                    "resource_types": pattern.resource_types,
+                    "frequency": pattern.frequency,
+                    "success_rate": pattern.success_rate,
+                    "average_cost_per_month": pattern.average_cost_per_month,
+                    "common_configurations": pattern.common_configurations,
+                    "environment_distribution": pattern.environment_distribution,
+                    "last_seen": pattern.last_seen.isoformat(),
+                })
+            
+            span.set_attribute("patterns_retrieved", len(result))
+            
+            logger.info(
+                "Deployment patterns retrieved",
+                user_id=user_id,
+                patterns_count=len(result),
+            )
+            
+            return result
+
+    async def get_optimization_insights(self, user_id: str) -> list[dict[str, Any]]:
+        with tracer.start_as_current_span(
+            "get_optimization_insights", 
+            attributes={"user_id": user_id},
+        ) as span:
+            logger.debug("Retrieving optimization insights", user_id=user_id)
+            
+            from app.memory.deployment_learning import get_deployment_learning_service
+            
+            learning_service = await get_deployment_learning_service()
+            optimizations = await learning_service.get_optimization_insights(user_id)
+            
+            result = []
+            for opt in optimizations:
+                result.append({
+                    "optimization_id": opt.optimization_id,
+                    "resource_type": opt.resource_type,
+                    "original_configuration": opt.original_configuration,
+                    "optimized_configuration": opt.optimized_configuration,
+                    "cost_savings_percentage": opt.cost_savings_percentage,
+                    "performance_impact": opt.performance_impact,
+                    "adoption_rate": opt.adoption_rate,
+                    "environments": opt.environments,
+                })
+            
+            span.set_attribute("optimizations_retrieved", len(result))
+            
+            logger.info(
+                "Optimization insights retrieved",
+                user_id=user_id,
+                optimizations_count=len(result),
+            )
+            
+            return result
+
+    async def get_failure_insights(self, user_id: str) -> list[dict[str, Any]]:
+        with tracer.start_as_current_span(
+            "get_failure_insights",
+            attributes={"user_id": user_id},
+        ) as span:
+            logger.debug("Retrieving failure insights", user_id=user_id)
+            
+            from app.memory.deployment_learning import get_deployment_learning_service
+            
+            learning_service = await get_deployment_learning_service()
+            failures = await learning_service.get_failure_patterns(user_id)
+            
+            result = []
+            for failure in failures:
+                result.append({
+                    "failure_id": failure.failure_id,
+                    "error_type": failure.error_type,
+                    "resource_context": failure.resource_context,
+                    "frequency": failure.frequency,
+                    "resolution_success_rate": failure.resolution_success_rate,
+                    "common_causes": failure.common_causes,
+                    "recommended_solutions": failure.recommended_solutions,
+                    "environments": failure.environments,
+                })
+            
+            span.set_attribute("failures_retrieved", len(result))
+            
+            logger.info(
+                "Failure insights retrieved",
+                user_id=user_id,
+                failures_count=len(result),
+            )
+            
+            return result
+
+    async def record_deployment_outcome(
+        self,
+        user_id: str,
+        deployment_id: str,
+        resource_types: list[str],
+        environment: str,
+        success: bool,
+        configuration: dict[str, Any],
+        error_type: str | None = None,
+        error_message: str | None = None,
+        cost_estimate: float | None = None,
+        duration_seconds: int | None = None,
+    ) -> None:
+        with tracer.start_as_current_span(
+            "record_deployment_outcome",
+            attributes={
+                "user_id": user_id,
+                "deployment_id": deployment_id,
+                "success": success,
+                "environment": environment,
+            },
+        ) as span:
+            logger.info(
+                "Recording deployment outcome for learning",
+                user_id=user_id,
+                deployment_id=deployment_id,
+                success=success,
+                environment=environment,
+                resource_count=len(resource_types),
+            )
+            
+            from app.memory.deployment_learning import get_deployment_learning_service
+            
+            learning_service = await get_deployment_learning_service()
+            await learning_service.record_deployment_outcome(
+                user_id=user_id,
+                deployment_id=deployment_id,
+                resource_types=resource_types,
+                environment=environment,
+                success=success,
+                configuration=configuration,
+                error_type=error_type,
+                error_message=error_message,
+                cost_estimate=cost_estimate,
+                duration_seconds=duration_seconds,
+            )
+            
+            span.set_attribute("outcome_recorded", True)
+            
+            app_insights.track_custom_event(
+                "deployment_learning_recorded",
+                {
+                    "user_id": user_id,
+                    "success": success,
+                    "environment": environment,
+                    "resource_count": len(resource_types),
+                },
+            )
+
     async def get_statistics(self) -> dict[str, Any]:
         async with self.get_connection() as conn:
             total = await conn.fetchval("SELECT COUNT(*) FROM messages")
             unique_users = await conn.fetchval("SELECT COUNT(DISTINCT user_id) FROM messages")
             role_rows = await conn.fetch("SELECT role, COUNT(*) AS cnt FROM messages GROUP BY role")
             role_distribution = {r["role"]: r["cnt"] for r in role_rows}
+            
+            deployment_stats = {}
+            try:
+                deployment_total = await conn.fetchval("SELECT COUNT(*) FROM deployment_outcomes")
+                deployment_success_rate = await conn.fetchval(
+                    "SELECT AVG(CASE WHEN success THEN 1.0 ELSE 0.0 END) FROM deployment_outcomes"
+                )
+                deployment_stats = {
+                    "total_deployments": int(deployment_total or 0),
+                    "success_rate": float(deployment_success_rate or 0.0),
+                }
+            except Exception:
+                deployment_stats = {"total_deployments": 0, "success_rate": 0.0}
+                
         return {
             "total_messages": int(total or 0),
             "unique_users": int(unique_users or 0),
             "role_distribution": role_distribution,
+            "deployment_learning": deployment_stats,
             "database_size_bytes": None,
             "pool_size": None,
             "max_memory": self.max_memory,

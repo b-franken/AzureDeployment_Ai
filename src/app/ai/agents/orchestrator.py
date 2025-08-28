@@ -45,14 +45,18 @@ class OrchestrationAgent(Agent[dict[str, Any], dict[str, Any]]):
         return ExecutionPlan(steps=steps, metadata={"goal": goal, "context": self.context.metadata})
 
     async def execute(self, plan: ExecutionPlan) -> ExecutionResult[dict[str, Any]]:
-        logger.debug("executing plan with %d steps", len(plan.steps))
-        results: list[StepResult] = []
-        for step in plan.steps:
-            res = await self._run_step(step)
-            results.append(res)
-            if not res.success:
-                return ExecutionResult(success=False, result={"steps": results})
-        return ExecutionResult(success=True, result={"steps": results})
+        async with self.tracer.trace_operation(
+            "orchestrate_execution",
+            {"steps_count": len(plan.steps), "registered_agents": len(self.agents)}
+        ):
+            logger.debug("executing plan with %d steps", len(plan.steps))
+            results: list[StepResult] = []
+            for step in plan.steps:
+                res = await self._run_step(step)
+                results.append(res)
+                if not res.success:
+                    return ExecutionResult(success=False, result={"steps": results})
+            return ExecutionResult(success=True, result={"steps": results})
 
     async def _run_step(self, step: PlanStep) -> StepResult:
         logger.debug("running step %s of type %s", step.name, step.type)

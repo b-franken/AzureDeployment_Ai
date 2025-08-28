@@ -114,21 +114,41 @@ class ReactiveAgent(Agent[dict[str, Any], dict[str, Any]]):
 
     async def _handle_event(self, event: Event) -> None:
         """Handle a single event by calling all registered handlers."""
-        handlers = self.event_handlers.get(event.type, [])
+        async with self.tracer.trace_operation(
+            "handle_event",
+            {
+                "event.type": event.type.value,
+                "event.source": event.source or "unknown",
+                "event.correlation_id": event.correlation_id or "none",
+            }
+        ) as span:
+            handlers = self.event_handlers.get(event.type, [])
+            span.set_attribute("handlers_count", len(handlers))
 
-        if not handlers:
-            logger.debug(f"No handlers registered for event type: {event.type}")
-            return
+            if not handlers:
+                logger.debug(f"No handlers registered for event type: {event.type}")
+                span.set_attribute("result", "no_handlers")
+                return
 
-        tasks = [self._safe_handler_call(handler, event) for handler in handlers]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+            async with self.tracer.trace_operation(
+                "execute_handlers",
+                {"handlers_count": len(handlers)}
+            ):
+                tasks = [self._safe_handler_call(handler, event) for handler in handlers]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                logger.error(
-                    f"Handler {handlers[i].__name__} failed for event {event.type}: {result}",
-                    exc_info=result,
-                )
+            failed_count = 0
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    failed_count += 1
+                    logger.error(
+                        f"Handler {handlers[i].__name__} failed for event {event.type}: {result}",
+                        exc_info=result,
+                    )
+            
+            span.set_attribute("handlers.executed", len(handlers))
+            span.set_attribute("handlers.failed", failed_count)
+            span.set_attribute("result", "completed" if failed_count == 0 else "partial_failure")
 
     async def _safe_handler_call(self, handler: EventHandler, event: Event) -> None:
         """Safely call an event handler with error handling."""

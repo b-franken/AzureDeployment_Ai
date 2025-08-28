@@ -343,7 +343,7 @@ class ApplicationInsights:
             if hasattr(request, "url"):
                 url = str(request.url)
 
-                if "api.openai.com" in url:
+                if urlparse(url).hostname == "api.openai.com":
                     span.set_attribute("llm.vendor", "openai")
                     span.set_attribute("http.url.domain", "api.openai.com")
 

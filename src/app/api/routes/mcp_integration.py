@@ -662,7 +662,7 @@ async def mcp_health_check(td: Annotated[TokenData, Depends(mcp_dependency)]) ->
             health_status = {
                 "status": "unhealthy",
                 "mcp_server": "disconnected",
-                "error": str(e),
+                "error": "An internal error has occurred.",
                 "timestamp": datetime.utcnow().isoformat(),
             }
 

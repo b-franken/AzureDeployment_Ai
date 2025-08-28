@@ -22,11 +22,9 @@ tracer = trace.get_tracer(__name__)
 
 class IntelligentAzureProvision(Tool):
     """
-    Production-grade Azure provisioning tool using AVM modules, intelligent agents,
-    and comprehensive observability. Handles multi-resource deployments with
-    natural language understanding and user memory persistence.
-
-    Senior developer implementation following 2025+ best practices.
+    Intelligent Azure provisioning using AVM when available,
+    with a reliable fallback to the Azure SDK tools from the repository
+    (which authenticate via src/app/core/azure_auth.py).
     """
 
     name = "azure_provision"
@@ -111,12 +109,14 @@ class IntelligentAzureProvision(Tool):
         logger.info(
             "IntelligentAzureProvision initialized with AVM backend",
             avm_version=getattr(self.avm_backend, "version", "latest"),
-            observability_enabled=getattr(settings.observability, "enabled", True),
+            observability_enabled=getattr(
+                settings.observability, "enabled", True),
         )
 
     async def run(self, **kwargs: Any) -> ToolResult:
         """
         Execute intelligent Azure resource provisioning with comprehensive observability.
+        Falls back to Azure SDK tools when AVM cannot render/resolve the resource.
         """
         request_text = kwargs.get("request", "").strip()
         correlation_id = kwargs.get("correlation_id") or str(uuid.uuid4())
@@ -129,10 +129,7 @@ class IntelligentAzureProvision(Tool):
                 "output": "Request description is required for intelligent provisioning",
             }
 
-        # Validate required parameters
         subscription_id = kwargs.get("subscription_id")
-        resource_group = kwargs.get("resource_group")
-
         if not subscription_id:
             return {
                 "ok": False,
@@ -140,18 +137,13 @@ class IntelligentAzureProvision(Tool):
                 "output": "Azure subscription ID is required for provisioning",
             }
 
-        if not resource_group:
-            return {
-                "ok": False,
-                "summary": "Missing resource_group",
-                "output": "Resource group name is required for provisioning",
-            }
+        requested_rg = kwargs.get("resource_group")
 
         with tracer.start_as_current_span(
             "intelligent_azure_provision",
             attributes={
-                "azure.subscription_id": kwargs.get("subscription_id", "unknown"),
-                "azure.resource_group": kwargs.get("resource_group", "unknown"),
+                "azure.subscription_id": subscription_id,
+                "azure.resource_group": requested_rg or "unknown",
                 "azure.location": kwargs.get("location", "westeurope"),
                 "azure.environment": kwargs.get("environment", "dev"),
                 "provision.dry_run": kwargs.get("dry_run", True),
@@ -165,58 +157,72 @@ class IntelligentAzureProvision(Tool):
                 request=request_text,
                 correlation_id=correlation_id,
                 user_id=user_id,
-                subscription_id=kwargs.get("subscription_id"),
-                resource_group=kwargs.get("resource_group"),
+                subscription_id=subscription_id,
+                resource_group=requested_rg,
                 location=kwargs.get("location", "westeurope"),
                 environment=kwargs.get("environment", "dev"),
                 dry_run=kwargs.get("dry_run", True),
             )
 
             try:
-                # Step 1: Persist user request to memory for context
                 await self._store_user_context(user_id, request_text, correlation_id)
 
-                # Step 2: Parse natural language request
                 nlu_result = await self._parse_request_with_context(user_id, request_text)
                 span.set_attributes(
                     {
                         "nlu.intent": (
-                            nlu_result.intent.value if hasattr(nlu_result, "intent") else "unknown"
+                            nlu_result.intent.value if hasattr(
+                                nlu_result, "intent") else "unknown"
                         ),
                         "nlu.resource_type": getattr(nlu_result, "resource_type", "unknown"),
                         "nlu.confidence": getattr(nlu_result, "confidence", 0.0),
                     }
                 )
 
-                # Step 3: Create provisioning context
-                provision_context = self._create_provision_context(kwargs, nlu_result)
+                if (not requested_rg) and getattr(nlu_result, "resource_type", "") == "resource_group":
+                    inferred_rg = getattr(nlu_result, "resource_name", None)
+                    if inferred_rg:
+                        kwargs["resource_group"] = inferred_rg
+                        requested_rg = inferred_rg
+                        logger.info(
+                            "Inferred resource_group from NLU",
+                            resource_group=inferred_rg,
+                            correlation_id=correlation_id,
+                        )
 
-                # Step 4: Initialize intelligent provisioning agent
+                if not requested_rg and getattr(nlu_result, "resource_type", "") != "resource_group":
+                    return {
+                        "ok": False,
+                        "summary": "Missing resource_group",
+                        "output": "Resource group name is required for provisioning",
+                    }
+
+                provision_context = self._create_provision_context(
+                    kwargs, nlu_result)
                 agent = await self._create_provisioning_agent(user_id, kwargs)
 
-                # Step 5: Generate execution plan
                 execution_plan = await agent.plan(request_text)
-                span.set_attribute("agent.plan_steps", len(execution_plan.steps))
+                span.set_attribute("agent.plan_steps",
+                                   len(execution_plan.steps))
 
                 logger.info(
                     "Generated intelligent execution plan",
                     correlation_id=correlation_id,
                     plan_steps=len(execution_plan.steps),
                     nlu_intent=getattr(nlu_result, "intent", "unknown"),
-                    nlu_resource_type=getattr(nlu_result, "resource_type", "unknown"),
+                    nlu_resource_type=getattr(
+                        nlu_result, "resource_type", "unknown"),
                 )
 
-                # Step 6: Execute plan using AVM backend
                 if kwargs.get("dry_run", True):
                     result = await self._generate_plan_preview(
-                        provision_context, nlu_result, correlation_id
+                        provision_context, nlu_result, correlation_id, request_text
                     )
                 else:
                     result = await self._execute_deployment(
-                        provision_context, nlu_result, agent, correlation_id
+                        provision_context, nlu_result, agent, correlation_id, request_text
                     )
 
-                # Step 7: Store deployment result in memory
                 await self._store_deployment_result(user_id, result, correlation_id)
 
                 app_insights.track_custom_event(
@@ -295,7 +301,7 @@ class IntelligentAzureProvision(Tool):
                 error=str(e),
             )
 
-    async def _parse_request_with_context(self, user_id: str, request: str) -> dict[str, Any]:
+    async def _parse_request_with_context(self, user_id: str, request: str) -> Any:
         """Parse natural language request with user context from memory."""
         try:
             memory_store = await get_async_store()
@@ -311,12 +317,11 @@ class IntelligentAzureProvision(Tool):
                 history_messages=len(user_history),
             )
 
-            # Enhanced NLU parsing with user context
             nlu_result = parse_provision_request(request)
 
-            # Enrich with user preferences from history
             if user_history:
-                nlu_result = self._enrich_with_user_preferences(nlu_result, user_history)
+                nlu_result = self._enrich_with_user_preferences(
+                    nlu_result, user_history)
 
             logger.info(
                 "Natural language request parsed successfully",
@@ -343,9 +348,8 @@ class IntelligentAzureProvision(Tool):
         self, nlu_result: Any, user_history: list[dict[str, Any]]
     ) -> Any:
         """Enrich NLU result with user preferences from history."""
-        # Extract user preferences from previous interactions
-        preferred_locations = []
-        preferred_environments = []
+        preferred_locations: list[str] = []
+        preferred_environments: list[str] = []
 
         for message in user_history:
             if message.get("role") == "user":
@@ -360,7 +364,6 @@ class IntelligentAzureProvision(Tool):
                 elif "staging" in content:
                     preferred_environments.append("staging")
 
-        # For UnifiedParseResult, modify the context field to add preferences
         if hasattr(nlu_result, "context"):
             if preferred_locations:
                 nlu_result.context["preferred_location"] = preferred_locations[0]
@@ -375,20 +378,19 @@ class IntelligentAzureProvision(Tool):
 
         return nlu_result
 
-    def _create_provision_context(
-        self, kwargs: dict[str, Any], nlu_result: Any
-    ) -> ProvisionContext:
+    def _create_provision_context(self, kwargs: dict[str, Any], nlu_result: Any) -> ProvisionContext:
         """Create provisioning context from parameters and NLU results."""
-        # Extract preferences from NLU result context
         preferred_location = None
         preferred_environment = None
 
         if hasattr(nlu_result, "context"):
             preferred_location = nlu_result.context.get("preferred_location")
-            preferred_environment = nlu_result.context.get("preferred_environment")
+            preferred_environment = nlu_result.context.get(
+                "preferred_environment")
 
         location = kwargs.get("location") or preferred_location or "westeurope"
-        environment = kwargs.get("environment") or preferred_environment or "dev"
+        environment = kwargs.get(
+            "environment") or preferred_environment or "dev"
 
         tags = {
             "CreatedBy": "IntelligentAzureProvision",
@@ -399,7 +401,7 @@ class IntelligentAzureProvision(Tool):
 
         context = ProvisionContext(
             subscription_id=kwargs["subscription_id"],
-            resource_group=kwargs["resource_group"],
+            resource_group=kwargs.get("resource_group"),
             location=location,
             name_prefix=kwargs.get("name_prefix", "app"),
             environment=environment,
@@ -438,7 +440,8 @@ class IntelligentAzureProvision(Tool):
             },
         )
 
-        agent = ProvisioningAgent(user_id=user_id, context=context, config=config)
+        agent = ProvisioningAgent(
+            user_id=user_id, context=context, config=config)
 
         logger.debug(
             "Created provisioning agent with context",
@@ -451,13 +454,34 @@ class IntelligentAzureProvision(Tool):
 
         return agent
 
+    def _should_fallback_to_sdk(self, err: Exception, nlu_result: Any) -> bool:
+        """
+        Choose SDK fallback when AVM does not support the resource or when
+        the AVM module/version resolution fails (e.g., KeyError in versions map).
+        """
+        if getattr(nlu_result, "resource_type", "") == "resource_group":
+            return True
+
+        msg = str(err).lower()
+        patterns = [
+            "unsupported resource type",
+            "module not found",
+            "unable to resolve module",
+            "avm/res/",
+            "br/public:avm",
+            "keyerror",
+            "no emitter for",
+        ]
+        return any(p in msg for p in patterns)
+
     async def _generate_plan_preview(
         self,
         context: ProvisionContext,
-        nlu_result: dict[str, Any],
+        nlu_result: Any,
         correlation_id: str,
+        request_text: str,
     ) -> ToolResult:
-        """Generate deployment plan preview using AVM backend."""
+        """Generate deployment plan preview using AVM backend or fall back to SDK on unsupported resources."""
         try:
             plan_preview = await self.avm_backend.plan_from_nlu(nlu_result, context, dry_run=True)
 
@@ -470,7 +494,8 @@ class IntelligentAzureProvision(Tool):
                 bicep_path=plan_preview.bicep_path,
                 estimated_monthly_cost=monthly_cost,
                 has_what_if=plan_preview.what_if is not None,
-                validation_passed=plan_preview.validation_results.get("valid", False),
+                validation_passed=plan_preview.validation_results.get(
+                    "valid", False),
             )
 
             output_sections = [
@@ -518,10 +543,7 @@ class IntelligentAzureProvision(Tool):
                     "2. To execute deployment: Set `dry_run: false` and confirm",
                     "3. All resources follow Azure best practices via AVM modules",
                     "",
-                    (
-                        "**Note:** This deployment uses Azure Verified Modules (AVM) for "
-                        "security, compliance, and best practices."
-                    ),
+                    "**Note:** This deployment uses Azure Verified Modules (AVM) for security, compliance, and best practices.",
                 ]
             )
 
@@ -535,6 +557,21 @@ class IntelligentAzureProvision(Tool):
             }
 
         except Exception as e:
+            if self._should_fallback_to_sdk(e, nlu_result):
+                logger.info(
+                    "AVM plan unsupported/unavailable; using SDK fallback",
+                    correlation_id=correlation_id,
+                    error=str(e),
+                    resource_type=getattr(
+                        nlu_result, "resource_type", "unknown"),
+                )
+                return await self._fallback_via_sdk(
+                    request_text=request_text,
+                    context=context,
+                    nlu_result=nlu_result,
+                    correlation_id=correlation_id,
+                    dry_run=True,
+                )
             logger.error(
                 "Failed to generate AVM plan preview",
                 correlation_id=correlation_id,
@@ -546,13 +583,13 @@ class IntelligentAzureProvision(Tool):
     async def _execute_deployment(
         self,
         context: ProvisionContext,
-        nlu_result: dict[str, Any],
+        nlu_result: Any,
         agent: ProvisioningAgent,
         correlation_id: str,
+        request_text: str,
     ) -> ToolResult:
-        """Execute actual deployment using AVM backend and agent orchestration."""
+        """Execute actual deployment using AVM backend, or fall back to SDK on unsupported resources."""
         try:
-            # Generate plan first
             plan_preview = await self.avm_backend.plan_from_nlu(nlu_result, context, dry_run=False)
 
             logger.info(
@@ -562,7 +599,6 @@ class IntelligentAzureProvision(Tool):
                 resource_group=context.resource_group,
             )
 
-            # Execute deployment
             deployment_result = await self.avm_backend.apply(context, plan_preview.bicep_path)
 
             if deployment_result.get("status") == "succeeded":
@@ -581,7 +617,7 @@ class IntelligentAzureProvision(Tool):
                     f"- Resource Group: {context.resource_group}",
                     f"- Location: {context.location}",
                     f"- Duration: {deployment_result.get('duration', 'Unknown')}",
-                    "- Status: ✅ Succeeded",
+                    "- Status:  Succeeded",
                     "",
                     "## Deployed Resources (AVM Modules)",
                     "```json",
@@ -593,10 +629,7 @@ class IntelligentAzureProvision(Tool):
                     plan_preview.rendered,
                     "```",
                     "",
-                    (
-                        "**Note:** All resources deployed using Azure Verified Modules (AVM) "
-                        "following Azure best practices."
-                    ),
+                    "**Note:** All resources deployed using Azure Verified Modules (AVM) following Azure best practices.",
                 ]
 
                 return {
@@ -607,6 +640,7 @@ class IntelligentAzureProvision(Tool):
                     ),
                     "output": "\n".join(output_sections),
                 }
+
             logger.error(
                 "AVM deployment failed",
                 correlation_id=correlation_id,
@@ -617,12 +651,25 @@ class IntelligentAzureProvision(Tool):
             return {
                 "ok": False,
                 "summary": f"AVM deployment failed: {deployment_result.get('status')}",
-                "output": (
-                    f"Deployment failed: {deployment_result.get('message', 'Unknown error')}"
-                ),
+                "output": f"Deployment failed: {deployment_result.get('message', 'Unknown error')}",
             }
 
         except Exception as e:
+            if self._should_fallback_to_sdk(e, nlu_result):
+                logger.info(
+                    "AVM execution unsupported/unavailable; using SDK fallback",
+                    correlation_id=correlation_id,
+                    error=str(e),
+                    resource_type=getattr(
+                        nlu_result, "resource_type", "unknown"),
+                )
+                return await self._fallback_via_sdk(
+                    request_text=request_text,
+                    context=context,
+                    nlu_result=nlu_result,
+                    correlation_id=correlation_id,
+                    dry_run=False,
+                )
             logger.error(
                 "AVM deployment execution failed",
                 correlation_id=correlation_id,
@@ -668,3 +715,45 @@ class IntelligentAzureProvision(Tool):
                 correlation_id=correlation_id,
                 error=str(e),
             )
+
+    async def _fallback_via_sdk(
+        self,
+        request_text: str,
+        context: ProvisionContext,
+        nlu_result: Any,
+        correlation_id: str,
+        dry_run: bool,
+    ) -> ToolResult:
+        """
+        Delegate to the in-repo Azure SDK tooling (no Azure CLI).
+        Authentication flows through src/app/core/azure_auth.py as used by AzureProvision.
+        """
+        from app.tools.azure.tool import AzureProvision
+
+        name_value = getattr(nlu_result, "resource_name",
+                             None) or f"{context.name_prefix}-{context.environment}"
+
+        if getattr(nlu_result, "resource_type", "") == "resource_group":
+            if context.resource_group:
+                name_value = context.resource_group
+
+        params = {
+            "subscription_id": context.subscription_id,
+            "resource_group": context.resource_group,
+            "location": context.location,
+            "env": context.environment,
+            "name": name_value,
+            "tags": context.tags,
+            "dry_run": dry_run,
+            "correlation_id": correlation_id,
+        }
+
+        logger.info(
+            "Invoking Azure SDK fallback",
+            correlation_id=correlation_id,
+            action_hint=request_text,
+            params={k: v for k, v in params.items() if k != "tags"},
+        )
+
+        tool = AzureProvision()
+        return await tool.run(action=request_text, **params)

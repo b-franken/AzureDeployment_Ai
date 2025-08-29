@@ -92,8 +92,6 @@ dependencies = [
   "psycopg_pool",
   "jsonschema",
   "scikit-learn",
-
-
 ]
 
 [project.urls]

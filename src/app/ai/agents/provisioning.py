@@ -7,15 +7,17 @@ from opentelemetry import trace
 from pydantic import BaseModel
 
 from app.ai.agents.base import Agent, AgentContext
+from app.observability.app_insights import app_insights
 from app.ai.agents.types import ExecutionPlan, ExecutionResult, PlanStep, StepResult, StepType
 from app.ai.intelligence.dependency_analyzer import DependencyAnalyzer
 from app.ai.intelligence.resource_intelligence import ResourceIntelligence
 from app.ai.nlu import parse_provision_request
 from app.core.logging import get_logger
 from app.tools.registry import ensure_tools_loaded, get_tool
+from app.observability.agent_tracing import get_agent_tracer
 
 logger = get_logger(__name__)
-tracer = trace.get_tracer(__name__)
+tracer = get_agent_tracer("ProvisioningAgent")
 
 
 class ProvisioningAgentConfig(BaseModel):
@@ -45,13 +47,13 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
         ensure_tools_loaded()
 
     async def plan(self, goal: str) -> ExecutionPlan:
-        with tracer.start_as_current_span(
+        async with tracer.trace_operation(
             "provisioning_agent_plan",
-            attributes={
+            {
                 "user_id": self.user_id,
                 "goal_length": len(goal),
                 "environment": self.context.environment if self.context else "dev",
-            },
+            }
         ) as span:
             parsed = parse_provision_request(goal)
             env = self.context.environment if self.context else "dev"
@@ -64,6 +66,20 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
                 resource_name=parsed.resource_name,
                 environment=env,
                 confidence=parsed.confidence,
+            )
+            
+            app_insights.track_custom_event(
+                "provisioning_agent_plan_start",
+                {
+                    "user_id": self.user_id,
+                    "resource_type": parsed.resource_type,
+                    "resource_name": parsed.resource_name or "unnamed",
+                    "environment": env,
+                    "confidence": parsed.confidence,
+                    "goal_length": len(goal),
+                    "cloud_RoleName": "ProvisioningAgent",
+                    "service_name": "ai.agents.provisioning"
+                }
             )
 
             primary_resource = {
@@ -105,6 +121,23 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
                 warnings_count=len(intelligence_result.warnings),
                 recommendations_count=len(intelligence_result.recommendations),
             )
+            
+            app_insights.track_custom_event(
+                "provisioning_agent_plan_completed",
+                {
+                    "user_id": self.user_id,
+                    "resource_type": parsed.resource_type,
+                    "total_resources": len(all_resources),
+                    "inferred_count": len(intelligence_result.inferred_resources),
+                    "deployment_groups": len(optimized_plan.deployment_groups),
+                    "estimated_time_seconds": optimization_metrics["optimized_time_seconds"],
+                    "warnings_count": len(intelligence_result.warnings),
+                    "recommendations_count": len(intelligence_result.recommendations),
+                    "environment": env,
+                    "cloud_RoleName": "ProvisioningAgent",
+                    "service_name": "ai.agents.provisioning"
+                }
+            )
 
             return ExecutionPlan(
                 steps=steps,
@@ -143,43 +176,82 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
     async def execute(self, plan: ExecutionPlan) -> ExecutionResult[dict[str, Any]]:
         import time
 
-        start_time = time.perf_counter()
-        step_results: list[StepResult] = []
-        accumulated_output: dict[str, Any] = {}
+        async with tracer.trace_operation(
+            "provisioning_agent_execute",
+            {
+                "user_id": self.user_id,
+                "steps_count": len(plan.steps),
+                "environment": self.context.environment if self.context else "dev"
+            }
+        ) as span:
+            app_insights.track_custom_event(
+                "provisioning_agent_execute_start",
+                {
+                    "user_id": self.user_id,
+                    "steps_count": len(plan.steps),
+                    "environment": self.context.environment if self.context else "dev",
+                    "cloud_RoleName": "ProvisioningAgent",
+                    "service_name": "ai.agents.provisioning"
+                }
+            )
 
-        for step in plan.steps:
-            try:
-                result = await self._execute_step(step, accumulated_output)
-                step_results.append(result)
-                if result.output:
-                    accumulated_output[step.name or step.type.value] = result.output
-                if not result.success and step.type != StepType.MESSAGE:
+            start_time = time.perf_counter()
+            step_results: list[StepResult] = []
+            accumulated_output: dict[str, Any] = {}
+
+            for step in plan.steps:
+                try:
+                    result = await self._execute_step(step, accumulated_output)
+                    step_results.append(result)
+                    if result.output:
+                        accumulated_output[step.name or step.type.value] = result.output
+                    if not result.success and step.type != StepType.MESSAGE:
+                        break
+                except Exception as e:
+                    logger.error(
+                        "provisioning.step_exception",
+                        step=step.name or step.type.value,
+                        error_type=type(e).__name__,
+                        error_message=str(e),
+                        exc_info=True,
+                    )
+                    step_results.append(
+                        StepResult(step_name=step.name or step.type.value, success=False, error=str(e))
+                    )
                     break
-            except Exception as e:
-                logger.error(
-                    "provisioning.step_exception",
-                    step=step.name or step.type.value,
-                    error_type=type(e).__name__,
-                    error_message=str(e),
-                    exc_info=True,
-                )
-                step_results.append(
-                    StepResult(step_name=step.name or step.type.value, success=False, error=str(e))
-                )
-                break
 
-        success = all(r.success for r in step_results)
+            success = all(r.success for r in step_results)
+            duration_ms = (time.perf_counter() - start_time) * 1000
+            
+            span.set_attributes({
+                "execution_success": success,
+                "steps_executed": len(step_results),
+                "duration_ms": duration_ms
+            })
+            
+            app_insights.track_custom_event(
+                "provisioning_agent_execute_completed",
+                {
+                    "user_id": self.user_id,
+                    "execution_success": success,
+                    "steps_executed": len(step_results),
+                    "duration_ms": duration_ms,
+                    "environment": self.context.environment if self.context else "dev",
+                    "cloud_RoleName": "ProvisioningAgent",
+                    "service_name": "ai.agents.provisioning"
+                }
+            )
 
-        return ExecutionResult(
-            success=success,
-            result=accumulated_output,
-            duration_ms=(time.perf_counter() - start_time) * 1000,
-            step_results=step_results,
-            metadata={
-                **plan.metadata,
-                "execution_time": datetime.datetime.now(datetime.UTC).isoformat(),
-            },
-        )
+            return ExecutionResult(
+                success=success,
+                result=accumulated_output,
+                duration_ms=duration_ms,
+                step_results=step_results,
+                metadata={
+                    **plan.metadata,
+                    "execution_time": datetime.datetime.now(datetime.UTC).isoformat(),
+                },
+            )
 
     async def _execute_step(self, step: PlanStep, context: dict[str, Any]) -> StepResult:
         import time

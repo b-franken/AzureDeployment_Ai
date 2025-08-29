@@ -7,9 +7,10 @@ from opentelemetry import trace
 
 from app.core.logging import get_logger
 from app.memory.storage import get_async_store
+from app.observability.agent_tracing import get_agent_tracer
 
 logger = get_logger(__name__)
-tracer = trace.get_tracer(__name__)
+tracer = get_agent_tracer("LearningIntegrationService")
 
 
 @dataclass
@@ -33,13 +34,13 @@ class LearningIntegrationService:
         current_resource_types: list[str],
         environment: str,
     ) -> list[LearningEnhancedRecommendation]:
-        with tracer.start_as_current_span(
+        async with tracer.trace_operation(
             "enhance_recommendations_with_learning",
-            attributes={
+            {
                 "user_id": user_id,
                 "recommendations_count": len(base_recommendations),
                 "environment": environment,
-            },
+            }
         ) as span:
             logger.info(
                 "Enhancing recommendations with deployment learning",
@@ -168,15 +169,15 @@ class LearningIntegrationService:
         cost_estimate: float | None = None,
         duration_seconds: int | None = None,
     ) -> None:
-        with tracer.start_as_current_span(
+        async with tracer.trace_operation(
             "record_deployment_for_learning",
-            attributes={
+            {
                 "user_id": user_id,
                 "deployment_id": deployment_id,
                 "success": success,
                 "environment": environment,
                 "recommendations_followed_count": len(recommendations_followed or []),
-            },
+            }
         ) as span:
             logger.info(
                 "Recording deployment result for machine learning",
@@ -245,9 +246,9 @@ class LearningIntegrationService:
     async def get_personalized_insights(
         self, user_id: str, current_request: str
     ) -> dict[str, Any]:
-        with tracer.start_as_current_span(
+        async with tracer.trace_operation(
             "get_personalized_insights",
-            attributes={"user_id": user_id},
+            {"user_id": user_id}
         ) as span:
             logger.debug("Generating personalized deployment insights", user_id=user_id)
 

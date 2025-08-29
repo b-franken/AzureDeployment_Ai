@@ -21,6 +21,9 @@ class AgentServiceMapper:
         "ReactiveAgent": "agent-reactive",
         "CoordinatorAgent": "agent-coordinator",
         "ChainAgent": "agent-chain",
+        "ResourceIntelligence": "agent-resource-intelligence",
+        "DependencyAnalyzer": "agent-dependency-analyzer",
+        "LearningIntegrationService": "agent-learning-integration",
     }
     
     _resource_cache: dict[str, Resource] = {}

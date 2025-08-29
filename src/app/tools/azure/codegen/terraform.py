@@ -5,6 +5,15 @@ from typing import Any
 
 
 def generate_terraform_code(action: str, params: dict[str, Any]) -> str:
+    from app.core.logging import get_logger
+    logger = get_logger(__name__)
+    
+    logger.debug(
+        "Generating Terraform template",
+        action=action,
+        params_keys=list(params.keys()) if params else []
+    )
+    
     resource_group = params.get("resource_group", "myapp-dev-rg")
     location = params.get("location", "westeurope")
     name = params.get("name", "myresource")

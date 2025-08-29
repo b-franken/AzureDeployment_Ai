@@ -6,9 +6,10 @@ from typing import Any
 from opentelemetry import trace
 
 from app.core.logging import get_logger
+from app.observability.agent_tracing import get_agent_tracer
 
 logger = get_logger(__name__)
-tracer = trace.get_tracer(__name__)
+tracer = get_agent_tracer("ResourceIntelligence")
 
 
 @dataclass
@@ -112,26 +113,28 @@ class ResourceIntelligence:
     ) -> ResourceIntelligenceResult:
         preferences = user_preferences or {}
         
-        with tracer.start_as_current_span(
+        async with tracer.trace_operation(
             "analyze_resource_requirements",
-            attributes={
-                "primary_resource_type": primary_resource.get("type", "unknown"),
+            {
+                "resource_type": primary_resource.get("type", "unknown"),
+                "resource_name": primary_resource.get("name", "unnamed"),
                 "environment": environment,
-            },
-        ) as span:
+                "operation.type": "analysis_start"
+            }
+        ) as analysis_span:
             logger.info(
                 "Starting resource intelligence analysis",
                 resource_type=primary_resource.get("type"),
                 resource_name=primary_resource.get("name"),
                 environment=environment,
             )
-
+            
             inferred = await self._infer_required_resources(primary_resource, environment, preferences)
             recommendations = await self._generate_recommendations(primary_resource, environment)
             warnings = self._validate_resource_configuration(primary_resource, environment)
             adjustments = self._suggest_configuration_adjustments(primary_resource, environment, preferences)
 
-            span.set_attributes({
+            analysis_span.set_attributes({
                 "inferred_resources_count": len(inferred),
                 "recommendations_count": len(recommendations),
                 "warnings_count": len(warnings),
@@ -149,6 +152,13 @@ class ResourceIntelligence:
                 inferred_count=len(inferred),
                 recommendations_count=len(recommendations),
                 warnings_count=len(warnings),
+            )
+
+            tracer.track_agent_metrics(
+                "resource_analysis", 
+                0.0, 
+                True, 
+                len(inferred)
             )
 
             return result

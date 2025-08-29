@@ -1,5 +1,6 @@
 export const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000").replace(/\/+$/, "")
 export const REQUEST_TIMEOUT_MS = 30000
+export const DEPLOYMENT_TIMEOUT_MS = 120000
 
 export class ApiError extends Error {
   constructor(
@@ -339,5 +340,6 @@ export type ChatResponse = {
 }
 
 export async function sendChat(input: { message: string; deploy: boolean }): Promise<ChatResponse> {
-  return apiClient.post<ChatResponse>("/api/chat", input, { context: "chat-deploy" })
+  const timeoutMs = input.deploy ? DEPLOYMENT_TIMEOUT_MS : REQUEST_TIMEOUT_MS
+  return apiClient.post<ChatResponse>("/api/chat", input, { context: "chat-deploy", timeoutMs })
 }

@@ -9,7 +9,7 @@ from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
 from app.core.logging import get_logger
-from app.observability.agent_service_mapper import get_agent_service_name
+from app.observability.agent_service_mapper import AgentServiceMapper, get_agent_service_name
 
 logger = get_logger(__name__)
 
@@ -115,6 +115,22 @@ class AgentTracer:
             duration_ms=duration_ms,
             success=success,
             resource_count=resource_count,
+        )
+
+        from app.observability.app_insights import app_insights
+        service_name = AgentServiceMapper.get_service_name(self.agent_name)
+        
+        app_insights.track_custom_event(
+            f"agent_{operation}_completed",
+            {
+                "agent_name": self.agent_name,
+                "operation": operation,
+                "duration_ms": duration_ms,
+                "success": success,
+                "resource_count": resource_count,
+                "cloud_RoleName": service_name,
+                "service_name": f"ai.agents.{self.agent_name.lower()}"
+            }
         )
 
     def create_dependency_span(

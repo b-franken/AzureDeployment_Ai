@@ -8,9 +8,10 @@ from typing import Any
 from opentelemetry import trace
 
 from app.core.logging import get_logger
+from app.observability.agent_tracing import get_agent_tracer
 
 logger = get_logger(__name__)
-tracer = trace.get_tracer(__name__)
+tracer = get_agent_tracer("DependencyAnalyzer")
 
 
 @dataclass
@@ -110,12 +111,13 @@ class DependencyAnalyzer:
     async def analyze_dependencies(
         self, resources: list[dict[str, Any]], environment: str = "dev"
     ) -> DeploymentPlan:
-        with tracer.start_as_current_span(
+        async with tracer.trace_operation(
             "analyze_dependencies",
-            attributes={
+            {
                 "resource_count": len(resources),
                 "environment": environment,
-            },
+                "operation.type": "analysis_start"
+            }
         ) as span:
             logger.info(
                 "Starting dependency analysis",
@@ -124,17 +126,17 @@ class DependencyAnalyzer:
             )
 
             resource_deps = await self._build_dependency_graph(resources, environment)
-            span.set_attribute("dependencies_inferred", len(resource_deps))
+            span.set_attributes({"dependencies_inferred": len(resource_deps)})
 
             deployment_groups = self._calculate_deployment_groups(resource_deps)
-            span.set_attribute("deployment_groups", len(deployment_groups))
+            span.set_attributes({"deployment_groups": len(deployment_groups)})
 
             critical_path = self._find_critical_path(resource_deps)
             total_time = self._estimate_total_time(deployment_groups)
             parallel_ops = sum(len(group) for group in deployment_groups if len(group) > 1)
 
             warnings = self._validate_dependencies(resource_deps)
-            span.set_attribute("dependency_warnings", len(warnings))
+            span.set_attributes({"dependency_warnings": len(warnings)})
 
             plan = DeploymentPlan(
                 deployment_groups=deployment_groups,
@@ -150,6 +152,13 @@ class DependencyAnalyzer:
                 estimated_time_seconds=total_time,
                 parallel_opportunities=parallel_ops,
                 warnings_count=len(warnings),
+            )
+            
+            tracer.track_agent_metrics(
+                "dependency_analysis",
+                float(total_time * 1000),
+                True,
+                len(deployment_groups)
             )
 
             return plan
@@ -342,7 +351,14 @@ class DependencyAnalyzer:
     async def optimize_for_parallel_deployment(
         self, plan: DeploymentPlan
     ) -> tuple[DeploymentPlan, dict[str, Any]]:
-        with tracer.start_as_current_span("optimize_parallel_deployment") as span:
+        async with tracer.trace_operation(
+            "optimize_parallel_deployment",
+            {
+                "original_groups": len(plan.deployment_groups),
+                "original_time_seconds": plan.total_estimated_time_seconds,
+                "operation.type": "optimization_start"
+            }
+        ) as span:
             optimizations: dict[str, Any] = {}
             original_time = plan.total_estimated_time_seconds
 

@@ -15,6 +15,7 @@ from app.memory.storage import get_async_store
 from app.observability.app_insights import app_insights
 from app.tools.base import Tool, ToolResult
 from app.tools.provision.backends.avm_bicep.engine import BicepAvmBackend, ProvisionContext
+from app.tools.azure.codegen.terraform import generate_terraform_code
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -244,19 +245,39 @@ class IntelligentAzureProvision(Tool):
                     "Generated intelligent execution plan",
                     correlation_id=correlation_id,
                     plan_steps=len(execution_plan.steps),
-                    nlu_intent=getattr(nlu_result, "intent", "unknown"),
-                    nlu_resource_type=getattr(
-                        nlu_result, "resource_type", "unknown"),
+                    nlu_intent=getattr(nlu_result, "intent", "unknown").value if hasattr(nlu_result, "intent") else "unknown",
+                    nlu_resource_type=getattr(nlu_result, "resource_type", "unknown"),
                 )
 
+                preview_result = await self._generate_plan_preview(
+                    provision_context, nlu_result, correlation_id, request_text
+                )
+                
                 if kwargs.get("dry_run", True):
-                    result = await self._generate_plan_preview(
-                        provision_context, nlu_result, correlation_id, request_text
-                    )
+                    result = preview_result
                 else:
-                    result = await self._execute_deployment(
+                    deployment_result = await self._execute_deployment(
                         provision_context, nlu_result, agent, correlation_id, request_text
                     )
+                    
+                    combined_output_sections = []
+                    
+                    if preview_result.get("output"):
+                        combined_output_sections.append("## Deployment Preview")
+                        combined_output_sections.append(preview_result["output"])
+                        combined_output_sections.append("")
+                    
+                    if deployment_result.get("output"):
+                        combined_output_sections.append("## Deployment Execution")
+                        combined_output_sections.append(deployment_result["output"])
+                    
+                    result = {
+                        "ok": deployment_result.get("ok", False),
+                        "summary": f"Deployment completed - {deployment_result.get('summary', '')}",
+                        "output": "\n".join(combined_output_sections),
+                        "preview_data": preview_result,
+                        "deployment_data": deployment_result
+                    }
 
                 await self._store_deployment_result(user_id, result, correlation_id)
 
@@ -509,6 +530,62 @@ class IntelligentAzureProvision(Tool):
         ]
         return any(p in msg for p in patterns)
 
+    def _map_resource_type_to_terraform_action(self, resource_type: str) -> str:
+        """Map AVM resource types to Terraform action names."""
+        mapping = {
+            "resource_group": "create_rg",
+            "storage_account": "create_storage",
+            "webapp": "create_webapp",
+            "web_app": "create_webapp",
+            "app_service_plan": "create_webapp",
+            "aks_cluster": "create_aks",
+            "kubernetes_cluster": "create_aks",
+            "vnet": "create_network",
+            "virtual_network": "create_network",
+            "subnet": "create_subnet",
+            "log_analytics_workspace": "create_monitor",
+            "key_vault": "create_keyvault",
+            "sql_server": "create_sql_server",
+            "sql_database": "create_sql_database",
+            "cosmos_db": "create_cosmos",
+            "cosmosdb": "create_cosmos",
+            "container_registry": "create_acr",
+            "acr": "create_acr",
+            "Microsoft.Resources/resourceGroups": "create_rg",
+            "Microsoft.Storage/storageAccounts": "create_storage",
+            "Microsoft.Web/sites": "create_webapp",
+            "Microsoft.Web/serverfarms": "create_webapp",
+            "Microsoft.ContainerService/managedClusters": "create_aks",
+            "Microsoft.Network/virtualNetworks": "create_network",
+            "Microsoft.Network/virtualNetworks/subnets": "create_subnet",
+            "Microsoft.OperationalInsights/workspaces": "create_monitor",
+            "Microsoft.KeyVault/vaults": "create_keyvault",
+            "Microsoft.Sql/servers": "create_sql_server",
+            "Microsoft.Sql/servers/databases": "create_sql_database",
+            "Microsoft.DocumentDB/databaseAccounts": "create_cosmos",
+            "Microsoft.ContainerRegistry/registries": "create_acr",
+            "api_management": "create_apim",
+            "apim": "create_apim",
+            "compute": "create_vm",
+            "virtual_machine": "create_vm",
+            "vm": "create_vm",
+            "eventhub": "create_eventhub",
+            "event_hub": "create_eventhub",
+            "frontdoor": "create_frontdoor",
+            "front_door": "create_frontdoor",
+            "identity": "create_identity",
+            "managed_identity": "create_identity",
+            "policy": "create_policy",
+            "redis": "create_redis",
+            "redis_cache": "create_redis",
+            "private_dns": "create_private_dns",
+            "private_link": "create_private_link",
+            "traffic_manager": "create_traffic_manager",
+            "backup": "create_backup",
+            "recovery_services": "create_backup"
+        }
+        return mapping.get(resource_type.lower(), resource_type.lower())
+
     async def _generate_plan_preview(
         self,
         context: ProvisionContext,
@@ -533,6 +610,23 @@ class IntelligentAzureProvision(Tool):
                     "valid", False),
             )
 
+            terraform_params = {
+                "resource_group": context.resource_group,
+                "location": context.location,
+                "name": getattr(nlu_result, "resource_name", "myresource"),
+                "environment": context.environment
+            }
+            
+            resource_type = getattr(nlu_result, "resource_type", "")
+            terraform_action = self._map_resource_type_to_terraform_action(resource_type)
+            logger.debug(
+                "Generating Terraform code",
+                resource_type=resource_type,
+                terraform_action=terraform_action,
+                correlation_id=correlation_id
+            )
+            terraform_code = generate_terraform_code(terraform_action, terraform_params)
+
             output_sections = [
                 "**Azure Deployment Plan Preview**",
                 "",
@@ -545,6 +639,11 @@ class IntelligentAzureProvision(Tool):
                 "## Azure Verified Module (AVM) Bicep Code",
                 "```bicep",
                 plan_preview.rendered,
+                "```",
+                "",
+                "## Terraform Infrastructure Code",
+                "```hcl",
+                terraform_code,
                 "```",
                 "",
             ]
@@ -615,35 +714,15 @@ class IntelligentAzureProvision(Tool):
             )
             raise
 
-    async def _execute_deployment(
-        self,
-        context: ProvisionContext,
-        nlu_result: Any,
-        agent: ProvisioningAgent,
-        correlation_id: str,
-        request_text: str,
-    ) -> ToolResult:
-        """Execute actual deployment using AVM backend, or fall back to SDK on unsupported resources."""
+    async def _execute_deployment(self, context: ProvisionContext, nlu_result: Any, agent: ProvisioningAgent, correlation_id: str, request_text: str) -> ToolResult:
         try:
             plan_preview = await self.avm_backend.plan_from_nlu(nlu_result, context, dry_run=False)
-
-            logger.info(
-                "Starting AVM deployment execution",
-                correlation_id=correlation_id,
-                bicep_path=plan_preview.bicep_path,
-                resource_group=context.resource_group,
-            )
-
+            logger.info("Starting AVM deployment execution", correlation_id=correlation_id, bicep_path=plan_preview.bicep_path, resource_group=context.resource_group)
             deployment_result = await self.avm_backend.apply(context, plan_preview.bicep_path)
-
             if deployment_result.get("status") == "succeeded":
-                logger.info(
-                    "AVM deployment completed successfully",
-                    correlation_id=correlation_id,
-                    deployment_id=deployment_result.get("deployment_id"),
-                    duration=deployment_result.get("duration"),
-                )
-
+                cost_estimate = plan_preview.cost_estimate or {}
+                monthly_cost = cost_estimate.get("monthly_estimate", 0.0)
+                
                 output_sections = [
                     "**Azure Deployment Completed Successfully**",
                     "",
@@ -652,6 +731,7 @@ class IntelligentAzureProvision(Tool):
                     f"- Resource Group: {context.resource_group}",
                     f"- Location: {context.location}",
                     f"- Duration: {deployment_result.get('duration', 'Unknown')}",
+                    f"- Estimated Monthly Cost: ${monthly_cost:.2f} USD",
                     "- Status:  Succeeded",
                     "",
                     "## Deployed Resources (AVM Modules)",
@@ -659,58 +739,36 @@ class IntelligentAzureProvision(Tool):
                     json.dumps(deployment_result.get("outputs", {}), indent=2),
                     "```",
                     "",
+                ]
+                
+                if cost_estimate:
+                    output_sections.extend([
+                        "## Cost Breakdown",
+                        "```json",
+                        json.dumps(cost_estimate, indent=2),
+                        "```",
+                        "",
+                    ])
+                
+                output_sections.extend([
                     "## Azure Verified Module (AVM) Bicep Code",
                     "```bicep",
                     plan_preview.rendered,
                     "```",
                     "",
                     "**Note:** All resources deployed using Azure Verified Modules (AVM) following Azure best practices.",
-                ]
-
-                return {
-                    "ok": True,
-                    "summary": (
-                        f"AVM deployment succeeded - "
-                        f"{getattr(nlu_result, 'resource_type', 'resource')} deployed"
-                    ),
-                    "output": "\n".join(output_sections),
-                }
-
-            logger.error(
-                "AVM deployment failed",
-                correlation_id=correlation_id,
-                status=deployment_result.get("status"),
-                raw_result=deployment_result,
-            )
-
-            return {
-                "ok": False,
-                "summary": f"AVM deployment failed: {deployment_result.get('status')}",
-                "output": f"Deployment failed: {deployment_result.get('message', 'Unknown error')}",
-            }
-
+                ])
+                return {"ok": True, "summary": f"AVM deployment succeeded - {getattr(nlu_result, 'resource_type', 'resource')} deployed", "output": "\n".join(output_sections)}
+            msg = str(deployment_result.get("message", "")).lower()
+            if any(s in msg for s in ["azure cli not found", "no such file or directory", "az: not found"]):
+                return await self._fallback_via_sdk(request_text=request_text, context=context, nlu_result=nlu_result, correlation_id=correlation_id, dry_run=False)
+            logger.error("AVM deployment failed", correlation_id=correlation_id, status=deployment_result.get("status"), raw_result=deployment_result)
+            return {"ok": False, "summary": f"AVM deployment failed: {deployment_result.get('status')}", "output": f"Deployment failed: {deployment_result.get('message', 'Unknown error')}"}
         except Exception as e:
             if self._should_fallback_to_sdk(e, nlu_result):
-                logger.info(
-                    "AVM execution unsupported/unavailable; using SDK fallback",
-                    correlation_id=correlation_id,
-                    error=str(e),
-                    resource_type=getattr(
-                        nlu_result, "resource_type", "unknown"),
-                )
-                return await self._fallback_via_sdk(
-                    request_text=request_text,
-                    context=context,
-                    nlu_result=nlu_result,
-                    correlation_id=correlation_id,
-                    dry_run=False,
-                )
-            logger.error(
-                "AVM deployment execution failed",
-                correlation_id=correlation_id,
-                error=str(e),
-                exc_info=True,
-            )
+                logger.info("AVM execution unsupported/unavailable; using SDK fallback", correlation_id=correlation_id, error=str(e), resource_type=getattr(nlu_result, "resource_type", "unknown"))
+                return await self._fallback_via_sdk(request_text=request_text, context=context, nlu_result=nlu_result, correlation_id=correlation_id, dry_run=False)
+            logger.error("AVM deployment execution failed", correlation_id=correlation_id, error=str(e), exc_info=True)
             raise
 
     async def _store_deployment_result(

@@ -381,20 +381,20 @@ class ApplicationInsights:
                 host = urlparse(str(request.url)).hostname
                 if host and host.lower() == "api.openai.com":
                     if hasattr(response, "content"):
-                    try:
-                        import json
+                        try:
+                            import json
 
-                        response_data = json.loads(
-                            response.content.decode("utf-8"))
-                        if isinstance(response_data, dict) and "usage" in response_data:
-                            usage = response_data["usage"]
-                            if isinstance(usage, dict):
-                                for key, value in usage.items():
-                                    if isinstance(value, int | float):
-                                        span.set_attribute(
-                                            f"llm.usage.{key}", value)
-                    except (ValueError, TypeError, KeyError, AttributeError):
-                        pass
+                            response_data = json.loads(
+                                response.content.decode("utf-8"))
+                            if isinstance(response_data, dict) and "usage" in response_data:
+                                usage = response_data["usage"]
+                                if isinstance(usage, dict):
+                                    for key, value in usage.items():
+                                        if isinstance(value, int | float):
+                                            span.set_attribute(
+                                                f"llm.usage.{key}", value)
+                        except (ValueError, TypeError, KeyError, AttributeError):
+                            pass
 
         except (AttributeError, TypeError, ValueError) as e:
             logger.debug(f"HTTP response hook error: {e}")

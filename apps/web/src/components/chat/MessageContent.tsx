@@ -1,5 +1,6 @@
 // MessageContent.tsx
 import React from 'react'
+import DOMPurify from 'dompurify'
 import { Copy, Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
@@ -157,7 +158,7 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, onCopy }) => {
             key={index}
             className="text-sm leading-relaxed text-black"
             dangerouslySetInnerHTML={{
-              __html: formatText(part.content).replace(/\n/g, '<br>'),
+              __html: DOMPurify.sanitize(formatText(part.content).replace(/\n/g, '<br>')),
             }}
           />
         )

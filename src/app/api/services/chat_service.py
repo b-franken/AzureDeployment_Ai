@@ -114,6 +114,7 @@ async def run_chat(
         preferred_tool=preferred_tool,
         allowlist=list(allowlist or []),
         context=context,
+        conversation_context=[{"role": msg["role"], "content": msg["content"]} for msg in mem] if mem else None,
     )
 
     # Extract tool usage information if available from context

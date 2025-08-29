@@ -225,6 +225,7 @@ export async function chat(
   const sub = isOpts ? providerOrOpts.subscription_id : undefined
   const rg = isOpts ? providerOrOpts.resource_group : undefined
   const env = isOpts ? providerOrOpts.environment : undefined
+  const timeoutMs = tools && dry !== true ? DEPLOYMENT_TIMEOUT_MS : REQUEST_TIMEOUT_MS
   const data = await apiClient.post<{ output: string }>(
     "/api/chat?stream=false",
     {
@@ -240,7 +241,7 @@ export async function chat(
       resource_group: rg,
       environment: env,
     },
-    { context: "chat" }
+    { context: "chat", timeoutMs }
   )
   if (!data || typeof data.output !== "string") throw new ApiError("chat response malformed")
   return data.output

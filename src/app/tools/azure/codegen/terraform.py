@@ -8,10 +8,11 @@ def generate_terraform_code(action: str, params: dict[str, Any]) -> str:
     from app.core.logging import get_logger
     logger = get_logger(__name__)
     
-    logger.debug(
-        "Generating Terraform template",
+    logger.info(
+        "Terraform generation started",
         action=action,
-        params_keys=list(params.keys()) if params else []
+        params=params,
+        action_in_storage_actions=action in ["create_storage", "create_storage_account"]
     )
     
     resource_group = params.get("resource_group", "myapp-dev-rg")
@@ -54,6 +55,7 @@ output "resource_group_name" {{
 """
 
     elif action in ["create_storage", "create_storage_account"]:
+        logger.info("Matched storage account template", action=action)
         sku = params.get("sku", "Standard_LRS")
         access_tier = params.get("access_tier", "Hot")
         repl = sku.split("_")[1] if "_" in sku else "LRS"
@@ -179,6 +181,11 @@ output "cluster_name" {{
 """
 
     else:
+        logger.warning(
+            "Using generic Terraform template", 
+            action=action,
+            available_actions=["create_rg", "create_storage", "create_webapp", "create_aks"]
+        )
         terraform_config += f"""# Generic resource template for {action}
 # Resource name: {name}
 # Location: {location}
@@ -187,4 +194,10 @@ output "cluster_name" {{
 # Add specific resource configuration here
 """
 
+    logger.info(
+        "Terraform generation completed",
+        action=action,
+        config_length=len(terraform_config),
+        is_generic=action not in ["create_rg", "create_storage", "create_storage_account", "create_webapp", "create_aks"]
+    )
     return terraform_config

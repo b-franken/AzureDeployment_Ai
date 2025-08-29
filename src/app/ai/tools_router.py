@@ -225,7 +225,7 @@ def _maybe_wrap_approval(
 
 
 async def _run_tool(
-    name: str, args: dict[str, object], context: ToolExecutionContext | None = None
+    name: str, args: dict[str, object], context: ToolExecutionContext | None = None, conversation_context: list[dict] | None = None
 ) -> dict[str, object]:
     if context:
         context.tool_execution_count += 1
@@ -298,6 +298,10 @@ async def _run_tool(
             merged_args["correlation_id"] = context.correlation_id
         if "confirmed" not in merged_args and merged_args.get("dry_run") is False:
             merged_args["confirmed"] = True
+
+    # Add conversation context for phase detection
+    if conversation_context is not None:
+        merged_args["conversation_context"] = conversation_context
 
     tool = get_tool(name)
     if not tool:
@@ -617,8 +621,19 @@ async def _run_tool_and_explain(
     provider: str | None,
     model: str | None,
     context: ToolExecutionContext | None,
+    conversation_context: list[dict] | None = None,
 ) -> str:
-    result = await _run_tool(name, args, context)
+    result = await _run_tool(name, args, context, conversation_context)
+    
+    # For deployment tools, return the technical output directly without summarization
+    if name in ["azure_provision", "provision_orchestrator"] and isinstance(result, dict):
+        output = result.get("output", "")
+        if output and any(marker in output for marker in [
+            "```bicep", "```hcl", "```terraform", "## Azure Verified Module", "## Terraform Infrastructure"
+        ]):
+            logger.info(f"Returning technical output directly for tool {name}")
+            return output
+    
     summary = json.dumps(result, ensure_ascii=False)
     return await generate_response(
         f"Tool {name} executed with args {json.dumps(args, ensure_ascii=False)}.\n"
@@ -640,6 +655,7 @@ async def maybe_call_tool(
     preferred_tool: str | None = None,
     context: ToolExecutionContext | None = None,
     return_json: bool = False,
+    conversation_context: list[dict] | None = None,
 ) -> str:
     from app.core.config import settings
 
@@ -648,6 +664,18 @@ async def maybe_call_tool(
         f"model={model} enable_tools={enable_tools}"
     )
     await _log_request(user_input, context)
+    
+    # Handle proceed commands specially to avoid LLM reinterpretation
+    if enable_tools and user_input.lower().strip() in ["proceed", "confirm", "deploy it", "deploy now", "yes deploy", "go ahead"]:
+        logger.info(f"Detected proceed command: '{user_input}' - bypassing LLM orchestration")
+        return await _run_tool_and_explain(
+            "azure_provision", 
+            {"request": user_input.strip()}, 
+            provider, 
+            model, 
+            context, 
+            conversation_context
+        )
 
     if context and context.classifier and settings.environment != "development":
         try:
@@ -678,7 +706,7 @@ async def maybe_call_tool(
                 return json.dumps(res, ensure_ascii=False, indent=2)
             return await _run_tool_and_explain(
                 str(mapped["tool"]), dict(
-                    mapped["args"]), provider, model, context
+                    mapped["args"]), provider, model, context, conversation_context
             )
         tools = list_tools()
         if allowlist:
@@ -712,7 +740,7 @@ async def maybe_call_tool(
                 if return_json:
                     res = await _run_tool(name, dict(args_obj), context)
                     return json.dumps(res, ensure_ascii=False, indent=2)
-                return await _run_tool_and_explain(name, dict(args_obj), provider, model, context)
+                return await _run_tool_and_explain(name, dict(args_obj), provider, model, context, conversation_context)
             except Exception:
                 return "Invalid direct tool syntax. Use: tool:tool_name {json-args}"
         if preferred_tool:
@@ -737,7 +765,7 @@ async def maybe_call_tool(
                 res = await _run_tool(preferred_tool, mapped_args, context)
                 return json.dumps(res, ensure_ascii=False, indent=2)
             return await _run_tool_and_explain(
-                preferred_tool, mapped_args, provider, model, context
+                preferred_tool, mapped_args, provider, model, context, conversation_context
             )
         tools_desc = (
             "\n".join(
@@ -763,7 +791,7 @@ async def maybe_call_tool(
         if return_json:
             res = await _run_tool(name, args, context)
             return json.dumps(res, ensure_ascii=False, indent=2)
-        return await _run_tool_and_explain(name, args, provider, model, context)
+        return await _run_tool_and_explain(name, args, provider, model, context, conversation_context)
     except Exception as e:
         await _log_error(e, context)
         return "An unexpected error occurred."

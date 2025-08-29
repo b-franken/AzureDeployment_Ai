@@ -310,12 +310,27 @@ class unified_nlu_parser:
         return max(scores, key=lambda k: scores[k])
 
     def _detect_resource_type(self, text: str) -> str:
+        from app.core.logging import get_logger
+        logger = get_logger(__name__)
+        
         scores: dict[str, int] = {}
+        contextual_resources = {"resource_group"}
+        
+        logger.debug("NLU resource type detection", text=text[:100])
+        
         for rtype, pats in self.resource_patterns.items():
             s = 0
             for pat in pats:
-                if pat.search(text):
+                match = pat.search(text)
+                if match:
                     s += 2
+                    if rtype not in contextual_resources:
+                        start_pos = match.start()
+                        create_verbs = r"\b(?:create|make|new|provision|deploy|setup|add)\b"
+                        text_before_match = text[:start_pos + 50]
+                        if re.search(create_verbs, text_before_match):
+                            s += 10
+            
             keyword_hints: dict[str, list[str]] = {
                 "resource_group": ["resource group", "rg"],
                 "storage": ["storage", "blob", "file"],
@@ -327,14 +342,43 @@ class unified_nlu_parser:
                 "sql": ["sql", "database", "db"],
                 "vnet": ["network", "vnet", "networking"],
             }
+            
             for hint in keyword_hints.get(rtype, []):
                 if hint in text:
-                    s += 1
+                    hint_score = 1
+                    if rtype not in contextual_resources:
+                        create_verbs = r"\b(?:create|make|new|provision|deploy|setup|add)\b"
+                        hint_pos = text.find(hint)
+                        text_before_hint = text[:hint_pos + len(hint) + 50]
+                        if re.search(create_verbs, text_before_hint):
+                            hint_score += 5
+                    s += hint_score
+            
+            if rtype in contextual_resources:
+                in_context_patterns = [
+                    r"\bin\s+(?:resource\s+group|rg)\s+",
+                    r"(?:resource\s+group|rg)\s+[a-z0-9][\w-]*"
+                ]
+                for pattern in in_context_patterns:
+                    if re.search(pattern, text):
+                        s = min(s, 3)
+                        break
+            
             if s > 0:
                 scores[rtype] = s
+                logger.debug("NLU scoring", resource_type=rtype, score=s, text_snippet=text[:50])
+                
         if not scores:
+            logger.warning("NLU no resource type detected", text=text[:100])
             return "generic"
-        return max(scores, key=lambda k: scores[k])
+            
+        best_type = max(scores, key=lambda k: scores[k])
+        logger.info("NLU resource type selected", 
+                   selected_type=best_type, 
+                   selected_score=scores[best_type],
+                   all_scores=dict(scores),
+                   text=text[:100])
+        return best_type
 
     def _extract_resource_name(self, text: str, rtype: str) -> str | None:
         if rtype in self.resource_patterns:

@@ -9,6 +9,7 @@ import LLMSelector from "@/components/chat/LLMSelector"
 import { ReviewButton } from "@/components/chat/ReviewButton"
 import { DeployButton } from "@/components/chat/DeployButton"
 import MessageContent from "@/components/chat/MessageContent"
+import DeploymentConfirmation from "@/components/chat/DeploymentConfirmation"
 import { chat as call_chat, API_BASE_URL } from "@/lib/api"
 import { chatStream } from "@/lib/stream"
 import { connectChatWs, ChatSocket } from "@/lib/ws"
@@ -41,6 +42,9 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
     const [isResizing, setIsResizing] = useState(false)
     const [deployToolsEnabled, setDeployToolsEnabled] = useState(false)
     const [threadId] = useState(() => crypto.randomUUID()) // Persistent thread for memory
+    const [activeDeployments, setActiveDeployments] = useState<Set<string>>(new Set())
+    const [pendingDeployment, setPendingDeployment] = useState<any>(null)
+    const [isConfirmingDeployment, setIsConfirmingDeployment] = useState(false)
 
     const scrollRef = useRef<HTMLDivElement>(null)
     const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -105,6 +109,22 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
             })
             return
         }
+        
+        // For deployment requests, check if same deployment is already active
+        const intentDeploy = /\b(proceed|confirm|deploy confirmed)\b/i.test(currentInput)
+        const isDeploy = deployToolsEnabled || intentDeploy
+        
+        if (isDeploy) {
+            const deploymentKey = `${currentInput}:${modelId}:${threadId}`
+            if (activeDeployments.has(deploymentKey)) {
+                console.warn("Duplicate deployment detected, skipping", {
+                    deploymentKey,
+                    timestamp: new Date().toISOString(),
+                })
+                return
+            }
+            setActiveDeployments(prev => new Set([...prev, deploymentKey]))
+        }
 
         if (abortControllerRef.current) abortControllerRef.current.abort()
 
@@ -140,9 +160,6 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
                     content: m.content,
                 }))
             const { provider, model } = splitModel(modelId)
-            const intentDeploy = /\b(proceed|confirm|deploy confirmed)\b/i.test(
-                userMessage.content
-            )
             const doDeploy = deployToolsEnabled || intentDeploy
 
             if (!doDeploy) {
@@ -187,6 +204,13 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
                                 : m
                         )
                     )
+                    
+                    if (reply.includes("Azure Deployment Preview") && reply.includes("Reply with: `proceed`")) {
+                        const previewData = parseDeploymentPreview(reply)
+                        if (previewData) {
+                            setPendingDeployment(previewData)
+                        }
+                    }
                 } catch (deployError: any) {
                     const errorMsg = `Deployment failed: ${deployError?.message || "Unknown error"
                         }.\n\nPlease try again or check your Azure configuration.`
@@ -212,9 +236,20 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
             setIsLoading(false)
             inputRef.current?.focus()
             abortControllerRef.current = null
+            
             // Clear pending request tracking when done
             if (pendingRequestRef.current === currentInput) {
                 pendingRequestRef.current = null
+            }
+            
+            // Clear deployment tracking for this request
+            if (isDeploy) {
+                const deploymentKey = `${currentInput}:${modelId}:${threadId}`
+                setActiveDeployments(prev => {
+                    const updated = new Set(prev)
+                    updated.delete(deploymentKey)
+                    return updated
+                })
             }
         }
     }
@@ -243,6 +278,88 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
             timestamp: new Date(),
         }
         setMessages((prev) => [...prev, reviewMessage])
+    }
+
+    const parseDeploymentPreview = (content: string) => {
+        const resourceTypeMatch = content.match(/Resource Type: (.+)/)
+        const resourceNameMatch = content.match(/Resource Name: (.+)/)
+        const resourceGroupMatch = content.match(/Resource Group: (.+)/)
+        const locationMatch = content.match(/Location: (.+)/)
+        const environmentMatch = content.match(/Environment: (.+)/)
+        const costMatch = content.match(/Estimated Monthly Cost: \$([\d.]+)/)
+        const deploymentIdMatch = content.match(/Preview ID: (.+)/)
+        const expiresMatch = content.match(/Expires: (.+?) \(/)
+
+        if (resourceTypeMatch && resourceNameMatch && resourceGroupMatch && locationMatch) {
+            return {
+                resourceType: resourceTypeMatch[1].trim(),
+                resourceName: resourceNameMatch[1].trim(),
+                resourceGroup: resourceGroupMatch[1].trim(),
+                location: locationMatch[1].trim(),
+                environment: environmentMatch?.[1]?.trim() || 'dev',
+                monthlyCost: parseFloat(costMatch?.[1] || '0'),
+                deploymentId: deploymentIdMatch?.[1]?.trim() || crypto.randomUUID(),
+                expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString()
+            }
+        }
+        return null
+    }
+
+    const handleDeploymentConfirm = async () => {
+        if (!pendingDeployment) return
+        
+        setIsConfirmingDeployment(true)
+        setPendingDeployment(null)
+        
+        const confirmMessage: ChatMsg = {
+            id: crypto.randomUUID(),
+            role: "user",
+            content: "proceed",
+            timestamp: new Date(),
+        }
+        setMessages((prev) => [...prev, confirmMessage])
+        
+        const assistantId = crypto.randomUUID()
+        setMessages((prev) => [
+            ...prev,
+            { id: assistantId, role: "assistant", content: "", timestamp: new Date() },
+        ])
+        
+        try {
+            const history = messages.map((m) => ({ role: m.role, content: m.content }))
+            const { provider, model } = splitModel(modelId)
+            
+            const reply = await call_chat("proceed", [...history, { role: "user", content: "proceed" }], {
+                provider,
+                model,
+                enable_tools: true,
+                dry_run: false,
+            })
+            
+            setMessages((prev) =>
+                prev.map((m) =>
+                    m.id === assistantId
+                        ? { ...m, content: reply, timestamp: new Date() }
+                        : m
+                )
+            )
+        } catch (error: any) {
+            const errorMsg = `Deployment failed: ${error?.message || "Unknown error"}`
+            setMessages((prev) =>
+                prev.map((m) =>
+                    m.id === assistantId
+                        ? { ...m, content: errorMsg, timestamp: new Date() }
+                        : m
+                )
+            )
+        } finally {
+            setIsConfirmingDeployment(false)
+        }
+    }
+
+    const handleDeploymentCancel = () => {
+        setPendingDeployment(null)
+        setIsConfirmingDeployment(false)
     }
 
     return (
@@ -352,6 +469,17 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
                         <div ref={scrollRef} />
                     </div>
                 </ScrollArea>
+
+                {pendingDeployment && (
+                    <div className="border-t border-white/10 p-4">
+                        <DeploymentConfirmation
+                            preview={pendingDeployment}
+                            onConfirm={handleDeploymentConfirm}
+                            onCancel={handleDeploymentCancel}
+                            isConfirming={isConfirmingDeployment}
+                        />
+                    </div>
+                )}
 
                 <div
                     className="flex h-2 cursor-row-resize items-center justify-center border-y border-white/10 hover:bg-white/5"

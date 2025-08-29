@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from datetime import datetime, timedelta
 from typing import Any
 
 from opentelemetry import trace
@@ -16,6 +17,8 @@ from app.observability.app_insights import app_insights
 from app.tools.base import Tool, ToolResult
 from app.tools.provision.backends.avm_bicep.engine import BicepAvmBackend, ProvisionContext
 from app.tools.azure.codegen.terraform import generate_terraform_code
+from app.tools.azure.deployment_phases import DeploymentPhaseDetector, DeploymentPhase, DeploymentState, deployment_state_manager
+from app.tools.azure.output_formatter import DeploymentOutputFormatter
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -129,6 +132,16 @@ class IntelligentAzureProvision(Tool):
                 "summary": "Invalid request",
                 "output": "Request description is required for intelligent provisioning",
             }
+
+        # Early phase detection for direct proceed commands
+        conversation_context = kwargs.get("conversation_context", [])
+        phase = DeploymentPhaseDetector.detect_phase(request_text, conversation_context)
+        
+        if phase == DeploymentPhase.EXECUTE:
+            logger.info(f"Early phase detection: execution phase detected for request '{request_text}'")
+            return await self._handle_execution_phase(
+                None, None, None, correlation_id, request_text, user_id
+            )
 
         subscription_id = kwargs.get("subscription_id")
         if not subscription_id:
@@ -249,35 +262,17 @@ class IntelligentAzureProvision(Tool):
                     nlu_resource_type=getattr(nlu_result, "resource_type", "unknown"),
                 )
 
-                preview_result = await self._generate_plan_preview(
-                    provision_context, nlu_result, correlation_id, request_text
-                )
+                conversation_context = kwargs.get("conversation_context", [])
+                phase = DeploymentPhaseDetector.detect_phase(request_text, conversation_context)
                 
-                if kwargs.get("dry_run", True):
-                    result = preview_result
-                else:
-                    deployment_result = await self._execute_deployment(
-                        provision_context, nlu_result, agent, correlation_id, request_text
+                if phase == DeploymentPhase.PREVIEW:
+                    result = await self._handle_preview_phase(
+                        provision_context, nlu_result, correlation_id, request_text, user_id
                     )
-                    
-                    combined_output_sections = []
-                    
-                    if preview_result.get("output"):
-                        combined_output_sections.append("## Deployment Preview")
-                        combined_output_sections.append(preview_result["output"])
-                        combined_output_sections.append("")
-                    
-                    if deployment_result.get("output"):
-                        combined_output_sections.append("## Deployment Execution")
-                        combined_output_sections.append(deployment_result["output"])
-                    
-                    result = {
-                        "ok": deployment_result.get("ok", False),
-                        "summary": f"Deployment completed - {deployment_result.get('summary', '')}",
-                        "output": "\n".join(combined_output_sections),
-                        "preview_data": preview_result,
-                        "deployment_data": deployment_result
-                    }
+                else:
+                    result = await self._handle_execution_phase(
+                        provision_context, nlu_result, agent, correlation_id, request_text, user_id
+                    )
 
                 await self._store_deployment_result(user_id, result, correlation_id)
 
@@ -619,13 +614,23 @@ class IntelligentAzureProvision(Tool):
             
             resource_type = getattr(nlu_result, "resource_type", "")
             terraform_action = self._map_resource_type_to_terraform_action(resource_type)
-            logger.debug(
-                "Generating Terraform code",
+            
+            logger.info(
+                "Terraform code generation",
                 resource_type=resource_type,
                 terraform_action=terraform_action,
+                params_keys=list(terraform_params.keys()),
                 correlation_id=correlation_id
             )
+            
             terraform_code = generate_terraform_code(terraform_action, terraform_params)
+            
+            logger.info(
+                "Generated Terraform code",
+                code_length=len(terraform_code),
+                has_storage_account=terraform_action == "create_storage",
+                correlation_id=correlation_id
+            )
 
             output_sections = [
                 "**Azure Deployment Plan Preview**",
@@ -714,62 +719,186 @@ class IntelligentAzureProvision(Tool):
             )
             raise
 
-    async def _execute_deployment(self, context: ProvisionContext, nlu_result: Any, agent: ProvisioningAgent, correlation_id: str, request_text: str) -> ToolResult:
+    async def _handle_preview_phase(
+        self,
+        context: ProvisionContext,
+        nlu_result: Any,
+        correlation_id: str,
+        request_text: str,
+        user_id: str,
+    ) -> ToolResult:
+        """Handle deployment preview phase - generate templates and store state."""
         try:
-            plan_preview = await self.avm_backend.plan_from_nlu(nlu_result, context, dry_run=False)
-            logger.info("Starting AVM deployment execution", correlation_id=correlation_id, bicep_path=plan_preview.bicep_path, resource_group=context.resource_group)
-            deployment_result = await self.avm_backend.apply(context, plan_preview.bicep_path)
-            if deployment_result.get("status") == "succeeded":
-                cost_estimate = plan_preview.cost_estimate or {}
-                monthly_cost = cost_estimate.get("monthly_estimate", 0.0)
-                
-                output_sections = [
-                    "**Azure Deployment Completed Successfully**",
-                    "",
-                    "**Deployment Details:**",
-                    f"- Deployment ID: `{deployment_result.get('deployment_id', 'Unknown')}`",
-                    f"- Resource Group: {context.resource_group}",
-                    f"- Location: {context.location}",
-                    f"- Duration: {deployment_result.get('duration', 'Unknown')}",
-                    f"- Estimated Monthly Cost: ${monthly_cost:.2f} USD",
-                    "- Status:  Succeeded",
-                    "",
-                    "## Deployed Resources (AVM Modules)",
-                    "```json",
-                    json.dumps(deployment_result.get("outputs", {}), indent=2),
-                    "```",
-                    "",
-                ]
-                
-                if cost_estimate:
-                    output_sections.extend([
-                        "## Cost Breakdown",
-                        "```json",
-                        json.dumps(cost_estimate, indent=2),
-                        "```",
-                        "",
-                    ])
-                
-                output_sections.extend([
-                    "## Azure Verified Module (AVM) Bicep Code",
-                    "```bicep",
-                    plan_preview.rendered,
-                    "```",
-                    "",
-                    "**Note:** All resources deployed using Azure Verified Modules (AVM) following Azure best practices.",
-                ])
-                return {"ok": True, "summary": f"AVM deployment succeeded - {getattr(nlu_result, 'resource_type', 'resource')} deployed", "output": "\n".join(output_sections)}
-            msg = str(deployment_result.get("message", "")).lower()
-            if any(s in msg for s in ["azure cli not found", "no such file or directory", "az: not found"]):
-                return await self._fallback_via_sdk(request_text=request_text, context=context, nlu_result=nlu_result, correlation_id=correlation_id, dry_run=False)
-            logger.error("AVM deployment failed", correlation_id=correlation_id, status=deployment_result.get("status"), raw_result=deployment_result)
-            return {"ok": False, "summary": f"AVM deployment failed: {deployment_result.get('status')}", "output": f"Deployment failed: {deployment_result.get('message', 'Unknown error')}"}
+            plan_preview = await self.avm_backend.plan_from_nlu(nlu_result, context, dry_run=True)
+            
+            cost_estimate = plan_preview.cost_estimate or {}
+            monthly_cost = cost_estimate.get("monthly_estimate", 0.0)
+            bicep_template = plan_preview.rendered or ""
+            what_if_analysis = plan_preview.what_if or ""
+            
+            terraform_params = {
+                "resource_group": context.resource_group,
+                "location": context.location,
+                "name": getattr(nlu_result, "resource_name", "myresource"),
+                "environment": context.environment
+            }
+            
+            resource_type = getattr(nlu_result, "resource_type", "")
+            terraform_action = self._map_resource_type_to_terraform_action(resource_type)
+            terraform_config = generate_terraform_code(terraform_action, terraform_params)
+            
+            deployment_id = str(uuid.uuid4())
+            
+            state = DeploymentState(
+                deployment_id=deployment_id,
+                user_id=user_id,
+                resource_spec={
+                    "resource_type": getattr(nlu_result, "resource_type", ""),
+                    "resource_name": getattr(nlu_result, "resource_name", ""),
+                    "request": request_text,
+                    "context": context.to_dict() if hasattr(context, "to_dict") else {}
+                },
+                bicep_template=bicep_template,
+                terraform_config=terraform_config,
+                cost_estimate={"monthly_estimate": monthly_cost},
+                what_if_analysis=what_if_analysis,
+                resource_group=context.resource_group,
+                location=context.location,
+                subscription_id=context.subscription_id,
+                created_at=datetime.utcnow(),
+                expires_at=datetime.utcnow() + timedelta(minutes=30)
+            )
+            
+            deployment_state_manager.store_preview_state(state)
+            
+            output = DeploymentOutputFormatter.format_preview_output(
+                state,
+                getattr(nlu_result, "resource_type", "resource"),
+                getattr(nlu_result, "resource_name", "unknown")
+            )
+            
+            return {
+                "ok": True,
+                "summary": "Deployment preview generated",
+                "output": output
+            }
+            
         except Exception as e:
-            if self._should_fallback_to_sdk(e, nlu_result):
-                logger.info("AVM execution unsupported/unavailable; using SDK fallback", correlation_id=correlation_id, error=str(e), resource_type=getattr(nlu_result, "resource_type", "unknown"))
-                return await self._fallback_via_sdk(request_text=request_text, context=context, nlu_result=nlu_result, correlation_id=correlation_id, dry_run=False)
-            logger.error("AVM deployment execution failed", correlation_id=correlation_id, error=str(e), exc_info=True)
-            raise
+            logger.error(
+                "Preview phase failed",
+                error=str(e),
+                correlation_id=correlation_id,
+                exc_info=True
+            )
+            return {
+                "ok": False,
+                "summary": "Preview generation failed",
+                "output": DeploymentOutputFormatter.format_deployment_error(str(e))
+            }
+
+    async def _handle_execution_phase(
+        self,
+        context: ProvisionContext,
+        nlu_result: Any,
+        agent: ProvisioningAgent,
+        correlation_id: str,
+        request_text: str,
+        user_id: str,
+    ) -> ToolResult:
+        """Handle deployment execution phase - find stored state and execute deployment."""
+        try:
+            state = deployment_state_manager.find_latest_state_for_user(user_id)
+            
+            if not state:
+                return {
+                    "ok": False,
+                    "summary": "No deployment preview found",
+                    "output": DeploymentOutputFormatter.format_state_not_found_error(user_id)
+                }
+            
+            if state.is_expired():
+                return {
+                    "ok": False,
+                    "summary": "Deployment preview expired",
+                    "output": DeploymentOutputFormatter.format_confirmation_timeout_error(state.deployment_id)
+                }
+            
+            import tempfile
+            from pathlib import Path
+            
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.bicep', delete=False) as f:
+                f.write(state.bicep_template)
+                bicep_file_path = f.name
+            
+            try:
+                backend = BicepAvmBackend()
+                deployment_context = ProvisionContext(
+                    subscription_id=state.subscription_id,
+                    resource_group=state.resource_group,
+                    location=state.location
+                )
+                
+                logger.info(
+                    "Executing deployment from stored state",
+                    deployment_id=state.deployment_id,
+                    user_id=user_id,
+                    resource_group=state.resource_group,
+                    subscription_id=state.subscription_id
+                )
+                
+                deployment_result = await backend.apply(deployment_context, bicep_file_path)
+                
+            finally:
+                Path(bicep_file_path).unlink(missing_ok=True)
+            
+            if deployment_result.get("status") == "succeeded":
+                duration = deployment_result.get("duration", "< 1 minute")
+                
+                output = DeploymentOutputFormatter.format_deployment_output(
+                    deployment_result.get("outputs", {}),
+                    state.bicep_template,
+                    state.terraform_config,
+                    duration,
+                    state.deployment_id,
+                    state.resource_group,
+                    state.location
+                )
+                
+                return {
+                    "ok": True,
+                    "summary": "Deployment completed successfully",
+                    "output": output
+                }
+            else:
+                error_message = deployment_result.get("message", "Deployment failed")
+                logger.error(
+                    "Deployment execution failed",
+                    deployment_id=state.deployment_id,
+                    status=deployment_result.get("status"),
+                    error=error_message
+                )
+                return {
+                    "ok": False,
+                    "summary": "Deployment failed",
+                    "output": DeploymentOutputFormatter.format_deployment_error(
+                        error_message,
+                        state.deployment_id,
+                        state.resource_group
+                    )
+                }
+                
+        except Exception as e:
+            logger.error(
+                "Execution phase failed",
+                error=str(e),
+                correlation_id=correlation_id,
+                exc_info=True
+            )
+            return {
+                "ok": False,
+                "summary": "Deployment execution failed",
+                "output": DeploymentOutputFormatter.format_deployment_error(str(e))
+            }
 
     async def _store_deployment_result(
         self, user_id: str, result: ToolResult, correlation_id: str

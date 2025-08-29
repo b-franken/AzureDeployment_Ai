@@ -11,6 +11,7 @@ from opentelemetry.trace import Status, StatusCode
 
 from app.ai.llm.base import LLMProvider
 from app.ai.types import Message
+from app.ai.validation import LLMMessage, MessageRole, ValidationResult
 from app.core.exceptions import ExternalServiceException, retry_on_error
 
 
@@ -55,34 +56,54 @@ class UnifiedLLMProvider(LLMProvider):
     ) -> None:
         await self.aclose()
 
-    def _sanitize_messages(self, messages: list[Message]) -> list[Message]:
-        """Keep only system/user/assistant with string content.
-        Drop tool/function messages and assistant messages that contain tool_calls.
-        This prevents OpenAI 400: 'tool must be a response to tool_calls'.
-        """
-        out: list[Message] = []
-        for m in messages:
-            role = str(m.get("role") or "").lower()
-            if role == "tool":
-                continue
-            if isinstance(m, dict) and ("tool_calls" in m or (role == "assistant" and "name" in m)):
+    def _sanitize_messages(self, messages: list[Message]) -> ValidationResult:
+        """Validate and sanitize messages using Pydantic models."""
+        sanitized: list[LLMMessage] = []
+        errors: list[str] = []
+        warnings: list[str] = []
+        
+        for i, m in enumerate(messages):
+            try:
+                role = str(m.get("role") or "").lower()
+                
+                if role == "tool":
+                    warnings.append(f"Message {i}: Skipping tool message")
+                    continue
+                    
+                if isinstance(m, dict) and ("tool_calls" in m or (role == "assistant" and "name" in m)):
+                    content = m.get("content")
+                    if isinstance(content, str) and content.strip():
+                        sanitized.append(LLMMessage(role=MessageRole.ASSISTANT, content=content))
+                        warnings.append(f"Message {i}: Stripped tool_calls from assistant message")
+                    else:
+                        warnings.append(f"Message {i}: Skipping assistant message with tool_calls and no content")
+                    continue
+
                 content = m.get("content")
-                if isinstance(content, str) and content.strip():
-                    out.append({"role": "assistant", "content": content})
-                continue
+                if not isinstance(content, str):
+                    try:
+                        content = json.dumps(content, ensure_ascii=False)
+                        warnings.append(f"Message {i}: Converted non-string content to JSON")
+                    except Exception:
+                        content = "" if content is None else str(content)
+                        warnings.append(f"Message {i}: Converted content to string")
 
-            content = m.get("content")
-            if not isinstance(content, str):
                 try:
-                    content = json.dumps(content, ensure_ascii=False)
-                except Exception:
-                    content = "" if content is None else str(content)
-
-            if role not in {"system", "user", "assistant"}:
-                role = "user"
-
-            out.append({"role": role, "content": content})
-        return out
+                    message_role = MessageRole(role) if role in {"system", "user", "assistant"} else MessageRole.USER
+                    if role not in {"system", "user", "assistant"}:
+                        warnings.append(f"Message {i}: Unknown role '{role}', using 'user'")
+                        
+                    sanitized.append(LLMMessage(role=message_role, content=content))
+                except ValueError as e:
+                    errors.append(f"Message {i}: Invalid role '{role}': {e}")
+                    
+            except Exception as e:
+                errors.append(f"Message {i}: Validation error: {e}")
+        
+        if errors:
+            return ValidationResult.failure(errors, warnings)
+        
+        return ValidationResult.success(sanitized)
 
     @retry_on_error(max_retries=3, base_delay=0.5)
     async def chat(self, model: str, messages: list[Message]) -> str:
@@ -91,7 +112,17 @@ class UnifiedLLMProvider(LLMProvider):
                 "llm.providers.available", ",".join(a.name() for a in self._adapters)
             )
             span.set_attribute("llm.provider.primary", self._adapters[0].name())
-            clean = self._sanitize_messages(messages)
+            
+            validation = self._sanitize_messages(messages)
+            if not validation.is_valid:
+                raise ValueError(f"Message validation failed: {'; '.join(validation.errors)}")
+            
+            if validation.warnings:
+                current = trace.get_current_span()
+                if current:
+                    current.add_event("message_validation_warnings", {"warnings": validation.warnings})
+            
+            clean = [{"role": m.role.value, "content": m.content} for m in validation.sanitized_messages]
             last_err: Exception | None = None
 
             for idx, adapter in enumerate(self._adapters):
@@ -129,7 +160,17 @@ class UnifiedLLMProvider(LLMProvider):
                 "llm.providers.available", ",".join(a.name() for a in self._adapters)
             )
             span.set_attribute("llm.provider.primary", self._adapters[0].name())
-            clean = self._sanitize_messages(messages)
+            
+            validation = self._sanitize_messages(messages)
+            if not validation.is_valid:
+                raise ValueError(f"Message validation failed: {'; '.join(validation.errors)}")
+            
+            if validation.warnings:
+                current = trace.get_current_span()
+                if current:
+                    current.add_event("message_validation_warnings", {"warnings": validation.warnings})
+            
+            clean = [{"role": m.role.value, "content": m.content} for m in validation.sanitized_messages]
             last_err: Exception | None = None
 
             for idx, adapter in enumerate(self._adapters):
@@ -174,10 +215,19 @@ class UnifiedLLMProvider(LLMProvider):
                 "llm.providers.available", ",".join(a.name() for a in self._adapters)
             )
             span.set_attribute("llm.provider.primary", self._adapters[0].name())
+            
+            validation = self._sanitize_messages(messages)
+            if not validation.is_valid:
+                raise ValueError(f"Message validation failed: {'; '.join(validation.errors)}")
+            
+            if validation.warnings:
+                current = trace.get_current_span()
+                if current:
+                    current.add_event("message_validation_warnings", {"warnings": validation.warnings})
+            
             clean: list[dict[str, Any]] = [
-                {"role": m.get("role"), "content": m.get("content")}
-                # type: ignore[arg-type]
-                for m in self._sanitize_messages(messages)
+                {"role": m.role.value, "content": m.content}
+                for m in validation.sanitized_messages
             ]
 
             last_err: Exception | None = None

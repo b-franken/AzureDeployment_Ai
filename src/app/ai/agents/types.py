@@ -65,6 +65,8 @@ class ExecutionResult(Generic[TResult]):
 @dataclass
 class AgentContext:
     user_id: str = "system"
+    thread_id: str | None = None
+    agent_name: str | None = None
     subscription_id: str | None = None
     resource_group: str | None = None
     environment: Literal["dev", "tst", "acc", "prod"] = "dev"

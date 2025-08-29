@@ -7,21 +7,13 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Generic, TypeVar
 
-from app.ai.agents.types import ExecutionPlan, ExecutionResult
+from app.ai.agents.types import AgentContext, ExecutionPlan, ExecutionResult
 from app.observability.agent_tracing import get_agent_tracer
 
 TState = TypeVar("TState")
 TResult = TypeVar("TResult")
 
 
-@dataclass
-class AgentContext:
-    user_id: str | None = None
-    thread_id: str | None = None
-    agent_name: str | None = None
-    environment: str | None = None
-    dry_run: bool = False
-    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class AgentStatus(Enum):

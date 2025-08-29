@@ -27,7 +27,8 @@
         "tailwind-merge": "2.5.2",
         "tailwindcss-animate": "1.0.7",
         "zod": "^4.0.17",
-        "zustand": "^4.5.7"
+        "zustand": "^4.5.7",
+        "dompurify": "^3.2.6"
     },
     "devDependencies": {
         "@types/node": "20.12.12",

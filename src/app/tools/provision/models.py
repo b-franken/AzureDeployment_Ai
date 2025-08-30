@@ -1,19 +1,24 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field, model_validator
+from app.core.schemas.base import BaseSchema
+from app.core.schemas.mixins import AzureMixin, ValidationMixin
+from app.core.schemas.registry import register_schema
 
 Env = Literal["dev", "tst", "acc", "prod"]
 Backend = Literal["auto", "terraform", "bicep", "sdk"]
 
 
-class WebAppPlanModel(BaseModel):
+@register_schema(version="1.0.0", category="provisioning")
+class WebAppPlanModel(BaseSchema):
     model_config = ConfigDict(extra="forbid")
     name: str
     sku: str = "P1v3"
     linux: bool = True
 
 
-class WebAppParameters(BaseModel):
+@register_schema(version="1.0.0", category="provisioning")
+class WebAppParameters(BaseSchema, AzureMixin):
     model_config = ConfigDict(extra="forbid")
     resource_group: str
     location: str
@@ -23,7 +28,8 @@ class WebAppParameters(BaseModel):
     tags: dict[str, str] = Field(default_factory=dict)
 
 
-class StorageParameters(BaseModel):
+@register_schema(version="1.0.0", category="provisioning")
+class StorageParameters(BaseSchema, AzureMixin):
     model_config = ConfigDict(extra="forbid")
     resource_group: str
     location: str
@@ -33,7 +39,8 @@ class StorageParameters(BaseModel):
     tags: dict[str, str] = Field(default_factory=dict)
 
 
-class AksParameters(BaseModel):
+@register_schema(version="1.0.0", category="provisioning")
+class AksParameters(BaseSchema, AzureMixin):
     model_config = ConfigDict(extra="forbid")
     resource_group: str
     location: str
@@ -43,7 +50,8 @@ class AksParameters(BaseModel):
     tags: dict[str, str] = Field(default_factory=dict)
 
 
-class AcrParameters(BaseModel):
+@register_schema(version="1.0.0", category="provisioning")
+class AcrParameters(BaseSchema, AzureMixin):
     model_config = ConfigDict(extra="forbid")
     resource_group: str
     location: str
@@ -53,7 +61,8 @@ class AcrParameters(BaseModel):
     tags: dict[str, str] = Field(default_factory=dict)
 
 
-class ApimParameters(BaseModel):
+@register_schema(version="1.0.0", category="provisioning")
+class ApimParameters(BaseSchema, AzureMixin):
     model_config = ConfigDict(extra="forbid")
     resource_group: str
     location: str
@@ -65,7 +74,8 @@ class ApimParameters(BaseModel):
     tags: dict[str, str] = Field(default_factory=dict)
 
 
-class EventHubParameters(BaseModel):
+@register_schema(version="1.0.0", category="provisioning")
+class EventHubParameters(BaseSchema, AzureMixin):
     model_config = ConfigDict(extra="forbid")
     resource_group: str
     location: str
@@ -77,7 +87,8 @@ class EventHubParameters(BaseModel):
     tags: dict[str, str] = Field(default_factory=dict)
 
 
-class ProvisionSpec(BaseModel):
+@register_schema(version="1.0.0", category="provisioning")
+class ProvisionSpec(BaseSchema, ValidationMixin):
     model_config = ConfigDict(extra="forbid")
     product: Literal[
         "web_app",

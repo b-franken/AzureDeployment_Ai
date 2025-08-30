@@ -243,6 +243,35 @@ class ApplicationInsights:
         if span:
             span.record_exception(exception, attributes=properties or {})
 
+    def track_dependency(
+        self,
+        name: str,
+        data: str | None = None,
+        type_name: str = "HTTP",
+        target: str | None = None,
+        duration: int = 0,
+        success: bool = True,
+        result_code: str = "200",
+        properties: dict[str, Any] | None = None
+    ) -> None:
+        span = trace.get_current_span()
+        if span:
+            attributes = {
+                "dependency.name": name,
+                "dependency.type": type_name,
+                "dependency.target": target or "unknown",
+                "dependency.duration": duration,
+                "dependency.success": success,
+                "dependency.result_code": result_code
+            }
+            if properties:
+                for key, value in properties.items():
+                    attributes[f"dependency.{key}"] = str(value)
+            if data:
+                attributes["dependency.data"] = data[:1000] if len(data) > 1000 else data
+            
+            span.add_event("dependency_call", attributes=attributes)
+
     def _patch_otel_attributes(self) -> None:
         """Patch OpenTelemetry attribute validation to handle logger objects."""
         try:

@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from app.ai.llm.factory import get_provider_and_model
 from app.core.logging import get_logger
 from app.core.streams import streaming_handler
-from app.events.schemas import DeploymentEvent
+from app.core.schemas.domains.deployment import DeploymentEvent
 
 router = APIRouter()
 logger = get_logger(__name__)

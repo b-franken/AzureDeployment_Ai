@@ -186,7 +186,7 @@ class BicepAvmBackend:
                 return {"status": "error", "message": str(e)}
 
     async def plan_from_nlu(
-        self, nlu_result: dict[str, Any], ctx: ProvisionContext, dry_run: bool = True
+        self, nlu_result, ctx: ProvisionContext, dry_run: bool = True
     ) -> PlanPreview:
         spec = self._mapper.map_nlu_to_avm(nlu_result)
 

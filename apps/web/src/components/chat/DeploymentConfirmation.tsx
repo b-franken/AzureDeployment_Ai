@@ -16,6 +16,8 @@ type DeploymentPreview = {
     monthlyCost: number
     deploymentId: string
     expiresAt: string
+    bicepContent?: string
+    terraformContent?: string
 }
 
 type DeploymentConfirmationProps = {
@@ -109,7 +111,7 @@ export default function DeploymentConfirmation({
                     />
                     <label htmlFor="acknowledge" className="text-sm text-gray-700">
                         I acknowledge that this deployment will create Azure resources and may incur costs.
-                        I have reviewed the Bicep and Terraform templates above.
+                        I understand the resource configuration and potential costs.
                     </label>
                 </div>
 

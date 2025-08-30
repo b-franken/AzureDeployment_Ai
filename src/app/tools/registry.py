@@ -45,7 +45,6 @@ def ensure_tools_loaded() -> None:
         return
     registry: list[tuple[str, str]] = [
         ("app.tools.azure.intelligent_provision", "IntelligentAzureProvision"),
-        ("app.tools.provision.orchestrator", "ProvisionOrchestrator"),
         ("app.tools.finops.cost_tool", "AzureCosts"),
         ("app.tools.azure.quota_check", "AzureQuotaCheck"),
     ]

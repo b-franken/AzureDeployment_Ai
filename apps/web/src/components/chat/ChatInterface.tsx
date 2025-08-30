@@ -191,11 +191,12 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
                 )
             } else {
                 try {
+                    const isDryRun = !intentDeploy
                     const reply = await call_chat(userMessage.content, history.slice(0, -1), {
                         provider,
                         model,
                         enable_tools: true,
-                        dry_run: false,
+                        dry_run: isDryRun,
                     })
                     setMessages((prev) =>
                         prev.map((m) =>
@@ -205,7 +206,7 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
                         )
                     )
                     
-                    if (reply.includes("Azure Deployment Preview") && reply.includes("Reply with: `proceed`")) {
+                    if (isDryRun && (reply.includes("Azure Deployment Preview") || reply.includes("Deployment Preview") || reply.includes("Preview ID:"))) {
                         const previewData = parseDeploymentPreview(reply)
                         if (previewData) {
                             setPendingDeployment(previewData)
@@ -281,25 +282,28 @@ export default function ChatInterface({ onBack }: ChatInterfaceProps) {
     }
 
     const parseDeploymentPreview = (content: string) => {
-        const resourceTypeMatch = content.match(/Resource Type: (.+)/)
-        const resourceNameMatch = content.match(/Resource Name: (.+)/)
-        const resourceGroupMatch = content.match(/Resource Group: (.+)/)
-        const locationMatch = content.match(/Location: (.+)/)
-        const environmentMatch = content.match(/Environment: (.+)/)
-        const costMatch = content.match(/Estimated Monthly Cost: \$([\d.]+)/)
-        const deploymentIdMatch = content.match(/Preview ID: (.+)/)
-        const expiresMatch = content.match(/Expires: (.+?) \(/)
+        const resourceTypeMatch = content.match(/(?:Resource Type|Type):\s*(.+)/i)
+        const resourceNameMatch = content.match(/(?:Resource Name|Name):\s*(.+)/i) || content.match(/(?:creating|deploying)\s+([a-zA-Z0-9\-_]+)/i)
+        const resourceGroupMatch = content.match(/(?:Resource Group|Group):\s*(.+)/i)
+        const locationMatch = content.match(/(?:Location|Region):\s*(.+)/i)
+        const environmentMatch = content.match(/(?:Environment|Env):\s*(.+)/i)
+        const costMatch = content.match(/(?:Estimated Monthly Cost|Monthly Cost|Cost):\s*\$?([\d.]+)/i)
+        const deploymentIdMatch = content.match(/(?:Preview ID|ID|Deployment ID):\s*(.+)/i)
+        const bicepMatch = content.match(/```bicep([\s\S]*?)```/)
+        const terraformMatch = content.match(/```(?:terraform|tf)([\s\S]*?)```/)
 
-        if (resourceTypeMatch && resourceNameMatch && resourceGroupMatch && locationMatch) {
+        if (resourceTypeMatch || resourceNameMatch) {
             return {
-                resourceType: resourceTypeMatch[1].trim(),
-                resourceName: resourceNameMatch[1].trim(),
-                resourceGroup: resourceGroupMatch[1].trim(),
-                location: locationMatch[1].trim(),
+                resourceType: resourceTypeMatch?.[1]?.trim() || 'unknown',
+                resourceName: resourceNameMatch?.[1]?.trim() || 'unnamed-resource',
+                resourceGroup: resourceGroupMatch?.[1]?.trim() || 'default-rg',
+                location: locationMatch?.[1]?.trim() || 'westeurope',
                 environment: environmentMatch?.[1]?.trim() || 'dev',
                 monthlyCost: parseFloat(costMatch?.[1] || '0'),
                 deploymentId: deploymentIdMatch?.[1]?.trim() || crypto.randomUUID(),
-                expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString()
+                expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+                bicepContent: bicepMatch?.[1]?.trim(),
+                terraformContent: terraformMatch?.[1]?.trim()
             }
         }
         return null

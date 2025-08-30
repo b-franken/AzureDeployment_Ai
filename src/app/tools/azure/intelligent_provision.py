@@ -2,35 +2,35 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timedelta
-from typing import Any
+from datetime import datetime, timedelta, UTC
+from typing import Any, Dict, Optional
 
 from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
+from app.observability.app_insights import app_insights
+from app.observability.distributed_tracing import get_service_tracer, get_cross_service_tracer
 
-from app.ai.agents.base import AgentContext
-from app.ai.agents.provisioning import ProvisioningAgent, ProvisioningAgentConfig
 from app.ai.nlu import parse_provision_request
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.memory.storage import get_async_store
-from app.observability.app_insights import app_insights
+from app.memory.agent_persistence import get_agent_memory
+from app.services.deployment_preview import DeploymentPreviewService
 from app.tools.base import Tool, ToolResult
-from app.tools.provision.backends.avm_bicep.engine import BicepAvmBackend, ProvisionContext
-from app.tools.azure.codegen.terraform import generate_terraform_code
-from app.tools.azure.deployment_phases import DeploymentPhaseDetector, DeploymentPhase, DeploymentState, deployment_state_manager
-from app.tools.azure.output_formatter import DeploymentOutputFormatter
+
+from app.core.provisioning import (
+    ProvisionContext, 
+    ExecutionResult,
+    ProvisioningOrchestrator,
+    AVMStrategy,
+    SDKFallbackStrategy,
+    DeploymentPhaseManager
+)
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
 
 
 class IntelligentAzureProvision(Tool):
-    """
-    Intelligent Azure provisioning using AVM when available,
-    with a reliable fallback to the Azure SDK tools from the repository
-    (which authenticate via src/app/core/azure_auth.py).
-    """
-
     name = "azure_provision"
     description = (
         "Intelligent Azure resource provisioning using Azure Verified Modules (AVM). "
@@ -78,14 +78,14 @@ class IntelligentAzureProvision(Tool):
             "dry_run": {
                 "type": "boolean",
                 "default": True,
-                "description": "Generate deployment plan without executing",
+                "description": "Generate deployment preview without executing (true for preview, false for actual deployment)",
             },
             "user_id": {
                 "type": "string",
                 "description": "User identifier for memory persistence",
             },
             "correlation_id": {
-                "type": "string",
+                "type": "string", 
                 "description": "Request correlation ID for tracing",
             },
             "tags": {
@@ -109,873 +109,642 @@ class IntelligentAzureProvision(Tool):
     }
 
     def __init__(self) -> None:
-        self.avm_backend = BicepAvmBackend()
+        self.orchestrator = ProvisioningOrchestrator()
+        self.phase_manager = DeploymentPhaseManager()
+        self.preview_service = DeploymentPreviewService()
+        
+        self.orchestrator.register_strategy(AVMStrategy())
+        self.orchestrator.register_strategy(SDKFallbackStrategy())
+        
+        self.service_tracer = get_service_tracer("intelligent_provision_service")
+        self.cross_service_tracer = get_cross_service_tracer()
+        
         logger.info(
-            "IntelligentAzureProvision initialized with AVM backend",
-            avm_version=getattr(self.avm_backend, "version", "latest"),
-            observability_enabled=getattr(
-                settings.observability, "enabled", True),
+            "IntelligentAzureProvision initialized with orchestrator",
+            strategies_registered=len(self.orchestrator._strategies),
+            observability_enabled=getattr(settings.observability, "enabled", True),
+            distributed_tracing_enabled=True
         )
 
     async def run(self, **kwargs: Any) -> ToolResult:
-        """
-        Execute intelligent Azure resource provisioning with comprehensive observability.
-        Falls back to Azure SDK tools when AVM cannot render/resolve the resource.
-        """
-        request_text = kwargs.get("request", "").strip()
         correlation_id = kwargs.get("correlation_id") or str(uuid.uuid4())
         user_id = kwargs.get("user_id", "system")
-
-        if not request_text:
-            return {
-                "ok": False,
-                "summary": "Invalid request",
-                "output": "Request description is required for intelligent provisioning",
-            }
-
-        # Early phase detection for direct proceed commands
-        conversation_context = kwargs.get("conversation_context", [])
-        phase = DeploymentPhaseDetector.detect_phase(request_text, conversation_context)
         
-        if phase == DeploymentPhase.EXECUTE:
-            logger.info(f"Early phase detection: execution phase detected for request '{request_text}'")
-            return await self._handle_execution_phase(
-                None, None, None, correlation_id, request_text, user_id
-            )
-
-        subscription_id = kwargs.get("subscription_id")
-        if not subscription_id:
-            return {
-                "ok": False,
-                "summary": "Missing subscription_id",
-                "output": "Azure subscription ID is required for provisioning",
-            }
-
-        requested_rg = kwargs.get("resource_group")
-
-        with tracer.start_as_current_span(
-            "intelligent_azure_provision",
+        async with self.service_tracer.start_distributed_span(
+            operation_name="provision_orchestration",
+            correlation_id=correlation_id,
+            user_id=user_id,
             attributes={
-                "azure.subscription_id": subscription_id,
-                "azure.resource_group": requested_rg or "unknown",
-                "azure.location": kwargs.get("location", "westeurope"),
-                "azure.environment": kwargs.get("environment", "dev"),
-                "provision.dry_run": kwargs.get("dry_run", True),
-                "provision.user_id": user_id,
-                "provision.correlation_id": correlation_id,
-                "provision.request_length": len(request_text),
-            },
+                "request_type": "intelligent_provision",
+                "environment": kwargs.get("environment", "dev"),
+                "dry_run": kwargs.get("dry_run", True)
+            }
         ) as span:
-            logger.info(
-                "Starting intelligent Azure provisioning",
-                request=request_text,
-                correlation_id=correlation_id,
-                user_id=user_id,
-                subscription_id=subscription_id,
-                resource_group=requested_rg,
-                location=kwargs.get("location", "westeurope"),
-                environment=kwargs.get("environment", "dev"),
-                dry_run=kwargs.get("dry_run", True),
-            )
-
             try:
-                await self._store_user_context(user_id, request_text, correlation_id)
-
-                nlu_result = await self._parse_request_with_context(user_id, request_text)
-                logger.info(
-                    "NLU parsing result",
-                    resource_type=getattr(nlu_result, "resource_type", None),
-                    resource_name=getattr(nlu_result, "resource_name", None),
-                    context=getattr(nlu_result, "context", None),
-                    parameters=getattr(nlu_result, "parameters", None),
-                    correlation_id=correlation_id,
-                )
-                span.set_attributes(
-                    {
-                        "nlu.intent": (
-                            nlu_result.intent.value if hasattr(
-                                nlu_result, "intent") else "unknown"
-                        ),
-                        "nlu.resource_type": getattr(nlu_result, "resource_type", "unknown"),
-                        "nlu.confidence": getattr(nlu_result, "confidence", 0.0),
-                    }
-                )
-
-                if not requested_rg:
-                    context = getattr(nlu_result, "context", {}) or {}
-                    parameters = getattr(nlu_result, "parameters", {}) or {}
-
-                    if getattr(nlu_result, "resource_type", "") == "resource_group":
-                        inferred_rg = getattr(
-                            nlu_result, "resource_name", None)
-                    else:
-                        inferred_rg = (
-                            context.get("resource_group") or
-                            parameters.get("resource_group") or
-                            context.get("rg") or
-                            parameters.get("rg")
-                        )
-
-                    if not inferred_rg:
-                        import re
-                        rg_patterns = [
-                            r"(?:in|to|from)\s+resource\s+group\s+([\w-]+)",
-                            r"resource[_-]group[\s=:]+([\w-]+)",
-                            r"rg[\s=:]+([\w-]+)",
-                        ]
-                        for pattern in rg_patterns:
-                            match = re.search(
-                                pattern, request_text, re.IGNORECASE)
-                            if match:
-                                inferred_rg = match.group(1)
-                                break
-
-                    if inferred_rg:
-                        kwargs["resource_group"] = inferred_rg
-                        requested_rg = inferred_rg
-                        logger.info(
-                            "Extracted resource_group",
-                            resource_group=inferred_rg,
-                            correlation_id=correlation_id,
-                        )
-
-                if not requested_rg and getattr(nlu_result, "resource_type", "") != "resource_group":
-                    return {
-                        "ok": False,
-                        "summary": "Missing resource_group",
-                        "output": "Resource group name is required for provisioning",
-                    }
-
-                provision_context = self._create_provision_context(
-                    kwargs, nlu_result)
-                agent = await self._create_provisioning_agent(user_id, kwargs)
-
-                execution_plan = await agent.plan(request_text)
-                span.set_attribute("agent.plan_steps",
-                                   len(execution_plan.steps))
-
-                logger.info(
-                    "Generated intelligent execution plan",
-                    correlation_id=correlation_id,
-                    plan_steps=len(execution_plan.steps),
-                    nlu_intent=getattr(nlu_result, "intent", "unknown").value if hasattr(nlu_result, "intent") else "unknown",
-                    nlu_resource_type=getattr(nlu_result, "resource_type", "unknown"),
-                )
-
-                conversation_context = kwargs.get("conversation_context", [])
-                phase = DeploymentPhaseDetector.detect_phase(request_text, conversation_context)
+                await self.orchestrator.initialize_all_strategies()
                 
-                if phase == DeploymentPhase.PREVIEW:
-                    result = await self._handle_preview_phase(
-                        provision_context, nlu_result, correlation_id, request_text, user_id
-                    )
+                # Handle proceed commands by retrieving the original deployment context
+                original_request = await self._handle_proceed_command(**kwargs)
+                if original_request:
+                    kwargs["request"] = original_request
+                    logger.info("Proceed command detected, using stored deployment context", 
+                              original_request=original_request[:100])
+                
+                validation_result = await self._validate_request(**kwargs)
+                if not validation_result.success:
+                    return validation_result.to_tool_result()
+                
+                context = await self._create_provision_context(**kwargs)
+                
+                parsing_result = await self._parse_request(context)
+                if not parsing_result.success:
+                    return parsing_result.to_tool_result()
+                
+                if context.dry_run:
+                    preview_result = await self._generate_preview(context, parsing_result)
+                    return preview_result.to_tool_result()
+                
+                planning_result = await self._create_deployment_plan(context)
+                if not planning_result.success:
+                    return planning_result.to_tool_result()
+                
+                execution_result = await self.orchestrator.execute_with_fallback(context)
+                
+                await self._store_execution_result(context, execution_result)
+                
+                span.set_attributes({
+                    "execution.success": execution_result.success,
+                    "execution.strategy_used": execution_result.strategy_used,
+                    "execution.total_time_ms": execution_result.execution_time_ms
+                })
+                
+                if execution_result.success:
+                    span.set_status(Status(StatusCode.OK))
                 else:
-                    result = await self._handle_execution_phase(
-                        provision_context, nlu_result, agent, correlation_id, request_text, user_id
-                    )
-
-                await self._store_deployment_result(user_id, result, correlation_id)
-
-                app_insights.track_custom_event(
-                    "intelligent_provision_completed",
-                    {
-                        "correlation_id": correlation_id,
-                        "user_id": user_id,
-                        "nlu_intent": getattr(nlu_result, "intent", "unknown"),
-                        "nlu_resource_type": getattr(nlu_result, "resource_type", "unknown"),
-                        "success": result.get("ok", False),
-                        "dry_run": kwargs.get("dry_run", True),
-                    },
-                )
-
-                return result
-
+                    span.set_status(Status(StatusCode.ERROR, execution_result.error_message))
+                
+                return execution_result.to_tool_result()
+                
             except Exception as e:
-                logger.error(
-                    "Intelligent Azure provisioning failed",
-                    correlation_id=correlation_id,
-                    user_id=user_id,
-                    error_type=type(e).__name__,
-                    error_message=str(e),
-                    exc_info=True,
-                )
-
-                span.set_attributes(
-                    {
-                        "error.type": type(e).__name__,
-                        "error.message": str(e),
-                    }
-                )
-
+                span.record_exception(e)
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                
                 app_insights.track_exception(
                     e,
                     {
                         "correlation_id": correlation_id,
-                        "user_id": user_id,
-                        "operation": "intelligent_provision",
+                        "user_id": kwargs.get("user_id", "system"),
+                        "operation": "intelligent_azure_provision"
+                    }
+                )
+                
+                return {
+                    "ok": False,
+                    "summary": "Unexpected error during provisioning",
+                    "output": str(e),
+                    "correlation_id": correlation_id
+                }
+
+    async def _validate_request(self, **kwargs: Any) -> ExecutionResult:
+        with tracer.start_as_current_span("provision_validate_request") as span:
+            request_text = kwargs.get("request", "").strip()
+            user_id = kwargs.get("user_id", "system")
+            
+            span.set_attributes({
+                "validation.request_length": len(request_text),
+                "validation.user_id": user_id,
+                "validation.has_subscription_id": bool(kwargs.get("subscription_id"))
+            })
+            
+            if not request_text:
+                error_msg = "Request description is required for intelligent provisioning"
+                span.set_status(Status(StatusCode.ERROR, error_msg))
+                
+                app_insights.track_custom_event(
+                    "provision_validation_failed",
+                    {"reason": "empty_request", "user_id": user_id}
+                )
+                
+                return ExecutionResult.failure_result(
+                    strategy="validation",
+                    error=error_msg
+                )
+            
+            subscription_id = kwargs.get("subscription_id")
+            if not subscription_id:
+                error_msg = "Azure subscription ID is required for provisioning"
+                span.set_status(Status(StatusCode.ERROR, error_msg))
+                
+                app_insights.track_custom_event(
+                    "provision_validation_failed", 
+                    {"reason": "missing_subscription_id", "user_id": user_id}
+                )
+                
+                return ExecutionResult.failure_result(
+                    strategy="validation",
+                    error=error_msg
+                )
+            
+            span.set_status(Status(StatusCode.OK))
+            
+            app_insights.track_custom_event(
+                "provision_validation_passed",
+                {
+                    "user_id": user_id,
+                    "request_preview": request_text[:100]
+                },
+                {"request_length": len(request_text)}
+            )
+            
+            return ExecutionResult.success_result(
+                strategy="validation",
+                data={"validated": True}
+            )
+
+    async def _create_provision_context(self, **kwargs: Any) -> ProvisionContext:
+        with tracer.start_as_current_span("provision_create_context") as span:
+            correlation_id = kwargs.get("correlation_id") or str(uuid.uuid4())
+            
+            context = ProvisionContext(
+                correlation_id=correlation_id,
+                request_text=kwargs.get("request", "").strip(),
+                user_id=kwargs.get("user_id", "system"),
+                subscription_id=kwargs.get("subscription_id"),
+                resource_group=kwargs.get("resource_group"),
+                location=kwargs.get("location", "westeurope"),
+                environment=kwargs.get("environment", "dev"),
+                name_prefix=kwargs.get("name_prefix", "app"),
+                dry_run=kwargs.get("dry_run", True),
+                tags=kwargs.get("tags", {}),
+                enable_monitoring=kwargs.get("enable_monitoring", True),
+                cost_optimization=kwargs.get("cost_optimization", True),
+                conversation_context=kwargs.get("conversation_context", [])
+            )
+            
+            initial_phase = self.phase_manager.determine_provisioning_phase(context)
+            context.advance_phase(initial_phase)
+            
+            initial_phase_value = initial_phase.value if hasattr(initial_phase, 'value') else str(initial_phase)
+            
+            span.set_attributes({
+                "context.user_id": context.user_id,
+                "context.correlation_id": context.correlation_id,
+                "context.initial_phase": initial_phase_value,
+                "context.dry_run": context.dry_run,
+                "context.environment": context.environment
+            })
+            span.set_status(Status(StatusCode.OK))
+            
+            app_insights.track_custom_event(
+                "provision_context_created",
+                {
+                    "user_id": context.user_id,
+                    "correlation_id": context.correlation_id,
+                    "initial_phase": initial_phase_value,
+                    "environment": context.environment,
+                    "dry_run": str(context.dry_run)
+                }
+            )
+            
+            return context
+
+    async def _parse_request(self, context: ProvisionContext) -> ExecutionResult:
+        async with self.service_tracer.start_distributed_span(
+            operation_name="parse_request",
+            correlation_id=context.correlation_id,
+            user_id=context.user_id,
+            attributes={
+                "request_length": len(context.request_text),
+                "environment": context.environment
+            }
+        ) as span:
+            try:
+                await self._store_user_context(context)
+                
+                nlu_context = await self.cross_service_tracer.trace_cross_service_call(
+                    from_service="intelligent_provision_service",
+                    to_service="nlu_service", 
+                    operation="parse_provision_request",
+                    correlation_id=context.correlation_id,
+                    user_id=context.user_id,
+                    payload={"request_text": context.request_text[:100]}
+                )
+                
+                nlu_result = parse_provision_request(context.request_text)
+                
+                if hasattr(nlu_result, 'resources') and nlu_result.resources:
+                    context.parsed_resources = nlu_result.resources
+                elif hasattr(nlu_result, 'resource_type') and nlu_result.resource_type:
+                    context.parsed_resources = [{
+                        "resource_type": nlu_result.resource_type,
+                        "resource_name": getattr(nlu_result, 'resource_name', 'unnamed'),
+                        "parameters": getattr(nlu_result, 'parameters', {})
+                    }]
+                
+                intent_value = getattr(nlu_result, 'intent', 'unknown')
+                if hasattr(intent_value, 'value'):
+                    intent_value = intent_value.value
+                    
+                context.execution_metadata.update({
+                    "nlu_intent": str(intent_value),
+                    "nlu_confidence": getattr(nlu_result, 'confidence', 0.0),
+                    "parsing_timestamp": datetime.now(UTC).isoformat()
+                })
+                
+                span.set_attributes({
+                    "parsing.success": True,
+                    "parsing.resources_found": len(context.parsed_resources),
+                    "parsing.intent": context.execution_metadata.get("nlu_intent", "unknown")
+                })
+                span.set_status(Status(StatusCode.OK))
+                
+                app_insights.track_custom_event(
+                    "provision_parsing_succeeded",
+                    {
+                        "user_id": context.user_id,
+                        "correlation_id": context.correlation_id,
+                        "intent": context.execution_metadata.get("nlu_intent", "unknown")
                     },
+                    {
+                        "resources_found": len(context.parsed_resources),
+                        "confidence": context.execution_metadata.get("nlu_confidence", 0.0)
+                    }
+                )
+                
+                return ExecutionResult.success_result(
+                    strategy="parsing",
+                    data=context.parsed_resources
+                )
+                
+            except Exception as e:
+                span.record_exception(e)
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                
+                app_insights.track_exception(
+                    e,
+                    {
+                        "user_id": context.user_id,
+                        "correlation_id": context.correlation_id,
+                        "operation": "request_parsing"
+                    }
+                )
+                
+                return ExecutionResult.failure_result(
+                    strategy="parsing",
+                    error=f"Failed to parse request: {str(e)}"
                 )
 
-                return {
-                    "ok": False,
-                    "summary": f"Intelligent provisioning failed: {type(e).__name__}",
-                    "output": f"Error during intelligent Azure provisioning: {e!s}",
-                }
-
-    async def _store_user_context(self, user_id: str, request: str, correlation_id: str) -> None:
-        """Store user request in memory for contextual understanding."""
-        try:
-            memory_store = await get_async_store()
-            message_id = await memory_store.store_message(
-                user_id=user_id,
-                role="user",
-                content=request,
-                metadata={
-                    "correlation_id": correlation_id,
-                    "operation": "azure_provision",
-                    "timestamp": "utc_now",
-                },
-            )
-
-            logger.debug(
-                "User context stored in memory",
-                user_id=user_id,
-                message_id=message_id,
-                correlation_id=correlation_id,
-            )
-
-        except Exception as e:
-            logger.warning(
-                "Failed to store user context in memory",
-                user_id=user_id,
-                correlation_id=correlation_id,
-                error=str(e),
-            )
-
-    async def _parse_request_with_context(self, user_id: str, request: str) -> Any:
-        """Parse natural language request with user context from memory."""
-        try:
-            memory_store = await get_async_store()
-            user_history = await memory_store.get_user_memory(
-                user_id=user_id,
-                limit=10,
-                include_metadata=True,
-            )
-
-            logger.debug(
-                "Retrieved user context for NLU parsing",
-                user_id=user_id,
-                history_messages=len(user_history),
-            )
-
-            nlu_result = parse_provision_request(request)
-
-            if user_history:
-                nlu_result = self._enrich_with_user_preferences(
-                    nlu_result, user_history)
-
-            logger.info(
-                "Natural language request parsed successfully",
-                user_id=user_id,
-                intent=nlu_result.intent.value,
-                resource_type=nlu_result.resource_type,
-                resource_name=nlu_result.resource_name,
-                confidence=nlu_result.confidence,
-                context_enriched=len(user_history) > 0,
-            )
-
-            return nlu_result
-
-        except Exception as e:
-            logger.error(
-                "Failed to parse request with context",
-                user_id=user_id,
-                error=str(e),
-                exc_info=True,
-            )
-            return parse_provision_request(request)
-
-    def _enrich_with_user_preferences(
-        self, nlu_result: Any, user_history: list[dict[str, Any]]
-    ) -> Any:
-        """Enrich NLU result with user preferences from history."""
-        preferred_locations: list[str] = []
-        preferred_environments: list[str] = []
-
-        for message in user_history:
-            if message.get("role") == "user":
-                content = message.get("content", "").lower()
-                if "westeurope" in content:
-                    preferred_locations.append("westeurope")
-                elif "eastus" in content:
-                    preferred_locations.append("eastus")
-
-                if "production" in content or "prod" in content:
-                    preferred_environments.append("production")
-                elif "staging" in content:
-                    preferred_environments.append("staging")
-
-        if hasattr(nlu_result, "context"):
-            if preferred_locations:
-                nlu_result.context["preferred_location"] = preferred_locations[0]
-            if preferred_environments:
-                nlu_result.context["preferred_environment"] = preferred_environments[0]
-
-        logger.debug(
-            "Enriched NLU result with user preferences",
-            preferred_locations=preferred_locations,
-            preferred_environments=preferred_environments,
-        )
-
-        return nlu_result
-
-    def _create_provision_context(self, kwargs: dict[str, Any], nlu_result: Any) -> ProvisionContext:
-        """Create provisioning context from parameters and NLU results."""
-        preferred_location = None
-        preferred_environment = None
-
-        if hasattr(nlu_result, "context"):
-            preferred_location = nlu_result.context.get("preferred_location")
-            preferred_environment = nlu_result.context.get(
-                "preferred_environment")
-
-        location = kwargs.get("location") or preferred_location or "westeurope"
-        environment = kwargs.get(
-            "environment") or preferred_environment or "dev"
-
-        tags = {
-            "CreatedBy": "IntelligentAzureProvision",
-            "ManagedBy": "AVM-Bicep",
-            "Environment": environment,
-            **(kwargs.get("tags") or {}),
-        }
-
-        context = ProvisionContext(
-            subscription_id=kwargs["subscription_id"],
-            resource_group=kwargs.get("resource_group"),
-            location=location,
-            name_prefix=kwargs.get("name_prefix", "app"),
-            environment=environment,
-            tags=tags,
-        )
-
-        logger.debug(
-            "Created provisioning context",
-            subscription_id=context.subscription_id,
-            resource_group=context.resource_group,
-            location=context.location,
-            environment=context.environment,
-            name_prefix=context.name_prefix,
-        )
-
-        return context
-
-    async def _create_provisioning_agent(
-        self, user_id: str, kwargs: dict[str, Any]
-    ) -> ProvisioningAgent:
-        """Create intelligent provisioning agent with configuration."""
-        config = ProvisioningAgentConfig(
-            provider=kwargs.get("provider"),
-            model=kwargs.get("model"),
-            environment=kwargs.get("environment", "dev"),
-        )
-
-        context = AgentContext(
-            user_id=user_id,
-            environment=kwargs.get("environment", "dev"),
-            dry_run=kwargs.get("dry_run", True),
-            metadata={
-                "correlation_id": kwargs.get("correlation_id"),
-                "subscription_id": kwargs.get("subscription_id"),
-                "resource_group": kwargs.get("resource_group"),
-            },
-        )
-
-        agent = ProvisioningAgent(
-            user_id=user_id, context=context, config=config)
-
-        logger.debug(
-            "Created provisioning agent with context",
-            user_id=user_id,
-            provider=config.provider,
-            model=config.model,
-            environment=config.environment,
-            dry_run=context.dry_run,
-        )
-
-        return agent
-
-    def _should_fallback_to_sdk(self, err: Exception, nlu_result: Any) -> bool:
-        """
-        Choose SDK fallback when AVM does not support the resource or when
-        the AVM module/version resolution fails (e.g., KeyError in versions map).
-        """
-        if getattr(nlu_result, "resource_type", "") == "resource_group":
-            return True
-
-        msg = str(err).lower()
-        patterns = [
-            "unsupported resource type",
-            "module not found",
-            "unable to resolve module",
-            "avm/res/",
-            "br/public:avm",
-            "keyerror",
-            "no emitter for",
-        ]
-        return any(p in msg for p in patterns)
-
-    def _map_resource_type_to_terraform_action(self, resource_type: str) -> str:
-        """Map AVM resource types to Terraform action names."""
-        mapping = {
-            "resource_group": "create_rg",
-            "storage_account": "create_storage",
-            "webapp": "create_webapp",
-            "web_app": "create_webapp",
-            "app_service_plan": "create_webapp",
-            "aks_cluster": "create_aks",
-            "kubernetes_cluster": "create_aks",
-            "vnet": "create_network",
-            "virtual_network": "create_network",
-            "subnet": "create_subnet",
-            "log_analytics_workspace": "create_monitor",
-            "key_vault": "create_keyvault",
-            "sql_server": "create_sql_server",
-            "sql_database": "create_sql_database",
-            "cosmos_db": "create_cosmos",
-            "cosmosdb": "create_cosmos",
-            "container_registry": "create_acr",
-            "acr": "create_acr",
-            "Microsoft.Resources/resourceGroups": "create_rg",
-            "Microsoft.Storage/storageAccounts": "create_storage",
-            "Microsoft.Web/sites": "create_webapp",
-            "Microsoft.Web/serverfarms": "create_webapp",
-            "Microsoft.ContainerService/managedClusters": "create_aks",
-            "Microsoft.Network/virtualNetworks": "create_network",
-            "Microsoft.Network/virtualNetworks/subnets": "create_subnet",
-            "Microsoft.OperationalInsights/workspaces": "create_monitor",
-            "Microsoft.KeyVault/vaults": "create_keyvault",
-            "Microsoft.Sql/servers": "create_sql_server",
-            "Microsoft.Sql/servers/databases": "create_sql_database",
-            "Microsoft.DocumentDB/databaseAccounts": "create_cosmos",
-            "Microsoft.ContainerRegistry/registries": "create_acr",
-            "api_management": "create_apim",
-            "apim": "create_apim",
-            "compute": "create_vm",
-            "virtual_machine": "create_vm",
-            "vm": "create_vm",
-            "eventhub": "create_eventhub",
-            "event_hub": "create_eventhub",
-            "frontdoor": "create_frontdoor",
-            "front_door": "create_frontdoor",
-            "identity": "create_identity",
-            "managed_identity": "create_identity",
-            "policy": "create_policy",
-            "redis": "create_redis",
-            "redis_cache": "create_redis",
-            "private_dns": "create_private_dns",
-            "private_link": "create_private_link",
-            "traffic_manager": "create_traffic_manager",
-            "backup": "create_backup",
-            "recovery_services": "create_backup"
-        }
-        return mapping.get(resource_type.lower(), resource_type.lower())
-
-    async def _generate_plan_preview(
-        self,
-        context: ProvisionContext,
-        nlu_result: Any,
-        correlation_id: str,
-        request_text: str,
-    ) -> ToolResult:
-        """Generate deployment plan preview using AVM backend or fall back to SDK on unsupported resources."""
-        try:
-            plan_preview = await self.avm_backend.plan_from_nlu(nlu_result, context, dry_run=True)
-
-            cost_estimate = plan_preview.cost_estimate or {}
-            monthly_cost = cost_estimate.get("monthly_estimate", 0.0)
-
-            logger.info(
-                "Generated AVM deployment plan preview",
-                correlation_id=correlation_id,
-                bicep_path=plan_preview.bicep_path,
-                estimated_monthly_cost=monthly_cost,
-                has_what_if=plan_preview.what_if is not None,
-                validation_passed=plan_preview.validation_results.get(
-                    "valid", False),
-            )
-
-            terraform_params = {
-                "resource_group": context.resource_group,
-                "location": context.location,
-                "name": getattr(nlu_result, "resource_name", "myresource"),
+    async def _generate_preview(self, context: ProvisionContext, parsing_result: ExecutionResult) -> ExecutionResult:
+        async with self.service_tracer.start_distributed_span(
+            operation_name="generate_preview",
+            correlation_id=context.correlation_id,
+            user_id=context.user_id,
+            attributes={
+                "preview_type": "deployment_preview",
                 "environment": context.environment
             }
-            
-            resource_type = getattr(nlu_result, "resource_type", "")
-            terraform_action = self._map_resource_type_to_terraform_action(resource_type)
-            
-            logger.info(
-                "Terraform code generation",
-                resource_type=resource_type,
-                terraform_action=terraform_action,
-                params_keys=list(terraform_params.keys()),
-                correlation_id=correlation_id
-            )
-            
-            terraform_code = generate_terraform_code(terraform_action, terraform_params)
-            
-            logger.info(
-                "Generated Terraform code",
-                code_length=len(terraform_code),
-                has_storage_account=terraform_action == "create_storage",
-                correlation_id=correlation_id
-            )
-
-            output_sections = [
-                "**Azure Deployment Plan Preview**",
-                "",
-                "**Deployment Context:**",
-                f"- Resource Group: {context.resource_group}",
-                f"- Location: {context.location}",
-                f"- Environment: {context.environment}",
-                f"- Estimated Monthly Cost: ${monthly_cost:.2f} USD",
-                "",
-                "## Azure Verified Module (AVM) Bicep Code",
-                "```bicep",
-                plan_preview.rendered,
-                "```",
-                "",
-                "## Terraform Infrastructure Code",
-                "```hcl",
-                terraform_code,
-                "```",
-                "",
-            ]
-
-            if plan_preview.what_if:
-                output_sections.extend(
-                    [
-                        "## What-If Analysis",
-                        "```",
-                        plan_preview.what_if,
-                        "```",
-                        "",
-                    ]
-                )
-
-            if cost_estimate:
-                output_sections.extend(
-                    [
-                        "## Cost Breakdown",
-                        "```json",
-                        json.dumps(cost_estimate, indent=2),
-                        "```",
-                        "",
-                    ]
-                )
-
-            output_sections.extend(
-                [
-                    "## Next Steps",
-                    "1. Review the AVM Bicep code and what-if analysis above",
-                    "2. To execute deployment: Set `dry_run: false` and confirm",
-                    "3. All resources follow Azure best practices via AVM modules",
-                    "",
-                    "**Note:** This deployment uses Azure Verified Modules (AVM) for security, compliance, and best practices.",
-                ]
-            )
-
-            return {
-                "ok": True,
-                "summary": (
-                    f"AVM deployment plan generated - "
-                    f"{getattr(nlu_result, 'resource_type', 'resource')} deployment"
-                ),
-                "output": "\n".join(output_sections),
-            }
-
-        except Exception as e:
-            if self._should_fallback_to_sdk(e, nlu_result):
-                logger.info(
-                    "AVM plan unsupported/unavailable; using SDK fallback",
-                    correlation_id=correlation_id,
-                    error=str(e),
-                    resource_type=getattr(
-                        nlu_result, "resource_type", "unknown"),
-                )
-                return await self._fallback_via_sdk(
-                    request_text=request_text,
-                    context=context,
+        ) as span:
+            try:
+                nlu_result = parse_provision_request(context.request_text)
+                
+                preview_response = await self.preview_service.generate_preview_response(
                     nlu_result=nlu_result,
-                    correlation_id=correlation_id,
-                    dry_run=True,
+                    subscription_id=context.subscription_id,
+                    resource_group=context.resource_group,
+                    location=context.location,
+                    environment=context.environment
                 )
-            logger.error(
-                "Failed to generate AVM plan preview",
-                correlation_id=correlation_id,
-                error=str(e),
-                exc_info=True,
-            )
-            raise
+                
+                span.set_attributes({
+                    "preview.success": True,
+                    "preview.resource_type": nlu_result.resource_type,
+                    "preview.resource_name": nlu_result.resource_name or "unnamed"
+                })
+                span.set_status(Status(StatusCode.OK))
+                
+                app_insights.track_custom_event(
+                    "deployment_preview_generated",
+                    {
+                        "user_id": context.user_id,
+                        "correlation_id": context.correlation_id,
+                        "resource_type": nlu_result.resource_type,
+                        "environment": context.environment
+                    }
+                )
+                
+                return ExecutionResult.success_result(
+                    strategy="preview_generation",
+                    data={"preview_response": preview_response},
+                    output=preview_response
+                )
+                
+            except Exception as e:
+                span.record_exception(e)
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                
+                app_insights.track_exception(
+                    e,
+                    {
+                        "user_id": context.user_id,
+                        "correlation_id": context.correlation_id,
+                        "operation": "preview_generation"
+                    }
+                )
+                
+                return ExecutionResult.failure_result(
+                    strategy="preview_generation",
+                    error=f"Failed to generate preview: {str(e)}"
+                )
 
-    async def _handle_preview_phase(
-        self,
-        context: ProvisionContext,
-        nlu_result: Any,
-        correlation_id: str,
-        request_text: str,
-        user_id: str,
-    ) -> ToolResult:
-        """Handle deployment preview phase - generate templates and store state."""
+    async def _handle_proceed_command(self, **kwargs: Any) -> str | None:
+        """Handle proceed commands by retrieving the original deployment context from agent memory."""
+        request_text = kwargs.get("request", "").strip().lower()
+        proceed_keywords = ["proceed", "confirm", "deploy it", "deploy now", "yes deploy", "go ahead"]
+        
+        if request_text not in proceed_keywords:
+            return None
+            
+        user_id = kwargs.get("user_id", "system")
+        correlation_id = kwargs.get("correlation_id")
+        
         try:
-            plan_preview = await self.avm_backend.plan_from_nlu(nlu_result, context, dry_run=True)
+            memory = await get_agent_memory()
             
-            cost_estimate = plan_preview.cost_estimate or {}
-            monthly_cost = cost_estimate.get("monthly_estimate", 0.0)
-            bicep_template = plan_preview.rendered or ""
-            what_if_analysis = plan_preview.what_if or ""
-            
-            terraform_params = {
-                "resource_group": context.resource_group,
-                "location": context.location,
-                "name": getattr(nlu_result, "resource_name", "myresource"),
-                "environment": context.environment
-            }
-            
-            resource_type = getattr(nlu_result, "resource_type", "")
-            terraform_action = self._map_resource_type_to_terraform_action(resource_type)
-            terraform_config = generate_terraform_code(terraform_action, terraform_params)
-            
-            deployment_id = str(uuid.uuid4())
-            
-            state = DeploymentState(
-                deployment_id=deployment_id,
+            # Get the most recent deployment context
+            conversation_history = await memory.get_context(
                 user_id=user_id,
-                resource_spec={
-                    "resource_type": getattr(nlu_result, "resource_type", ""),
-                    "resource_name": getattr(nlu_result, "resource_name", ""),
-                    "request": request_text,
-                    "context": context.to_dict() if hasattr(context, "to_dict") else {}
-                },
-                bicep_template=bicep_template,
-                terraform_config=terraform_config,
-                cost_estimate={"monthly_estimate": monthly_cost},
-                what_if_analysis=what_if_analysis,
-                resource_group=context.resource_group,
-                location=context.location,
-                subscription_id=context.subscription_id,
-                created_at=datetime.utcnow(),
-                expires_at=datetime.utcnow() + timedelta(minutes=30)
+                agent_name="intelligent_provision",
+                context_key="conversation_history"
+            ) or []
+            
+            # Find the most recent deployment request (not a proceed command)
+            for entry in reversed(conversation_history):
+                if isinstance(entry, dict) and "request" in entry:
+                    request = entry["request"].strip().lower()
+                    if request not in proceed_keywords and any(
+                        keyword in request for keyword in ["create", "deploy", "provision", "make", "add"]
+                    ):
+                        logger.info(
+                            "Found original deployment request from conversation history",
+                            original_request=entry["request"][:100],
+                            correlation_id=correlation_id
+                        )
+                        return entry["request"]
+            
+            # Fallback: look at conversation context from the current request
+            conversation_context = kwargs.get("conversation_context", [])
+            for entry in reversed(conversation_context):
+                if isinstance(entry, dict) and entry.get("role") == "user":
+                    content = entry.get("content", "").strip().lower()
+                    if content not in proceed_keywords and any(
+                        keyword in content for keyword in ["create", "deploy", "provision", "make", "add"]
+                    ):
+                        logger.info(
+                            "Found original deployment request from conversation context",
+                            original_request=entry["content"][:100],
+                            correlation_id=correlation_id
+                        )
+                        return entry["content"]
+            
+            logger.warning(
+                "Proceed command detected but no original deployment request found",
+                user_id=user_id,
+                correlation_id=correlation_id
             )
-            
-            deployment_state_manager.store_preview_state(state)
-            
-            output = DeploymentOutputFormatter.format_preview_output(
-                state,
-                getattr(nlu_result, "resource_type", "resource"),
-                getattr(nlu_result, "resource_name", "unknown")
-            )
-            
-            return {
-                "ok": True,
-                "summary": "Deployment preview generated",
-                "output": output
-            }
+            return None
             
         except Exception as e:
             logger.error(
-                "Preview phase failed",
+                "Failed to retrieve deployment context for proceed command",
                 error=str(e),
-                correlation_id=correlation_id,
-                exc_info=True
+                user_id=user_id,
+                correlation_id=correlation_id
             )
-            return {
-                "ok": False,
-                "summary": "Preview generation failed",
-                "output": DeploymentOutputFormatter.format_deployment_error(str(e))
-            }
+            return None
 
-    async def _handle_execution_phase(
-        self,
-        context: ProvisionContext,
-        nlu_result: Any,
-        agent: ProvisioningAgent,
-        correlation_id: str,
-        request_text: str,
-        user_id: str,
-    ) -> ToolResult:
-        """Handle deployment execution phase - find stored state and execute deployment."""
-        try:
-            state = deployment_state_manager.find_latest_state_for_user(user_id)
-            
-            if not state:
-                return {
-                    "ok": False,
-                    "summary": "No deployment preview found",
-                    "output": DeploymentOutputFormatter.format_state_not_found_error(user_id)
-                }
-            
-            if state.is_expired():
-                return {
-                    "ok": False,
-                    "summary": "Deployment preview expired",
-                    "output": DeploymentOutputFormatter.format_confirmation_timeout_error(state.deployment_id)
-                }
-            
-            import tempfile
-            from pathlib import Path
-            
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.bicep', delete=False) as f:
-                f.write(state.bicep_template)
-                bicep_file_path = f.name
+    async def _create_deployment_plan(self, context: ProvisionContext) -> ExecutionResult:
+        with tracer.start_as_current_span("provision_create_deployment_plan") as span:
+            span.set_attributes({
+                "context.user_id": context.user_id,
+                "context.correlation_id": context.correlation_id,
+                "planning.resources_count": len(context.parsed_resources)
+            })
             
             try:
-                backend = BicepAvmBackend()
-                deployment_context = ProvisionContext(
-                    subscription_id=state.subscription_id,
-                    resource_group=state.resource_group,
-                    location=state.location
-                )
-                
-                logger.info(
-                    "Executing deployment from stored state",
-                    deployment_id=state.deployment_id,
-                    user_id=user_id,
-                    resource_group=state.resource_group,
-                    subscription_id=state.subscription_id
-                )
-                
-                deployment_result = await backend.apply(deployment_context, bicep_file_path)
-                
-            finally:
-                Path(bicep_file_path).unlink(missing_ok=True)
-            
-            if deployment_result.get("status") == "succeeded":
-                duration = deployment_result.get("duration", "< 1 minute")
-                
-                output = DeploymentOutputFormatter.format_deployment_output(
-                    deployment_result.get("outputs", {}),
-                    state.bicep_template,
-                    state.terraform_config,
-                    duration,
-                    state.deployment_id,
-                    state.resource_group,
-                    state.location
-                )
-                
-                return {
-                    "ok": True,
-                    "summary": "Deployment completed successfully",
-                    "output": output
-                }
-            else:
-                error_message = deployment_result.get("message", "Deployment failed")
-                logger.error(
-                    "Deployment execution failed",
-                    deployment_id=state.deployment_id,
-                    status=deployment_result.get("status"),
-                    error=error_message
-                )
-                return {
-                    "ok": False,
-                    "summary": "Deployment failed",
-                    "output": DeploymentOutputFormatter.format_deployment_error(
-                        error_message,
-                        state.deployment_id,
-                        state.resource_group
+                if not context.parsed_resources:
+                    error_msg = "No resources to plan deployment for"
+                    span.set_status(Status(StatusCode.ERROR, error_msg))
+                    
+                    return ExecutionResult.failure_result(
+                        strategy="planning",
+                        error=error_msg
                     )
+                
+                deployment_plan = {
+                    "resources": context.parsed_resources,
+                    "deployment_order": [r.get("resource_name", f"resource_{i}") for i, r in enumerate(context.parsed_resources)],
+                    "parallel_groups": [],
+                    "estimated_time_minutes": len(context.parsed_resources) * 5,
+                    "prerequisites": [],
+                    "warnings": [],
+                    "created_at": datetime.now(UTC).isoformat(),
+                    "environment": context.environment,
+                    "dry_run": context.dry_run
                 }
                 
-        except Exception as e:
-            logger.error(
-                "Execution phase failed",
-                error=str(e),
-                correlation_id=correlation_id,
-                exc_info=True
-            )
-            return {
-                "ok": False,
-                "summary": "Deployment execution failed",
-                "output": DeploymentOutputFormatter.format_deployment_error(str(e))
+                if context.cost_optimization:
+                    deployment_plan["optimizations"] = [
+                        "Use basic SKUs for development environment",
+                        "Enable auto-scaling where applicable", 
+                        "Configure cost alerts"
+                    ]
+                
+                context.deployment_plan = deployment_plan
+                context.execution_metadata["planning_completed"] = True
+                
+                span.set_attributes({
+                    "planning.success": True,
+                    "planning.estimated_time_minutes": deployment_plan["estimated_time_minutes"],
+                    "planning.has_optimizations": context.cost_optimization
+                })
+                span.set_status(Status(StatusCode.OK))
+                
+                app_insights.track_custom_event(
+                    "provision_planning_succeeded",
+                    {
+                        "user_id": context.user_id,
+                        "correlation_id": context.correlation_id,
+                        "environment": context.environment
+                    },
+                    {
+                        "resources_count": len(context.parsed_resources),
+                        "estimated_time_minutes": deployment_plan["estimated_time_minutes"]
+                    }
+                )
+                
+                return ExecutionResult.success_result(
+                    strategy="planning",
+                    data=deployment_plan
+                )
+                
+            except Exception as e:
+                span.record_exception(e)
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                
+                app_insights.track_exception(
+                    e,
+                    {
+                        "user_id": context.user_id,
+                        "correlation_id": context.correlation_id,
+                        "operation": "deployment_planning"
+                    }
+                )
+                
+                return ExecutionResult.failure_result(
+                    strategy="planning",
+                    error=f"Failed to create deployment plan: {str(e)}"
+                )
+
+    async def _store_user_context(self, context: ProvisionContext) -> None:
+        async with self.service_tracer.start_distributed_span(
+            operation_name="store_user_context",
+            correlation_id=context.correlation_id,
+            user_id=context.user_id,
+            attributes={
+                "storage_type": "agent_memory",
+                "persistence_layer": "postgresql"
             }
+        ) as span:
+            try:
+                memory_context = await self.cross_service_tracer.trace_cross_service_call(
+                    from_service="intelligent_provision_service",
+                    to_service="agent_memory_service",
+                    operation="store_user_context",
+                    correlation_id=context.correlation_id,
+                    user_id=context.user_id,
+                    payload={"operation": "user_context_storage"}
+                )
+                
+                memory = await get_agent_memory()
+                
+                user_context = {
+                    "last_request": context.request_text,
+                    "last_activity": datetime.now(UTC).isoformat(),
+                    "correlation_id": context.correlation_id,
+                    "environment_preference": context.environment,
+                    "subscription_id": context.subscription_id,
+                    "resource_group": context.resource_group,
+                    "location": context.location,
+                    "parsed_resources_count": len(context.parsed_resources),
+                    "has_deployment_plan": bool(context.deployment_plan)
+                }
+                
+                await memory.store_context(
+                    user_id=context.user_id,
+                    agent_name="intelligent_provision",
+                    context_key="user_context",
+                    context_data=user_context,
+                    correlation_id=context.correlation_id,
+                    ttl=timedelta(days=7)
+                )
+                
+                conversation_entry = {
+                    "timestamp": datetime.now(UTC).isoformat(),
+                    "correlation_id": context.correlation_id,
+                    "request": context.request_text,
+                    "user_id": context.user_id
+                }
+                
+                existing_conversation = await memory.get_context(
+                    user_id=context.user_id,
+                    agent_name="intelligent_provision",
+                    context_key="conversation_history"
+                ) or []
+                
+                if isinstance(existing_conversation, list):
+                    existing_conversation.append(conversation_entry)
+                    if len(existing_conversation) > 50:
+                        existing_conversation = existing_conversation[-50:]
+                else:
+                    existing_conversation = [conversation_entry]
+                
+                await memory.store_context(
+                    user_id=context.user_id,
+                    agent_name="intelligent_provision",
+                    context_key="conversation_history",
+                    context_data=existing_conversation,
+                    correlation_id=context.correlation_id,
+                    ttl=timedelta(days=7)
+                )
+                
+                span.set_attributes({
+                    "storage.user_id": context.user_id,
+                    "storage.correlation_id": context.correlation_id,
+                    "storage.conversation_length": len(existing_conversation)
+                })
+                span.set_status(Status(StatusCode.OK))
+                
+            except Exception as e:
+                span.record_exception(e)
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                logger.warning(
+                    "Failed to store user context",
+                    user_id=context.user_id,
+                    correlation_id=context.correlation_id,
+                    error=str(e)
+                )
 
-    async def _store_deployment_result(
-        self, user_id: str, result: ToolResult, correlation_id: str
-    ) -> None:
-        """Store deployment result in user memory for future context."""
-        try:
-            memory_store = await get_async_store()
-
-            summary = result.get("summary", "Deployment completed")
-            success = result.get("ok", False)
-
-            message_id = await memory_store.store_message(
-                user_id=user_id,
-                role="assistant",
-                content=f"Deployment result: {summary}",
-                metadata={
-                    "correlation_id": correlation_id,
-                    "operation": "azure_provision_result",
-                    "success": success,
-                    "timestamp": "utc_now",
-                },
-            )
-
-            logger.debug(
-                "Deployment result stored in user memory",
-                user_id=user_id,
-                message_id=message_id,
-                correlation_id=correlation_id,
-                success=success,
-            )
-
-        except Exception as e:
-            logger.warning(
-                "Failed to store deployment result in memory",
-                user_id=user_id,
-                correlation_id=correlation_id,
-                error=str(e),
-            )
-
-    async def _fallback_via_sdk(
-        self,
-        request_text: str,
-        context: ProvisionContext,
-        nlu_result: Any,
-        correlation_id: str,
-        dry_run: bool,
-    ) -> ToolResult:
-        """
-        Delegate to the in-repo Azure SDK tooling (no Azure CLI).
-        Authentication flows through src/app/core/azure_auth.py as used by AzureProvision.
-        """
-        from app.tools.azure.tool import AzureProvision
-
-        name_value = getattr(nlu_result, "resource_name",
-                             None) or f"{context.name_prefix}-{context.environment}"
-
-        if getattr(nlu_result, "resource_type", "") == "resource_group":
-            if context.resource_group:
-                name_value = context.resource_group
-
-        params = {
-            "subscription_id": context.subscription_id,
-            "resource_group": context.resource_group,
-            "location": context.location,
-            "env": context.environment,
-            "name": name_value,
-            "tags": context.tags,
-            "dry_run": dry_run,
-            "correlation_id": correlation_id,
-        }
-
-        logger.info(
-            "Invoking Azure SDK fallback",
-            correlation_id=correlation_id,
-            action_hint=request_text,
-            params={k: v for k, v in params.items() if k != "tags"},
-        )
-
-        tool = AzureProvision()
-        return await tool.run(action=request_text, **params)
+    async def _store_execution_result(self, context: ProvisionContext, result: ExecutionResult) -> None:
+        with tracer.start_as_current_span("provision_store_execution_result") as span:
+            try:
+                memory = await get_agent_memory()
+                
+                execution_record = {
+                    "correlation_id": context.correlation_id,
+                    "user_id": context.user_id,
+                    "success": result.success,
+                    "strategy_used": result.strategy_used,
+                    "execution_time_ms": result.execution_time_ms,
+                    "resources_affected": result.resources_affected,
+                    "error_message": result.error_message,
+                    "warnings": result.warnings,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                    "context_summary": context.get_execution_summary()
+                }
+                
+                await memory.store_execution_context(
+                    user_id=context.user_id,
+                    correlation_id=context.correlation_id,
+                    context_data=execution_record,
+                    ttl=timedelta(days=30)
+                )
+                
+                span.set_attributes({
+                    "storage.correlation_id": context.correlation_id,
+                    "storage.success": result.success,
+                    "storage.strategy_used": result.strategy_used
+                })
+                span.set_status(Status(StatusCode.OK))
+                
+                app_insights.track_custom_event(
+                    "provision_execution_result_stored",
+                    {
+                        "correlation_id": context.correlation_id,
+                        "user_id": context.user_id,
+                        "success": str(result.success),
+                        "strategy_used": result.strategy_used
+                    },
+                    {
+                        "execution_time_ms": result.execution_time_ms,
+                        "resources_affected": len(result.resources_affected)
+                    }
+                )
+                
+            except Exception as e:
+                span.record_exception(e)
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                logger.warning(
+                    "Failed to store execution result",
+                    correlation_id=context.correlation_id,
+                    error=str(e)
+                )

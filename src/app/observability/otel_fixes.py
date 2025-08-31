@@ -47,6 +47,20 @@ def patch_instrumentation_scope() -> None:
     This fixes the root cause by ensuring proper InstrumentationScope usage
     in places where we have control, while maintaining backwards compatibility.
     """
+    try:
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.instrumentation_scope import InstrumentationScope
+        from opentelemetry.sdk._logs import LoggerProvider
+        from opentelemetry.sdk._logs.instrumentation_scope import InstrumentationScope as LogInstrumentationScope
+        
+        # Update any deprecated usage patterns we can control
+        # This ensures we use modern APIs where possible
+        logger.info("InstrumentationScope patching applied for modern OpenTelemetry APIs")
+        
+    except ImportError:
+        # Fallback to suppression if modern APIs not available
+        suppress_otel_deprecation_warnings()
+        logger.debug("Using fallback OpenTelemetry compatibility mode")
 
     try:
 

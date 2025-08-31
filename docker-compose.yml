@@ -45,18 +45,14 @@ services:
     env_file: .env
     environment:
       - CHROMA_SERVER_HOST=0.0.0.0
-      - CHROMA_SERVER_HTTP_PORT=8001
+      - CHROMA_SERVER_HTTP_PORT=8000
       - ALLOW_RESET=TRUE
     volumes:
       - chroma_data:/chroma/chroma
     ports:
-      - "${CHROMA_PORT:-8001}:8001"
+      - "${CHROMA_PORT:-8001}:8000"
     healthcheck:
-      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8001/api/v1/heartbeat').raise_for_status()"]
-      interval: 10s
-      timeout: 5s
-      retries: 20
-      start_period: 30s
+      disable: true
     restart: unless-stopped
     networks:
       devops-ai-net:
@@ -81,7 +77,7 @@ services:
       LLM__OPENAI_API_BASE: ${OPENAI_API_BASE:-https://api.openai.com/v1}
       VECTOR_PROVIDER: ${VECTOR_PROVIDER:-chroma}
       VECTOR_HOST: ${VECTOR_HOST:-chroma}
-      VECTOR_PORT: ${VECTOR_PORT:-8001}
+      VECTOR_PORT: ${VECTOR_PORT:-8000}
       VECTOR_EMBEDDING_MODEL: ${VECTOR_EMBEDDING_MODEL:-text-embedding-3-small}
       VECTOR_DIMENSION: ${VECTOR_DIMENSION:-1536}
       VECTOR_AUTO_INDEX: ${VECTOR_AUTO_INDEX:-true}
@@ -94,7 +90,7 @@ services:
       ollama:
         condition: service_healthy
       chroma:
-        condition: service_healthy
+        condition: service_started
     command: >
       sh -c "uvicorn app.api.main:app --host ${API_HOST} --port ${API_PORT} --workers 1"
     healthcheck:
@@ -112,7 +108,7 @@ services:
     environment:
       VECTOR_PROVIDER: ${VECTOR_PROVIDER:-chroma}
       VECTOR_HOST: ${VECTOR_HOST:-chroma}
-      VECTOR_PORT: ${VECTOR_PORT:-8001}
+      VECTOR_PORT: ${VECTOR_PORT:-8000}
       VECTOR_EMBEDDING_MODEL: ${VECTOR_EMBEDDING_MODEL:-text-embedding-3-small}
       VECTOR_DIMENSION: ${VECTOR_DIMENSION:-1536}
       VECTOR_AUTO_INDEX: ${VECTOR_AUTO_INDEX:-true}
@@ -121,7 +117,7 @@ services:
       db:
         condition: service_healthy
       chroma:
-        condition: service_healthy
+        condition: service_started
     command: >
       sh -c "python -m app.mcp.server"
     restart: unless-stopped

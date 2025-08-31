@@ -35,7 +35,7 @@ async def initialize_vector_for_docker() -> Dict[str, Any]:
         
         vector_plugin = VectorDatabasePlugin(vector_config)
         
-        plugin_manager._registry.register_plugin("vector_database", vector_plugin, vector_config)
+        plugin_manager._registry.register_plugin(vector_plugin)
         
         initialization_results = await plugin_manager.initialize_all()
         

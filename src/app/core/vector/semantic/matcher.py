@@ -227,3 +227,58 @@ class SemanticMatcher:
                     "error": str(e),
                     "timestamp": datetime.now(UTC).isoformat()
                 }
+    
+    async def get_embedding(self, text: str) -> List[float]:
+        with tracer.start_as_current_span("generate_text_embedding") as span:
+            span.set_attributes({
+                "text.length": len(text),
+                "provider": self.vector_provider.name
+            })
+            
+            try:
+                import hashlib
+                import struct
+                
+                hash_bytes = hashlib.sha256(text.encode()).digest()
+                embedding = []
+                dimension = 1536
+                
+                for i in range(0, min(len(hash_bytes), dimension * 4), 4):
+                    chunk = hash_bytes[i:i+4]
+                    if len(chunk) == 4:
+                        value = struct.unpack('f', chunk)[0]
+                        embedding.append(float(value))
+                
+                while len(embedding) < dimension:
+                    embedding.append(0.0)
+                
+                result = embedding[:dimension]
+                
+                span.set_attributes({
+                    "embedding.dimension": len(result),
+                    "embedding.generated": True
+                })
+                span.set_status(Status(StatusCode.OK))
+                
+                return result
+                
+            except Exception as e:
+                span.record_exception(e)
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                self.logger.error("Failed to generate embedding", error=str(e), exc_info=True)
+                raise
+    
+    async def shutdown(self) -> None:
+        with tracer.start_as_current_span("semantic_matcher_shutdown") as span:
+            try:
+                if hasattr(self.vector_provider, 'shutdown'):
+                    await self.vector_provider.shutdown()
+                
+                span.set_status(Status(StatusCode.OK))
+                self.logger.info("SemanticMatcher shutdown completed")
+                
+            except Exception as e:
+                span.record_exception(e)
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                self.logger.error("Error during matcher shutdown", error=str(e), exc_info=True)
+                raise

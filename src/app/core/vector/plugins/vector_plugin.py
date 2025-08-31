@@ -28,7 +28,7 @@ class VectorDatabasePlugin(Plugin):
             description="Vector database integration for semantic search and RAG capabilities",
             author="Azure Deployment AI",
             plugin_type=PluginType.PROVIDER,
-            dependencies=["embeddings", "memory"],
+            dependencies=[],
             configuration_schema={
                 "type": "object",
                 "properties": {
@@ -56,7 +56,7 @@ class VectorDatabasePlugin(Plugin):
                     },
                     "auto_index_resources": {
                         "type": "boolean",
-                        "default": true
+                        "default": True
                     },
                     "cache_ttl_hours": {
                         "type": "integer",
@@ -93,19 +93,42 @@ class VectorDatabasePlugin(Plugin):
                 connection_config = self.config.configuration.get("connection_config", {})
                 
                 self.vector_registry = VectorRegistry()
-                await self.vector_registry.initialize(provider, connection_config)
+                
+                # Register the vector provider based on configuration
+                if provider == "chroma":
+                    from app.core.vector.providers.chroma import ChromaProvider
+                    chroma_provider = ChromaProvider(connection_config)
+                    await self.vector_registry.register_provider(
+                        name="chroma",
+                        provider=chroma_provider,
+                        config=connection_config,
+                        set_as_default=True
+                    )
+                elif provider == "pinecone":
+                    from app.core.vector.providers.pinecone import PineconeProvider
+                    pinecone_provider = PineconeProvider(connection_config)
+                    await self.vector_registry.register_provider(
+                        name="pinecone", 
+                        provider=pinecone_provider,
+                        config=connection_config,
+                        set_as_default=True
+                    )
+                
+                # Get the default provider for semantic matching
+                default_provider = self.vector_registry.get_provider()
+                if not default_provider:
+                    raise RuntimeError(f"No vector provider available for {provider}")
                 
                 self.semantic_matcher = SemanticMatcher(
-                    vector_registry=self.vector_registry,
-                    embedding_model=self.config.configuration.get("embedding_model", "text-embedding-3-small")
+                    vector_provider=default_provider,
+                    collection_name="azure_resources"
                 )
-                await self.semantic_matcher.initialize()
                 
                 self.resource_indexer = ResourceIndexer(
-                    vector_registry=self.vector_registry,
-                    semantic_matcher=self.semantic_matcher
+                    vector_provider=default_provider,
+                    collection_name="azure_resources",
+                    embedding_dimension=self.config.configuration.get("dimension", 1536)
                 )
-                await self.resource_indexer.initialize()
                 
                 span.set_attributes({
                     "vector.provider": provider,
@@ -252,11 +275,27 @@ class VectorDatabasePlugin(Plugin):
             "search.threshold": threshold
         })
         
-        results = await self.semantic_matcher.find_similar_resources(
-            query=query,
-            limit=limit,
-            threshold=threshold
+        from app.core.vector.semantic.matcher import SemanticMatchRequest
+        
+        match_request = SemanticMatchRequest(
+            resource_type="deployment",
+            requirements={},
+            query_text=query,
+            threshold=threshold,
+            max_results=limit,
+            include_metadata=True
         )
+        
+        match_response = await self.semantic_matcher.find_similar_resources(match_request)
+        results = [
+            {
+                "id": match.resource_id,
+                "score": match.similarity_score,
+                "summary": match.matched_content,
+                "metadata": match.metadata
+            }
+            for match in match_response.matches
+        ]
         
         span.set_attribute("search.results_count", len(results))
         
@@ -283,11 +322,40 @@ class VectorDatabasePlugin(Plugin):
             "indexing.data_size": len(str(resource_data))
         })
         
-        indexed_id = await self.resource_indexer.index_resource(
-            resource_data=resource_data,
+        from app.core.vector.semantic.indexer import ResourceIndexRequest
+        from app.core.schemas.domains.resources import AzureResource
+        
+        # Extract deployment context from resource data
+        if isinstance(resource_data, dict):
+            deployment_context = resource_data.get("deployment_context", {})
+            resource_group = deployment_context.get("resource_group") or resource_data.get("resource_group")
+            location = deployment_context.get("location") or resource_data.get("location")
+        else:
+            deployment_context = {}
+            resource_group = None
+            location = None
+        
+        # Fallback to context if not in resource data
+        resource_group = resource_group or context.execution_context.get("resource_group") or context.user_context.get("resource_group", "unknown-rg")
+        location = location or context.execution_context.get("location") or context.user_context.get("location", "westeurope")
+        
+        # Create an AzureResource from the data
+        azure_resource = AzureResource(
+            resource_id=resource_id or f"auto_{hash(str(resource_data))}",
             resource_type=resource_type,
-            resource_id=resource_id
+            resource_name=f"{resource_type}_{resource_id or 'unnamed'}",
+            resource_group=resource_group,
+            location=location,
+            properties=resource_data if isinstance(resource_data, dict) else {"data": resource_data}
         )
+        
+        index_request = ResourceIndexRequest(
+            resource=azure_resource,
+            force_reindex=True
+        )
+        
+        index_result = await self.resource_indexer.index_resource(index_request)
+        indexed_id = index_result.resource_id
         
         span.set_attribute("indexing.indexed_id", indexed_id)
         

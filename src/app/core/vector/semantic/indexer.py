@@ -182,7 +182,8 @@ class ResourceIndexer:
                 
                 vector_data = [{
                     "id": resource.resource_id,
-                    "values": embedding,
+                    "embedding": embedding,
+                    "content": content,
                     "metadata": metadata
                 }]
                 
@@ -467,3 +468,18 @@ class ResourceIndexer:
                     "error": str(e),
                     "timestamp": datetime.now(UTC).isoformat()
                 }
+    
+    async def shutdown(self) -> None:
+        with tracer.start_as_current_span("resource_indexer_shutdown") as span:
+            try:
+                if hasattr(self.vector_provider, 'shutdown'):
+                    await self.vector_provider.shutdown()
+                
+                span.set_status(Status(StatusCode.OK))
+                self.logger.info("ResourceIndexer shutdown completed")
+                
+            except Exception as e:
+                span.record_exception(e)
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                self.logger.error("Error during indexer shutdown", error=str(e), exc_info=True)
+                raise

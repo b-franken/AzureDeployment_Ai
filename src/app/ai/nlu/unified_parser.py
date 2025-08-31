@@ -307,6 +307,8 @@ class unified_nlu_parser:
             re.compile(r"resource\s+group\s+([a-z0-9][\w-]{0,89})", re.IGNORECASE),
             re.compile(r"rg\s+([a-z0-9][\w-]{0,89})", re.IGNORECASE),
             re.compile(r"in\s+(?:resource\s+group|rg)\s+([a-z0-9][\w-]{0,89})", re.IGNORECASE),
+            re.compile(r"group\s+([a-z0-9][\w-]{0,89})", re.IGNORECASE),
+            re.compile(r"\bin\s+([a-z0-9][\w-]{0,89})\s+in\s+", re.IGNORECASE),
         ]:
             m = pat.search(text)
             if m:

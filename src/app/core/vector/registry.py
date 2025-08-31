@@ -234,6 +234,78 @@ class VectorRegistry:
             span.set_status(Status(StatusCode.OK))
             
             return stats
+    
+    async def similarity_search(self, embedding: list, limit: int = 10) -> list:
+        with tracer.start_as_current_span("registry_similarity_search") as span:
+            span.set_attributes({
+                "search.embedding_dim": len(embedding),
+                "search.limit": limit,
+                "registry.provider": self._default_provider
+            })
+            
+            try:
+                provider = self.get_provider()
+                if not provider:
+                    span.set_status(Status(StatusCode.ERROR, "No provider available"))
+                    return []
+                
+                if hasattr(provider, 'similarity_search'):
+                    results = await provider.similarity_search(embedding=embedding, limit=limit)
+                    span.set_attribute("search.results_count", len(results))
+                    span.set_status(Status(StatusCode.OK))
+                    return results
+                else:
+                    span.set_status(Status(StatusCode.ERROR, "Provider does not support similarity search"))
+                    return []
+                    
+            except Exception as e:
+                span.record_exception(e)
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                return []
+    
+    async def cleanup_old_vectors(self, max_age) -> int:
+        with tracer.start_as_current_span("registry_cleanup_vectors") as span:
+            span.set_attribute("cleanup.max_age", str(max_age))
+            
+            try:
+                provider = self.get_provider()
+                if not provider:
+                    span.set_status(Status(StatusCode.ERROR, "No provider available"))
+                    return 0
+                
+                if hasattr(provider, 'cleanup_old_vectors'):
+                    cleaned_count = await provider.cleanup_old_vectors(max_age=max_age)
+                    span.set_attribute("cleanup.cleaned_count", cleaned_count)
+                    span.set_status(Status(StatusCode.OK))
+                    return cleaned_count
+                else:
+                    span.set_status(Status(StatusCode.OK, "Provider does not support cleanup"))
+                    return 0
+                    
+            except Exception as e:
+                span.record_exception(e)
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                return 0
+    
+    async def shutdown(self) -> None:
+        with tracer.start_as_current_span("registry_shutdown") as span:
+            try:
+                shutdown_results = []
+                for name, provider in self._providers.items():
+                    if hasattr(provider, 'shutdown'):
+                        await provider.shutdown()
+                        shutdown_results.append(name)
+                
+                span.set_attributes({
+                    "shutdown.providers_count": len(shutdown_results),
+                    "shutdown.providers": shutdown_results
+                })
+                span.set_status(Status(StatusCode.OK))
+                
+            except Exception as e:
+                span.record_exception(e)
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                raise
 
 
 async def create_chroma_provider(config: Dict[str, Any]) -> VectorProvider:

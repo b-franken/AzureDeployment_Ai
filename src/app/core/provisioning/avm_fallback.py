@@ -24,6 +24,7 @@ class AVMStrategy(ProvisioningStrategy):
                 from app.tools.provision.backends.avm_bicep.engine import BicepAvmBackend, ProvisionContext as AVMContext
                 
                 self._avm_backend = BicepAvmBackend()
+                self._initialized = True
                 
                 span.set_attributes({
                     "strategy.name": self.name,
@@ -56,9 +57,15 @@ class AVMStrategy(ProvisioningStrategy):
                 "context.has_deployment_plan": bool(context.deployment_plan)
             })
             
+            # Check if we have parsed resources OR if we can parse the request text
+            has_resources = (
+                len(context.parsed_resources) > 0 or 
+                (context.request_text and len(context.request_text.strip()) > 0)
+            )
+            
             can_handle = (
                 self._avm_backend is not None and 
-                len(context.parsed_resources) > 0 and
+                has_resources and
                 self.name not in context.attempted_strategies
             )
             
@@ -263,6 +270,7 @@ class SDKFallbackStrategy(ProvisioningStrategy):
                 
                 self._action_registry = get_action  # Use existing action registry
                 self._intelligent_tool = self  # Use self as the tool
+                self._initialized = True
                 
                 span.set_attributes({
                     "strategy.name": self.name,

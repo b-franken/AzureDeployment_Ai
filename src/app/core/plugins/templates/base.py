@@ -102,7 +102,7 @@ class TemplateEngine(ABC):
     async def validate_template(self, template: ResourceTemplate) -> List[str]:
         pass
     
-    def register_template(self, template: ResourceTemplate) -> bool:
+    async def register_template(self, template: ResourceTemplate) -> bool:
         with tracer.start_as_current_span("template_registration") as span:
             template_name = template.metadata.name
             

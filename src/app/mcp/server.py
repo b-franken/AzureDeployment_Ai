@@ -72,6 +72,7 @@ class MCPServer:
         register_integrated_analytics_tool(self.mcp)
         register_security_advisor_tool(self.mcp)
         register_cost_intelligence_tool(self.mcp)
+        await self._register_vector_intelligence_tools()
         logger.info("MCP server created", extra={"event": "mcp_created"})
         return self
 
@@ -676,6 +677,37 @@ class MCPServer:
             "successful_steps": sum(1 for r in results if r["status"] == "success"),
             "failed_steps": sum(1 for r in results if r["status"] == "failed"),
         }
+
+    async def _register_vector_intelligence_tools(self) -> None:
+        try:
+            from app.startup.vector_integration import get_vector_startup
+            
+            vector_startup = await get_vector_startup()
+            if vector_startup.is_initialized():
+                vector_tools = await vector_startup.get_mcp_vector_tools()
+                if vector_tools:
+                    tool_definitions = vector_tools.get_tool_definitions()
+                    
+                    for tool_def in tool_definitions:
+                        @self.mcp.tool(
+                            name=tool_def.name,
+                            description=tool_def.description
+                        )
+                        async def vector_tool_wrapper(context: Context, **kwargs):
+                            correlation_id = kwargs.get("correlation_id", f"mcp_vector_{datetime.utcnow().timestamp()}")
+                            return await vector_tools.execute_tool(
+                                tool_name=tool_def.name,
+                                parameters=kwargs,
+                                correlation_id=correlation_id
+                            )
+                    
+                    logger.info(f"Registered {len(tool_definitions)} vector intelligence tools")
+                else:
+                    logger.warning("Vector tools not available")
+            else:
+                logger.info("Vector system not initialized, skipping vector tools registration")
+        except Exception as e:
+            logger.error(f"Failed to register vector intelligence tools: {e}")
 
     def run(self) -> None:
         logger.info("Starting MCP server", extra={"event": "mcp_run", "transport": self.transport})

@@ -39,6 +39,31 @@ services:
           - ollama
           - devops-ai-ollama
 
+  chroma:
+    image: chromadb/chroma:latest
+    container_name: devops-ai-chroma
+    env_file: .env
+    environment:
+      - CHROMA_SERVER_HOST=0.0.0.0
+      - CHROMA_SERVER_HTTP_PORT=8001
+      - ALLOW_RESET=TRUE
+    volumes:
+      - chroma_data:/chroma/chroma
+    ports:
+      - "${CHROMA_PORT:-8001}:8001"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8001/api/v1/heartbeat').raise_for_status()"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      devops-ai-net:
+        aliases:
+          - chroma
+          - devops-ai-chroma
+
   api:
     build:
       context: .
@@ -54,12 +79,21 @@ services:
       LLM__OLLAMA_BASE_URL: http://ollama:11434
       LLM__OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       LLM__OPENAI_API_BASE: ${OPENAI_API_BASE:-https://api.openai.com/v1}
+      VECTOR_PROVIDER: ${VECTOR_PROVIDER:-chroma}
+      VECTOR_HOST: ${VECTOR_HOST:-chroma}
+      VECTOR_PORT: ${VECTOR_PORT:-8001}
+      VECTOR_EMBEDDING_MODEL: ${VECTOR_EMBEDDING_MODEL:-text-embedding-3-small}
+      VECTOR_DIMENSION: ${VECTOR_DIMENSION:-1536}
+      VECTOR_AUTO_INDEX: ${VECTOR_AUTO_INDEX:-true}
+      VECTOR_CACHE_TTL_HOURS: ${VECTOR_CACHE_TTL_HOURS:-24}
     ports:
       - "${API_PORT}:${API_PORT}"
     depends_on:
       db:
         condition: service_healthy
       ollama:
+        condition: service_healthy
+      chroma:
         condition: service_healthy
     command: >
       sh -c "uvicorn app.api.main:app --host ${API_HOST} --port ${API_PORT} --workers 1"
@@ -75,8 +109,18 @@ services:
       dockerfile: src/app/api/Dockerfile
     container_name: devops-ai-mcp
     env_file: .env
+    environment:
+      VECTOR_PROVIDER: ${VECTOR_PROVIDER:-chroma}
+      VECTOR_HOST: ${VECTOR_HOST:-chroma}
+      VECTOR_PORT: ${VECTOR_PORT:-8001}
+      VECTOR_EMBEDDING_MODEL: ${VECTOR_EMBEDDING_MODEL:-text-embedding-3-small}
+      VECTOR_DIMENSION: ${VECTOR_DIMENSION:-1536}
+      VECTOR_AUTO_INDEX: ${VECTOR_AUTO_INDEX:-true}
+      VECTOR_CACHE_TTL_HOURS: ${VECTOR_CACHE_TTL_HOURS:-24}
     depends_on:
       db:
+        condition: service_healthy
+      chroma:
         condition: service_healthy
     command: >
       sh -c "python -m app.mcp.server"
@@ -87,6 +131,7 @@ services:
 volumes:
   dbdata: {}
   ollama: {}
+  chroma_data: {}
 
 networks:
   devops-ai-net: {}

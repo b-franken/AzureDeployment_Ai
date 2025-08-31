@@ -25,6 +25,9 @@ from app.core.provisioning import (
     SDKFallbackStrategy,
     DeploymentPhaseManager
 )
+from app.core.plugins.manager import PluginManager
+from app.core.vector.docker_init import get_docker_plugin_manager
+from .vector_enhanced_provision import VectorEnhancedProvisioningTool
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -108,7 +111,7 @@ class IntelligentAzureProvision(Tool):
         "additionalProperties": False,
     }
 
-    def __init__(self) -> None:
+    def __init__(self, plugin_manager: Optional[PluginManager] = None) -> None:
         self.orchestrator = ProvisioningOrchestrator()
         self.phase_manager = DeploymentPhaseManager()
         self.preview_service = DeploymentPreviewService()
@@ -116,15 +119,40 @@ class IntelligentAzureProvision(Tool):
         self.orchestrator.register_strategy(AVMStrategy())
         self.orchestrator.register_strategy(SDKFallbackStrategy())
         
+        self.plugin_manager = plugin_manager
+        self.vector_enhanced_tool = None
+        self._vector_init_attempted = False
+        
         self.service_tracer = get_service_tracer("intelligent_provision_service")
         self.cross_service_tracer = get_cross_service_tracer()
         
         logger.info(
             "IntelligentAzureProvision initialized with orchestrator",
             strategies_registered=len(self.orchestrator._strategies),
+            vector_enhanced=self.vector_enhanced_tool is not None,
             observability_enabled=getattr(settings.observability, "enabled", True),
             distributed_tracing_enabled=True
         )
+    
+    async def _ensure_vector_capabilities(self) -> None:
+        if self._vector_init_attempted:
+            return
+        
+        self._vector_init_attempted = True
+        
+        try:
+            if not self.plugin_manager:
+                self.plugin_manager = await get_docker_plugin_manager()
+            
+            if self.plugin_manager and not self.vector_enhanced_tool:
+                self.vector_enhanced_tool = VectorEnhancedProvisioningTool(
+                    self.plugin_manager,
+                    self.orchestrator
+                )
+                
+                logger.info("Vector capabilities initialized")
+        except Exception as e:
+            logger.warning("Failed to initialize vector capabilities", error=str(e))
 
     async def run(self, **kwargs: Any) -> ToolResult:
         correlation_id = kwargs.get("correlation_id") or str(uuid.uuid4())
@@ -143,6 +171,9 @@ class IntelligentAzureProvision(Tool):
             try:
                 await self.orchestrator.initialize_all_strategies()
                 
+                # Ensure vector capabilities are available
+                await self._ensure_vector_capabilities()
+                
                 # Handle proceed commands by retrieving the original deployment context
                 original_request = await self._handle_proceed_command(**kwargs)
                 if original_request:
@@ -154,23 +185,49 @@ class IntelligentAzureProvision(Tool):
                 if not validation_result.success:
                     return validation_result.to_tool_result()
                 
-                context = await self._create_provision_context(**kwargs)
+                # Use vector-enhanced provisioning if available
+                if self.vector_enhanced_tool:
+                    span.set_attribute("execution.vector_enhanced", True)
+                    logger.info("Using vector-enhanced intelligent provisioning")
+                    
+                    execution_result = await self.vector_enhanced_tool.intelligent_provision_with_context(
+                        request_text=kwargs.get("request", ""),
+                        user_id=user_id,
+                        correlation_id=correlation_id,
+                        dry_run=kwargs.get("dry_run", True),
+                        environment=kwargs.get("environment", "dev"),
+                        subscription_id=kwargs.get("subscription_id", ""),
+                        resource_group=kwargs.get("resource_group", ""),
+                        location=kwargs.get("location", "westeurope"),
+                        name_prefix=kwargs.get("name_prefix", "app"),
+                        tags=kwargs.get("tags", {}),
+                        enable_monitoring=kwargs.get("enable_monitoring", True),
+                        cost_optimization=kwargs.get("cost_optimization", True)
+                    )
+                else:
+                    span.set_attribute("execution.vector_enhanced", False)
+                    logger.info("Using standard intelligent provisioning")
+                    
+                    context = await self._create_provision_context(**kwargs)
+                    
+                    parsing_result = await self._parse_request(context)
+                    if not parsing_result.success:
+                        return parsing_result.to_tool_result()
+                    
+                    if context.dry_run:
+                        preview_result = await self._generate_preview(context, parsing_result)
+                        return preview_result.to_tool_result()
+                    
+                    planning_result = await self._create_deployment_plan(context)
+                    if not planning_result.success:
+                        return planning_result.to_tool_result()
+                    
+                    execution_result = await self.orchestrator.execute_with_fallback(context)
                 
-                parsing_result = await self._parse_request(context)
-                if not parsing_result.success:
-                    return parsing_result.to_tool_result()
-                
-                if context.dry_run:
-                    preview_result = await self._generate_preview(context, parsing_result)
-                    return preview_result.to_tool_result()
-                
-                planning_result = await self._create_deployment_plan(context)
-                if not planning_result.success:
-                    return planning_result.to_tool_result()
-                
-                execution_result = await self.orchestrator.execute_with_fallback(context)
-                
-                await self._store_execution_result(context, execution_result)
+                # Store execution result (context will be created if using vector-enhanced)
+                if not self.vector_enhanced_tool:
+                    await self._store_execution_result(context, execution_result)
+                # Vector-enhanced tool already handles storage internally
                 
                 span.set_attributes({
                     "execution.success": execution_result.success,

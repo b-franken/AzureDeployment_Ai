@@ -80,7 +80,8 @@ coverage.xml
 *.bak
 *.swp
 *.swo
-node_modules
-.next
-out
-dist
+node_modules/
+.next/
+out/
+dist/
+.vector_integration.md

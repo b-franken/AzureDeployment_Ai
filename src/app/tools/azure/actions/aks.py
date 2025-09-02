@@ -5,10 +5,11 @@ import uuid
 
 from azure.core.exceptions import HttpResponseError
 
+from app.core.logging import get_logger
 from ..clients import Clients
 from ..idempotency import safe_get
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 ACR_PULL_ROLE_ID = "7f951dda-4ed3-4680-a7ca-43fe172d538d"
 

@@ -6,7 +6,9 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 def _is_azure_error(exc: BaseException) -> bool:

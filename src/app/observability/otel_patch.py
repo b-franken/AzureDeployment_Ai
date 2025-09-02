@@ -2,7 +2,9 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 def patch_opentelemetry_attributes() -> None:

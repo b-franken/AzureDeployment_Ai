@@ -10,9 +10,10 @@ from azure.core.credentials import AccessToken, TokenCredential
 from azure.core.credentials_async import AsyncTokenCredential
 from azure.core.exceptions import HttpResponseError
 
+from app.core.logging import get_logger
 from ..clients import Clients
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 async def _get_token_str(cred: TokenCredential | AsyncTokenCredential, scope: str) -> str:

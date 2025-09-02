@@ -135,10 +135,9 @@ class FunctionCallRequest(TimestampedSchema):
     function: FunctionCallType = Field(description="Function to call")
     arguments: dict[str, Any] = Field(description="Function arguments")
     request_timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(UTC), 
-        description="Request initiation timestamp"
+        default_factory=lambda: datetime.now(UTC), description="Request initiation timestamp"
     )
-    
+
     @field_validator("arguments")
     @classmethod
     def validate_arguments(cls, v: dict[str, Any]) -> dict[str, Any]:
@@ -149,20 +148,20 @@ class FunctionCallRequest(TimestampedSchema):
                 provided_type=type(v).__name__,
             )
             raise ValueError("arguments must be a dictionary")
-        
+
         if len(v) == 0:
             logger.warning(
                 "function_call_request_validation_warning",
                 warning="arguments dictionary is empty",
             )
-        
+
         logger.debug(
             "function_call_request_validation_success",
             arguments_count=len(v),
             argument_keys=list(v.keys()),
         )
         return v
-    
+
     def log_function_call_start(self) -> None:
         logger.info(
             "function_call_started",
@@ -181,10 +180,9 @@ class FunctionCallResponse(TimestampedSchema):
     error: str | None = Field(default=None, description="Error message if failed")
     execution_time_ms: float = Field(description="Execution time in milliseconds")
     response_timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(UTC), 
-        description="Response completion timestamp"
+        default_factory=lambda: datetime.now(UTC), description="Response completion timestamp"
     )
-    
+
     @field_validator("execution_time_ms")
     @classmethod
     def validate_execution_time(cls, v: float) -> float:
@@ -195,37 +193,37 @@ class FunctionCallResponse(TimestampedSchema):
                 provided_value=v,
             )
             raise ValueError("execution_time_ms cannot be negative")
-        
+
         if v > 300_000:  # 5 minutes in milliseconds
             logger.warning(
                 "function_call_response_validation_warning",
                 warning="execution time exceeds 5 minutes",
                 execution_time_ms=v,
             )
-        
+
         return v
-    
+
     @field_validator("error")
     @classmethod
     def validate_error_consistency(cls, v: str | None, info: ValidationInfo) -> str | None:
         success = info.data.get("success", True)
-        
+
         if not success and not v:
             logger.error(
                 "function_call_response_validation_error",
                 error="error message is required when success=False",
             )
             raise ValueError("error message is required when success=False")
-        
+
         if success and v:
             logger.warning(
                 "function_call_response_validation_warning",
                 warning="error message provided despite success=True",
                 error_message=v,
             )
-        
+
         return v
-    
+
     def log_function_call_completion(self) -> None:
         log_data = {
             "function_call_completed": True,
@@ -235,13 +233,13 @@ class FunctionCallResponse(TimestampedSchema):
             "execution_time_ms": self.execution_time_ms,
             "timestamp": self.response_timestamp.isoformat(),
         }
-        
+
         if not self.success and self.error:
             log_data["error"] = self.error
             logger.error("function_call_failed", **log_data)
         else:
             logger.info("function_call_succeeded", **log_data)
-    
+
     def get_performance_metrics(self) -> dict[str, Any]:
         return {
             "function": self.function,

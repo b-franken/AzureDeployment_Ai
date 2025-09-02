@@ -11,7 +11,9 @@ import logging
 import warnings
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 def suppress_otel_deprecation_warnings() -> None:

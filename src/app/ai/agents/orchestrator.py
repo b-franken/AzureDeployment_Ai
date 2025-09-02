@@ -95,27 +95,27 @@ class OrchestrationAgent(Agent[dict[str, Any], dict[str, Any]]):
             if not child_steps:
                 logger.warning("parallel step '%s' has no children", step.name)
                 return StepResult(
-                    step_name=step.name or "parallel_step", 
-                    success=False, 
-                    error="no child steps provided"
+                    step_name=step.name or "parallel_step",
+                    success=False,
+                    error="no child steps provided",
                 )
-            
+
             logger.debug("executing %d parallel tasks for step '%s'", len(child_steps), step.name)
             tasks = [self._run_step(s) for s in child_steps]
-            
+
             try:
                 done = await asyncio.gather(*tasks, return_exceptions=True)
             except Exception as e:
                 logger.error("parallel execution failed for step '%s': %s", step.name, e)
                 return StepResult(
-                    step_name=step.name or "parallel_step", 
-                    success=False, 
-                    error=f"parallel execution failed: {e}"
+                    step_name=step.name or "parallel_step",
+                    success=False,
+                    error=f"parallel execution failed: {e}",
                 )
-            
+
             child_results: list[StepResult] = []
             success_count = 0
-            
+
             for i, result in enumerate(done):
                 if isinstance(result, StepResult):
                     child_results.append(result)
@@ -129,41 +129,43 @@ class OrchestrationAgent(Agent[dict[str, Any], dict[str, Any]]):
                     child_results.append(
                         StepResult(step_name=step.name or "unknown", success=False, error=error_msg)
                     )
-            
+
             overall_success = success_count == len(child_results)
             logger.debug(
-                "parallel step '%s' completed: %d/%d tasks successful", 
-                step.name, success_count, len(child_results)
+                "parallel step '%s' completed: %d/%d tasks successful",
+                step.name,
+                success_count,
+                len(child_results),
             )
-            
+
             return StepResult(
-                step_name=step.name or "parallel_step", 
-                success=overall_success, 
-                children=child_results
+                step_name=step.name or "parallel_step",
+                success=overall_success,
+                children=child_results,
             )
         if step.type == StepType.AGENT:
             agent_name = step.agent or ""
             if not agent_name:
                 logger.error("agent step '%s' missing agent name", step.name)
                 return StepResult(
-                    step_name=step.name or "agent_step", 
-                    success=False, 
-                    error="agent name not specified"
+                    step_name=step.name or "agent_step",
+                    success=False,
+                    error="agent name not specified",
                 )
-            
+
             agent = self.agents.get(agent_name)
             if not agent:
                 logger.error("agent '%s' not found for step '%s'", agent_name, step.name)
                 available_agents = list(self.agents.keys())
                 return StepResult(
-                    step_name=step.name or "agent_step", 
-                    success=False, 
-                    error=f"agent '{agent_name}' not found. Available agents: {available_agents}"
+                    step_name=step.name or "agent_step",
+                    success=False,
+                    error=f"agent '{agent_name}' not found. Available agents: {available_agents}",
                 )
-            
+
             goal = step.description or step.name or "execute"
             logger.debug("executing agent '%s' with goal '%s'", agent_name, goal)
-            
+
             try:
                 plan = await agent.plan(goal)
                 logger.debug("agent '%s' created plan with %d steps", agent_name, len(plan.steps))
@@ -172,31 +174,31 @@ class OrchestrationAgent(Agent[dict[str, Any], dict[str, Any]]):
                 return StepResult(
                     step_name=step.name or "agent_step",
                     success=False,
-                    error=f"agent planning failed: {e}"
+                    error=f"agent planning failed: {e}",
                 )
-            
+
             try:
                 execution_result = await agent.execute(plan)
                 logger.debug(
-                    "agent '%s' execution completed, success=%s", 
-                    agent_name, 
-                    execution_result.success
+                    "agent '%s' execution completed, success=%s",
+                    agent_name,
+                    execution_result.success,
                 )
             except Exception as e:
                 logger.error("agent '%s' execution failed: %s", agent_name, e)
                 return StepResult(
                     step_name=step.name or "agent_step",
                     success=False,
-                    error=f"agent execution failed: {e}"
+                    error=f"agent execution failed: {e}",
                 )
-            
+
             if execution_result.success:
                 return StepResult(
                     step_name=step.name or "agent_step",
                     success=True,
                     output=execution_result.result if hasattr(execution_result, "result") else None,
                 )
-            
+
             error_msg = getattr(execution_result, "error", "agent failed")
             logger.debug("agent '%s' execution failed: %s", agent_name, error_msg)
             return StepResult(

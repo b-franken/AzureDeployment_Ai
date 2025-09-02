@@ -8,9 +8,10 @@ from app.ai.llm.factory import get_provider_and_model
 from app.ai.types import ChatHistory, Role
 from app.ai.types import Message as AIMessage
 from app.core.exceptions import BaseApplicationException
+from app.core.logging import get_logger
 from app.memory.storage import get_async_store
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 SYSTEM_PROMPT = (
     "You are DevOpsGPT, an expert in infrastructure, CI/CD, Kubernetes, Terraform,"

@@ -5,8 +5,9 @@ from collections.abc import Awaitable, Callable
 
 import jwt
 from fastapi import FastAPI, Request, Response
+from app.core.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def install_auth_middleware(app: FastAPI) -> None:

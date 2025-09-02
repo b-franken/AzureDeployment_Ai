@@ -27,9 +27,12 @@ class SecurityAnalysisRequest(BaseModel):
     """Request for security analysis."""
 
     subscription_id: str = Field(..., description="Azure subscription ID")
-    resource_group: str | None = Field(None, description="Specific resource group to analyze")
-    start_date: datetime | None = Field(None, description="Start date for analysis")
-    end_date: datetime | None = Field(None, description="End date for analysis")
+    resource_group: str | None = Field(
+        None, description="Specific resource group to analyze")
+    start_date: datetime | None = Field(
+        None, description="Start date for analysis")
+    end_date: datetime | None = Field(
+        None, description="End date for analysis")
     severity_filter: Literal["critical", "high", "medium", "low", "all"] = Field(
         "all", description="Security severity filter"
     )
@@ -39,7 +42,8 @@ class ChangeAnalysisRequest(BaseModel):
     """Request for change analysis."""
 
     subscription_id: str = Field(..., description="Azure subscription ID")
-    resource_group: str | None = Field(None, description="Specific resource group to analyze")
+    resource_group: str | None = Field(
+        None, description="Specific resource group to analyze")
     time_range: Literal["1h", "6h", "12h", "24h", "7d", "30d"] = Field(
         "24h", description="Time range for change analysis"
     )
@@ -54,22 +58,28 @@ class AuditAnalysisRequest(BaseModel):
 
     subscription_id: str = Field(..., description="Azure subscription ID")
     user_id: str | None = Field(None, description="Filter by specific user")
-    start_date: datetime | None = Field(None, description="Start date for audit logs")
-    end_date: datetime | None = Field(None, description="End date for audit logs")
-    operation_filter: str | None = Field(None, description="Filter by operation type")
-    resource_filter: str | None = Field(None, description="Filter by resource type")
+    start_date: datetime | None = Field(
+        None, description="Start date for audit logs")
+    end_date: datetime | None = Field(
+        None, description="End date for audit logs")
+    operation_filter: str | None = Field(
+        None, description="Filter by operation type")
+    resource_filter: str | None = Field(
+        None, description="Filter by resource type")
 
 
 class IntegratedAnalyticsResponse(BaseModel):
     """Unified response for integrated analytics."""
 
     success: bool = Field(..., description="Whether the analysis succeeded")
-    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Analysis timestamp")
+    timestamp: datetime = Field(
+        default_factory=datetime.utcnow, description="Analysis timestamp")
     correlation_id: str = Field(..., description="Request correlation ID")
     subscription_id: str = Field(..., description="Azure subscription ID")
 
     # Security Analysis
-    security_score: float | None = Field(None, description="Overall security score (0-100)")
+    security_score: float | None = Field(
+        None, description="Overall security score (0-100)")
     security_findings: list[dict[str, Any]] = Field(
         default_factory=list, description="Security findings and recommendations"
     )
@@ -78,8 +88,10 @@ class IntegratedAnalyticsResponse(BaseModel):
     )
 
     # Cost Analysis
-    current_month_spend: float | None = Field(None, description="Current month spend in USD")
-    cost_trend: str | None = Field(None, description="Cost trend (increasing/decreasing/stable)")
+    current_month_spend: float | None = Field(
+        None, description="Current month spend in USD")
+    cost_trend: str | None = Field(
+        None, description="Cost trend (increasing/decreasing/stable)")
     cost_savings_potential: float | None = Field(
         None, description="Estimated monthly savings potential"
     )
@@ -88,22 +100,27 @@ class IntegratedAnalyticsResponse(BaseModel):
     )
 
     # Change Analysis
-    recent_changes_count: int = Field(0, description="Number of recent changes")
+    recent_changes_count: int = Field(
+        0, description="Number of recent changes")
     high_risk_changes: list[dict[str, Any]] = Field(
         default_factory=list, description="High-risk changes requiring attention"
     )
     change_velocity: float | None = Field(None, description="Changes per day")
 
     # Audit Analysis
-    audit_events_count: int = Field(0, description="Number of audit events in period")
-    failed_operations_count: int = Field(0, description="Number of failed operations")
+    audit_events_count: int = Field(
+        0, description="Number of audit events in period")
+    failed_operations_count: int = Field(
+        0, description="Number of failed operations")
     suspicious_activities: list[dict[str, Any]] = Field(
         default_factory=list, description="Suspicious activities detected"
     )
-    top_users: list[dict[str, Any]] = Field(default_factory=list, description="Most active users")
+    top_users: list[dict[str, Any]] = Field(
+        default_factory=list, description="Most active users")
 
     # Integrated Insights
-    risk_score: float | None = Field(None, description="Overall risk score (0-100)")
+    risk_score: float | None = Field(
+        None, description="Overall risk score (0-100)")
     recommendations: list[dict[str, Any]] = Field(
         default_factory=list, description="Integrated recommendations"
     )
@@ -158,9 +175,12 @@ class IntegratedAnalyticsTool:
 
                 # Calculate security score based on findings
                 if findings:
-                    critical_count = sum(1 for f in findings if f.get("severity") == "critical")
-                    high_count = sum(1 for f in findings if f.get("severity") == "high")
-                    security_score = max(0, 100 - (critical_count * 20) - (high_count * 10))
+                    critical_count = sum(
+                        1 for f in findings if f.get("severity") == "critical")
+                    high_count = sum(
+                        1 for f in findings if f.get("severity") == "high")
+                    security_score = max(
+                        0, 100 - (critical_count * 20) - (high_count * 10))
                 else:
                     security_score = 95.0  # Default good score
 
@@ -227,14 +247,17 @@ class IntegratedAnalyticsTool:
 
                 # Calculate cost trend
                 current_spend = (
-                    cost_data.get("current_month_spend", 0) if isinstance(cost_data, dict) else 0
+                    cost_data.get("current_month_spend", 0) if isinstance(
+                        cost_data, dict) else 0
                 )
                 last_spend = (
-                    cost_data.get("last_month_spend", 0) if isinstance(cost_data, dict) else 0
+                    cost_data.get("last_month_spend", 0) if isinstance(
+                        cost_data, dict) else 0
                 )
 
                 if last_spend > 0:
-                    change_pct = ((current_spend - last_spend) / last_spend) * 100
+                    change_pct = (
+                        (current_spend - last_spend) / last_spend) * 100
                     if change_pct > 10:
                         trend = "increasing"
                     elif change_pct < -10:
@@ -319,7 +342,8 @@ class IntegratedAnalyticsTool:
                 }
 
                 end_time = datetime.utcnow()
-                start_time = end_time - time_ranges.get(request.time_range, timedelta(days=1))
+                start_time = end_time - \
+                    time_ranges.get(request.time_range, timedelta(days=1))
 
                 # Get activity log entries for changes
                 changes = await self._get_activity_log_changes(
@@ -389,7 +413,8 @@ class IntegratedAnalyticsTool:
             try:
                 # Set default time range if not provided
                 end_date = request.end_date or datetime.utcnow()
-                start_date = request.start_date or (end_date - timedelta(days=7))
+                start_date = request.start_date or (
+                    end_date - timedelta(days=7))
 
                 # Query audit logs
                 audit_query = AuditQuery(
@@ -481,7 +506,8 @@ class IntegratedAnalyticsTool:
             risk_score = (
                 (security_score * 0.4)  # 40% security weight
                 + ((1 - failed_ops_ratio) * 100 * 0.3)  # 30% audit weight
-                + (max(0, 100 - high_risk_changes * 10) * 0.3)  # 30% change weight
+                # 30% change weight
+                + (max(0, 100 - high_risk_changes * 10) * 0.3)
             )
 
             # Generate recommendations
@@ -721,7 +747,8 @@ class IntegratedAnalyticsTool:
                 for event in user_event_list:
                     timestamp = getattr(event, "timestamp", datetime.utcnow())
                     if isinstance(timestamp, str):
-                        timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                        timestamp = datetime.fromisoformat(
+                            timestamp.replace("Z", "+00:00"))
 
                     # Business hours: 8 AM - 6 PM weekdays
                     if (
@@ -773,7 +800,8 @@ async def run_integrated_analysis(
 
         tool = IntegratedAnalyticsTool()
         response = IntegratedAnalyticsResponse.model_validate(
-            {"success": True, "correlation_id": correlation_id, "subscription_id": subscription_id}
+            {"success": True, "correlation_id": correlation_id,
+                "subscription_id": subscription_id}
         )
 
         try:
@@ -783,26 +811,33 @@ async def run_integrated_analysis(
                     security_request, correlation_id
                 )
                 response.security_score = security_data.get("security_score")
-                response.security_findings = security_data.get("security_findings", [])
-                response.compliance_status = security_data.get("compliance_status", {})
+                response.security_findings = security_data.get(
+                    "security_findings", [])
+                response.compliance_status = security_data.get(
+                    "compliance_status", {})
             else:
                 security_data = {}
 
             # Run cost analysis
             if include_cost_analysis:
                 cost_data = await tool.analyze_cost_optimization(subscription_id, correlation_id)
-                response.current_month_spend = cost_data.get("current_month_spend")
+                response.current_month_spend = cost_data.get(
+                    "current_month_spend")
                 response.cost_trend = cost_data.get("cost_trend")
-                response.cost_savings_potential = cost_data.get("cost_savings_potential")
-                response.top_cost_resources = cost_data.get("top_cost_resources", [])
+                response.cost_savings_potential = cost_data.get(
+                    "cost_savings_potential")
+                response.top_cost_resources = cost_data.get(
+                    "top_cost_resources", [])
             else:
                 cost_data = {}
 
             # Run change analysis
             if change_request:
                 change_data = await tool.analyze_recent_changes(change_request, correlation_id)
-                response.recent_changes_count = change_data.get("recent_changes_count", 0)
-                response.high_risk_changes = change_data.get("high_risk_changes", [])
+                response.recent_changes_count = change_data.get(
+                    "recent_changes_count", 0)
+                response.high_risk_changes = change_data.get(
+                    "high_risk_changes", [])
                 response.change_velocity = change_data.get("change_velocity")
             else:
                 change_data = {}
@@ -810,9 +845,12 @@ async def run_integrated_analysis(
             # Run audit analysis
             if audit_request:
                 audit_data = await tool.analyze_audit_logs(audit_request, correlation_id)
-                response.audit_events_count = audit_data.get("audit_events_count", 0)
-                response.failed_operations_count = audit_data.get("failed_operations_count", 0)
-                response.suspicious_activities = audit_data.get("suspicious_activities", [])
+                response.audit_events_count = audit_data.get(
+                    "audit_events_count", 0)
+                response.failed_operations_count = audit_data.get(
+                    "failed_operations_count", 0)
+                response.suspicious_activities = audit_data.get(
+                    "suspicious_activities", [])
                 response.top_users = audit_data.get("top_users", [])
             else:
                 audit_data = {}
@@ -916,6 +954,7 @@ def register_integrated_analytics_tool(mcp_instance: Any) -> None:
         """Run integrated analytics analysis across all Azure services."""
 
         import uuid
+        from typing import cast
 
         if correlation_id == "auto":
             correlation_id = str(uuid.uuid4())
@@ -926,17 +965,21 @@ def register_integrated_analytics_tool(mcp_instance: Any) -> None:
             from typing import Literal, cast
 
             severity_filter = cast(
-                Literal["critical", "high", "medium", "low", "all"], security_severity_filter
+                Literal["critical", "high", "medium",
+                        "low", "all"], security_severity_filter
             )
             security_request = SecurityAnalysisRequest.model_validate(
-                {"subscription_id": subscription_id, "severity_filter": severity_filter}
+                {"subscription_id": subscription_id,
+                    "severity_filter": severity_filter}
             )
 
         change_request = None
         if include_changes:
-            time_range_literal = cast(Literal["1h", "6h", "12h", "24h", "7d", "30d"], time_range)
+            time_range_literal = cast(
+                Literal["1h", "6h", "12h", "24h", "7d", "30d"], time_range)
             change_request = ChangeAnalysisRequest.model_validate(
-                {"subscription_id": subscription_id, "time_range": time_range_literal}
+                {"subscription_id": subscription_id,
+                    "time_range": time_range_literal}
             )
 
         audit_request = None
@@ -945,7 +988,6 @@ def register_integrated_analytics_tool(mcp_instance: Any) -> None:
                 {"subscription_id": subscription_id}
             )
 
-        # Run integrated analysis
         result = await run_integrated_analysis(
             subscription_id=subscription_id,
             correlation_id=correlation_id,

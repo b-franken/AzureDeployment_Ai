@@ -18,9 +18,10 @@ from app.api.schemas import ChatRequest, ChatRequestV2, ChatResponse
 from app.api.services import run_chat
 from app.core.config import settings
 from app.core.exceptions import AuthenticationException, BaseApplicationException
+from app.core.logging import get_logger
 
 router = APIRouter()
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
 
 auth_module: ModuleType | None = None

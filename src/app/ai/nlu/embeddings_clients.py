@@ -17,24 +17,24 @@ logger = structlog.get_logger(__name__)
 
 class TfidfVectorizerProtocol(Protocol):
     """Protocol for sklearn TfidfVectorizer to avoid import errors.
-    
+
     This protocol defines the minimal interface needed for TF-IDF vectorization.
     It's designed to be compatible with sklearn's TfidfVectorizer while allowing
     for type safety without requiring sklearn as a hard dependency.
     """
 
-    def __init__(self, **kwargs: Any) -> None: 
+    def __init__(self, **kwargs: Any) -> None:
         """Initialize with flexible keyword arguments to match sklearn interface."""
         ...
 
-    def fit_transform(self, texts: Sequence[str]) -> Any: 
+    def fit_transform(self, texts: Sequence[str]) -> Any:
         """Fit and transform texts to TF-IDF matrix."""
         ...
 
 
 def _get_tfidf_vectorizer() -> type[TfidfVectorizerProtocol] | None:
     """Get TfidfVectorizer with proper error handling and logging.
-    
+
     Returns:
         TfidfVectorizer class if sklearn is available, None otherwise.
         The return type is cast to match our protocol interface.
@@ -50,12 +50,12 @@ def _get_tfidf_vectorizer() -> type[TfidfVectorizerProtocol] | None:
         # Type cast to our protocol - sklearn's TfidfVectorizer implements our protocol
         # but with additional parameters that don't break compatibility
         return cast(type[TfidfVectorizerProtocol], TfidfVectorizer)
-        
+
     except ImportError as e:
         logger.warning(
             "sklearn_not_available_fallback_mode",
             error=str(e),
-            fallback_method="hash_based_embeddings"
+            fallback_method="hash_based_embeddings",
         )
         return None
     except Exception as e:
@@ -317,7 +317,7 @@ class MistralClient(EmbeddingClient):
 
 class LocalEmbeddingClient(EmbeddingClient):
     """Lightweight local embedding client using TF-IDF or hash-based embeddings.
-    
+
     This client provides a fallback mechanism for embedding generation when
     external APIs are unavailable or for lightweight local processing.
     """
@@ -327,7 +327,7 @@ class LocalEmbeddingClient(EmbeddingClient):
         self._vectorizer: TfidfVectorizerProtocol | None = None
         self._fallback_dim = 384  # Standard embedding dimension
         self._initialization_attempted = False
-        
+
         logger.debug(
             "local_embedding_client_initialized",
             model_name=model_name,
@@ -338,15 +338,15 @@ class LocalEmbeddingClient(EmbeddingClient):
         """Ensure vectorizer is initialized with comprehensive error handling."""
         if self._vectorizer is not None or self._initialization_attempted:
             return
-            
+
         self._initialization_attempted = True
         vectorizer_class = _get_tfidf_vectorizer()
-        
+
         if vectorizer_class is None:
             logger.info(
                 "sklearn_unavailable_using_hash_fallback",
                 model_name=self.model_name,
-                fallback_method="hash_based_embeddings"
+                fallback_method="hash_based_embeddings",
             )
             return
 
@@ -362,36 +362,36 @@ class LocalEmbeddingClient(EmbeddingClient):
                 "sublinear_tf": True,  # Use sublinear TF scaling
                 "norm": "l2",  # L2 normalization
             }
-            
+
             self._vectorizer = vectorizer_class(**vectorizer_config)
-            
+
             logger.info(
-                "tfidf_vectorizer_initialized_successfully", 
+                "tfidf_vectorizer_initialized_successfully",
                 model_name=self.model_name,
                 config=vectorizer_config,
             )
-            
+
         except Exception as e:
             logger.error(
                 "failed_to_initialize_tfidf_vectorizer",
                 error=str(e),
                 error_type=type(e).__name__,
                 model_name=self.model_name,
-                fallback_method="hash_based_embeddings"
+                fallback_method="hash_based_embeddings",
             )
             self._vectorizer = None
 
     def _simple_hash_embedding(self, text: str, dim: int = 384) -> list[float]:
         """Ultra-lightweight hash-based embedding as fallback.
-        
+
         This method generates embeddings using a combination of hash functions
         and positional weighting to create a reasonable approximation of semantic
         similarity for basic text classification tasks.
-        
+
         Args:
             text: Input text to embed
             dim: Embedding dimension
-            
+
         Returns:
             Normalized embedding vector as list of floats
         """
@@ -406,7 +406,7 @@ class LocalEmbeddingClient(EmbeddingClient):
             features = [0.0] * dim
             text_cleaned = text.lower().strip()
             words = text_cleaned.split()
-            
+
             if not words:
                 logger.debug("no_words_found_after_preprocessing", text_length=len(text))
                 return [0.0] * dim
@@ -414,21 +414,21 @@ class LocalEmbeddingClient(EmbeddingClient):
             # Multiple hash strategies for robustness
             def word_hash(word: str, seed: int) -> str:
                 return f"{word}_{seed}"
-            
+
             def bigram_hash(word: str, seed: int) -> str:
                 try:
                     next_word = words[(words.index(word) + 1) % len(words)]
                     return f"{word}_{next_word}_{seed}"
                 except (ValueError, IndexError):
                     return f"{word}_solo_{seed}"
-            
+
             def position_hash(word: str, seed: int) -> str:
                 try:
                     pos = words.index(word) % 10
                     return f"{word}_{pos}_{seed}"
                 except ValueError:
                     return f"{word}_nopos_{seed}"
-            
+
             hash_strategies = [
                 ("word_hash", word_hash),
                 ("bigram_hash", bigram_hash),
@@ -442,11 +442,11 @@ class LocalEmbeddingClient(EmbeddingClient):
                             hash_input = hash_func(word, seed)
                             hash_val = int(hashlib.md5(hash_input.encode()).hexdigest(), 16)
                             idx = hash_val % dim
-                            
+
                             # Position-based weighting with decay
                             weight = 1.0 / (i + 1) ** 0.5
                             features[idx] += weight
-                            
+
                         except (ValueError, IndexError) as e:
                             logger.debug(
                                 "hash_computation_error_skipped",
@@ -463,11 +463,11 @@ class LocalEmbeddingClient(EmbeddingClient):
             else:
                 logger.debug("zero_norm_vector_using_uniform_fallback", text_length=len(text))
                 # Uniform fallback for zero vectors
-                uniform_value = 1.0 / (dim ** 0.5)
+                uniform_value = 1.0 / (dim**0.5)
                 features = [uniform_value] * dim
 
             return features
-            
+
         except Exception as e:
             logger.error(
                 "hash_embedding_generation_failed",
@@ -481,11 +481,11 @@ class LocalEmbeddingClient(EmbeddingClient):
 
     def encode(self, texts: Sequence[str], batch_size: int = 256) -> NDArray[np.float32]:
         """Encode texts to embeddings using TF-IDF or hash-based fallback.
-        
+
         Args:
             texts: Sequence of texts to embed
             batch_size: Batch size (ignored for local processing)
-            
+
         Returns:
             NumPy array of embeddings with shape (len(texts), embedding_dim)
         """
@@ -495,7 +495,7 @@ class LocalEmbeddingClient(EmbeddingClient):
 
         start_time = time.time()
         text_count = len(texts)
-        
+
         logger.info(
             "local_embedding_encoding_started",
             text_count=text_count,
@@ -510,10 +510,10 @@ class LocalEmbeddingClient(EmbeddingClient):
         if self._vectorizer is not None:
             try:
                 logger.debug("using_tfidf_vectorizer_for_encoding")
-                
+
                 # Fit and transform texts using TF-IDF
                 tfidf_matrix = self._vectorizer.fit_transform(texts)
-                
+
                 # Handle scipy sparse matrix or numpy array
                 if hasattr(tfidf_matrix, "toarray"):
                     # Cast scipy sparse matrix result
@@ -521,9 +521,9 @@ class LocalEmbeddingClient(EmbeddingClient):
                     embeddings = sparse_array.astype(np.float32)
                 else:
                     embeddings = np.asarray(tfidf_matrix, dtype=np.float32)
-                
+
                 duration_ms = (time.time() - start_time) * 1000
-                
+
                 logger.info(
                     "tfidf_encoding_completed_successfully",
                     text_count=text_count,
@@ -531,16 +531,16 @@ class LocalEmbeddingClient(EmbeddingClient):
                     duration_ms=duration_ms,
                     method="sklearn_tfidf",
                 )
-                
+
                 return cast("NDArray[np.float32]", embeddings)
-                
+
             except Exception as e:
                 logger.warning(
                     "tfidf_encoding_failed_using_hash_fallback",
                     error=str(e),
                     error_type=type(e).__name__,
                     text_count=text_count,
-                    fallback_method="hash_based_embeddings"
+                    fallback_method="hash_based_embeddings",
                 )
 
         # Ultra-lightweight fallback: hash-based embeddings
@@ -549,11 +549,11 @@ class LocalEmbeddingClient(EmbeddingClient):
             text_count=text_count,
             embedding_dimension=self._fallback_dim,
         )
-        
+
         try:
             embeddings = []
             failed_count = 0
-            
+
             for i, text in enumerate(texts):
                 try:
                     embedding = self._simple_hash_embedding(text, self._fallback_dim)
@@ -571,7 +571,7 @@ class LocalEmbeddingClient(EmbeddingClient):
 
             result = np.asarray(embeddings, dtype=np.float32)
             duration_ms = (time.time() - start_time) * 1000
-            
+
             logger.info(
                 "hash_based_encoding_completed",
                 text_count=text_count,
@@ -581,9 +581,9 @@ class LocalEmbeddingClient(EmbeddingClient):
                 duration_ms=duration_ms,
                 method="hash_based",
             )
-            
+
             return result
-            
+
         except Exception as e:
             logger.error(
                 "hash_based_encoding_completely_failed",
@@ -602,21 +602,21 @@ class LocalEmbeddingClient(EmbeddingClient):
 
 def get_embedding_client(provider: str | None = None) -> EmbeddingClient:
     """Get an embedding client based on the specified provider.
-    
+
     Args:
         provider: Embedding provider name. If None, uses EMBEDDINGS_PROVIDER env var
                  or defaults to 'azure'.
-                 
+
     Returns:
         Configured embedding client instance
-        
+
     Raises:
         ValueError: If provider is unknown
         RuntimeError: If client initialization fails
     """
     base = provider if provider is not None else (os.getenv("EMBEDDINGS_PROVIDER") or "azure")
     p = base.lower().strip()
-    
+
     # Parse optional dimensions
     dims_str = os.getenv("EMBEDDINGS_DIMENSIONS")
     dims = None
@@ -637,14 +637,14 @@ def get_embedding_client(provider: str | None = None) -> EmbeddingClient:
                 error=str(e),
             )
             dims = None
-    
+
     logger.info(
         "initializing_embedding_client",
         provider=p,
         dimensions=dims,
         env_provider=os.getenv("EMBEDDINGS_PROVIDER"),
     )
-    
+
     try:
         client: EmbeddingClient
         if p == "azure":
@@ -668,16 +668,16 @@ def get_embedding_client(provider: str | None = None) -> EmbeddingClient:
                 available_providers=available_providers,
             )
             raise ValueError(f"Unknown embeddings provider: {provider}")
-        
+
         logger.info(
             "embedding_client_initialized_successfully",
             provider=p,
             client_type=type(client).__name__,
             dimensions=dims,
         )
-        
+
         return client
-        
+
     except Exception as e:
         logger.error(
             "failed_to_initialize_embedding_client",

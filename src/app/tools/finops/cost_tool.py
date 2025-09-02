@@ -6,10 +6,11 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from app.tools.base import Tool, ToolResult
+from app.core.logging import get_logger
 
 from .analyzer import CostAnalyzer, CostManagementSystem, CostOptimizationStrategy
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ParsingError(ValueError):
@@ -59,7 +60,8 @@ class AzureCosts(Tool):
             start_date = self._parse_date(kwargs.get("start_date")) or (
                 datetime.utcnow() - timedelta(days=30)
             )
-            end_date = self._parse_date(kwargs.get("end_date")) or datetime.utcnow()
+            end_date = self._parse_date(
+                kwargs.get("end_date")) or datetime.utcnow()
 
             items = await self.analyzer.analyze([res], start_date, end_date)
             cost = items[0] if items else None
@@ -178,7 +180,8 @@ class AzureCosts(Tool):
                     snippet = str(v)[:100]
                     logger.warning("Invalid threshold item: %s", snippet)
                     if not tolerant:
-                        raise ParsingError(f"Invalid threshold value: {v}") from exc
+                        raise ParsingError(
+                            f"Invalid threshold value: {v}") from exc
             return out or None
         snippet = str(value)[:100]
         logger.warning("Unsupported thresholds type: %s", snippet)

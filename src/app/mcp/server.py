@@ -26,6 +26,7 @@ from app.mcp.tools.integrated_analytics import register_integrated_analytics_too
 from app.mcp.tools.security_advisor import register_security_advisor_tool
 from app.mcp.tools.what_if import register as register_what_if
 from app.observability.otel_fixes import ensure_proper_otel_initialization
+from app.core.logging import get_logger
 from app.platform.audit.logger import AuditLogger
 from app.tools.registry import ensure_tools_loaded, list_tools
 
@@ -34,7 +35,7 @@ from .resources import ResourceManager
 ensure_proper_otel_initialization()
 
 
-logger = logging.getLogger("app.mcp.server")
+logger = get_logger("app.mcp.server")
 
 
 class MCPServer:

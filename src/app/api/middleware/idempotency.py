@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
-from typing import Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -8,7 +9,7 @@ from starlette.responses import JSONResponse, Response
 
 
 class IdempotencyMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app, window_seconds: int = 30) -> None:
+    def __init__(self, app: Any, window_seconds: int = 30) -> None:
         super().__init__(app)
         self._window = window_seconds
         self._inflight: dict[str, float] = {}

@@ -62,17 +62,17 @@ class AgentFactory:
 
         if normalized == "provisioning":
             from app.ai.agents.provisioning import ProvisioningAgent, ProvisioningAgentConfig
-            
+
             user_id = kwargs.get("user_id", "system")
             if not isinstance(user_id, str):
                 logger.warning("invalid user_id type %s, using 'system'", type(user_id))
                 user_id = "system"
-            
+
             config = kwargs.get("config")
             if config is not None and not isinstance(config, dict | ProvisioningAgentConfig):
                 logger.warning("invalid config type %s, using None", type(config))
                 config = None
-            
+
             provisioning_agent: Agent[Any, Any] = ProvisioningAgent(
                 user_id=user_id,
                 context=context,
@@ -167,18 +167,18 @@ class AgentFactory:
         if not isinstance(config, dict):
             logger.error("from_config expects dict, got %r", type(config))
             raise TypeError("config must be a dict")
-        
+
         cfg = dict(config)
         if "type" not in cfg:
             logger.error("from_config missing required key 'type'")
             raise KeyError("config['type'] is required")
-        
+
         agent_type = str(cfg.pop("type"))
         context_cfg = dict(cfg.pop("context", {}))
-        
+
         try:
             context_kwargs: dict[str, Any] = {}
-            
+
             if "user_id" in context_cfg:
                 context_kwargs["user_id"] = str(context_cfg["user_id"])
             if "thread_id" in context_cfg:
@@ -234,7 +234,7 @@ class AgentFactory:
                 context_kwargs["cache_ttl_seconds"] = cache_ttl
             if "metadata" in context_cfg and isinstance(context_cfg["metadata"], dict):
                 context_kwargs["metadata"] = dict(context_cfg["metadata"])
-            
+
             context = AgentContext(**context_kwargs)
             logger.debug(
                 "created AgentContext for agent_type='%s' with user_id='%s', env='%s', dry_run=%s",
@@ -243,11 +243,11 @@ class AgentFactory:
                 context.environment,
                 context.dry_run,
             )
-            
+
         except (ValueError, TypeError, KeyError) as e:
             logger.error("failed to create AgentContext from config: %s", e)
             raise ValueError(f"Invalid context configuration: {e}") from e
-        
+
         try:
             agent = cls.create(agent_type, context, **cfg)
             logger.info(

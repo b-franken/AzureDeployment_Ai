@@ -8,10 +8,11 @@ from azure.core.credentials import AccessToken, TokenCredential
 from azure.core.credentials_async import AsyncTokenCredential
 from azure.core.exceptions import HttpResponseError
 
+from app.core.logging import get_logger
 from ..clients import Clients
 from ..validators import validate_name
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class _AsyncToSyncCredential(TokenCredential):

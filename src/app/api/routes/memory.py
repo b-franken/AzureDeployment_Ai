@@ -22,9 +22,10 @@ from pydantic import BaseModel, Field
 from app.api.routes.chat import get_optional_user, get_user_email
 from app.api.services.memory_service import get_memory_service
 from app.observability.app_insights import app_insights
+from app.core.logging import get_logger
 
 router = APIRouter(prefix="/memory", tags=["memory"])
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
 
 

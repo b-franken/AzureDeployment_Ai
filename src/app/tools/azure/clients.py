@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from random import random
 from typing import Any
 
+import structlog
 from azure.core.credentials import TokenCredential
 from azure.core.credentials_async import AsyncTokenCredential
 from azure.core.exceptions import (
@@ -27,20 +28,24 @@ from azure.mgmt.containerregistry.aio import ContainerRegistryManagementClient
 from azure.mgmt.containerservice.aio import ContainerServiceClient
 from azure.mgmt.cosmosdb.aio import CosmosDBManagementClient
 from azure.mgmt.keyvault.aio import KeyVaultManagementClient
-from azure.mgmt.loganalytics.aio import LogAnalyticsManagementClient  # type: ignore[import-untyped]
+# type: ignore[import-untyped]
+from azure.mgmt.loganalytics.aio import LogAnalyticsManagementClient
 from azure.mgmt.msi.aio import ManagedServiceIdentityClient
 from azure.mgmt.network.aio import NetworkManagementClient
 from azure.mgmt.privatedns.aio import PrivateDnsManagementClient
 from azure.mgmt.redis.aio import RedisManagementClient
 from azure.mgmt.resource import ResourceManagementClient
-from azure.mgmt.sql.aio import SqlManagementClient  # type: ignore[import-untyped]
+# type: ignore[import-untyped]
+from azure.mgmt.sql.aio import SqlManagementClient
 from azure.mgmt.storage.aio import StorageManagementClient
 from azure.mgmt.web.aio import WebSiteManagementClient
 
 from app.core.azure_auth import arm_scopes, build_async_credential, build_credential
 from app.core.config import settings
+from app.core.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
+std_logger = get_logger(__name__)
 
 
 def _sub_id(explicit: str | None) -> str:
@@ -85,14 +90,27 @@ class Clients:
     pdns: PrivateDnsManagementClient
 
     async def run(
-        self, fn: Callable[..., Any] | Callable[..., Awaitable[Any]], *args: Any, **kwargs: Any
+        self,
+        fn: Callable[..., Any] | Callable[..., Awaitable[Any]],
+        *args: Any,
+        **kwargs: Any,
     ) -> Any:
-        if inspect.iscoroutinefunction(fn):
-            return await fn(*args, **kwargs)
-        res = fn(*args, **kwargs)
-        if inspect.isawaitable(res):
-            return await res
-        return await asyncio.to_thread(fn, *args, **kwargs)
+        try:
+            if inspect.iscoroutinefunction(fn):
+                return await fn(*args, **kwargs)
+            res = fn(*args, **kwargs)
+            if inspect.isawaitable(res):
+                return await res
+            return await asyncio.to_thread(fn, *args, **kwargs)
+        except Exception as e:
+            logger.error(
+                "client_run_error",
+                function_name=getattr(fn, "__name__", str(fn)),
+                error=str(e),
+                error_type=type(e).__name__,
+                subscription_id=self.subscription_id,
+            )
+            raise
 
     async def close(self) -> None:
         # Close client connections first
@@ -126,22 +144,44 @@ class Clients:
                         await asyncio.to_thread(close)
             except Exception as e:
                 # Log individual client close errors but don't fail the whole cleanup
-                logger.debug(f"Error closing client {attr}: {e}")
+                logger.warning(
+                    "client_close_error",
+                    client_name=attr,
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    subscription_id=self.subscription_id,
+                )
 
         # Close credentials last
         try:
             cclose = getattr(self.cred, "close", None)
             if callable(cclose):
-                await cclose()
+                if inspect.iscoroutinefunction(cclose):
+                    await cclose()
+                else:
+                    # Check if result is awaitable before awaiting
+                    result = cclose()
+                    if inspect.isawaitable(result):
+                        await result
         except Exception as e:
-            logger.debug(f"Error closing async credential: {e}")
+            logger.warning(
+                "async_credential_close_error",
+                error=str(e),
+                error_type=type(e).__name__,
+                subscription_id=self.subscription_id,
+            )
 
         try:
             sclose = getattr(self.cred_sync, "close", None)
             if callable(sclose):
                 await asyncio.to_thread(sclose)
         except Exception as e:
-            logger.debug(f"Error closing sync credential: {e}")
+            logger.warning(
+                "sync_credential_close_error",
+                error=str(e),
+                error_type=type(e).__name__,
+                subscription_id=self.subscription_id,
+            )
 
 
 _CACHE: OrderedDict[str, tuple[Clients, int]] = OrderedDict()
@@ -173,7 +213,8 @@ async def _dispose(clients: Clients) -> None:
         # Log but don't propagate disposal errors as they're not critical
         logger.warning(
             "azure_clients.dispose_error",
-            extra={"subscription_id": clients.subscription_id, "error": str(exc)},
+            extra={"subscription_id": clients.subscription_id,
+                   "error": str(exc)},
             exc_info=True,
         )
 
@@ -210,7 +251,8 @@ async def _build_clients(sid: str) -> tuple[Clients, int]:
         )
         logger.debug(
             "azure_clients.build.end",
-            extra={"subscription_id": sid, "expires_in_s": expiry - int(time.time())},
+            extra={"subscription_id": sid,
+                   "expires_in_s": expiry - int(time.time())},
         )
         return clients, expiry
     except Exception as exc:
@@ -218,12 +260,24 @@ async def _build_clients(sid: str) -> tuple[Clients, int]:
         try:
             close_async = getattr(cred_async, "close", None)
             if callable(close_async):
-                await close_async()
-        except Exception:
-            pass  # Ignore cleanup errors
+                if inspect.iscoroutinefunction(close_async):
+                    await close_async()
+                else:
+                    # Check if result is awaitable before awaiting
+                    result = close_async()
+                    if inspect.isawaitable(result):
+                        await result
+        except Exception as cleanup_exc:
+            logger.warning(
+                "credential_cleanup_error",
+                error=str(cleanup_exc),
+                error_type=type(cleanup_exc).__name__,
+                subscription_id=sid,
+            )
         logger.error(
             "azure_clients.build.error",
-            extra={"subscription_id": sid, "error_type": type(exc).__name__, "error": str(exc)},
+            extra={"subscription_id": sid, "error_type": type(
+                exc).__name__, "error": str(exc)},
             exc_info=True,
         )
         raise
@@ -240,10 +294,12 @@ async def get_clients(subscription_id: str | None) -> Clients:
                 # Schedule disposal asynchronously to avoid blocking
                 asyncio.create_task(_dispose(clients))
                 _CACHE.pop(sid, None)
-                logger.debug("azure_clients.cache.expired", extra={"subscription_id": sid})
+                logger.debug("azure_clients.cache.expired",
+                             extra={"subscription_id": sid})
             else:
                 _CACHE.move_to_end(sid)
-                logger.debug("azure_clients.cache.hit", extra={"subscription_id": sid})
+                logger.debug("azure_clients.cache.hit",
+                             extra={"subscription_id": sid})
                 return clients
 
         # Build new clients
@@ -257,12 +313,14 @@ async def get_clients(subscription_id: str | None) -> Clients:
                 _, (old_clients, _) = _CACHE.popitem(last=False)
                 asyncio.create_task(_dispose(old_clients))
 
-            logger.debug("azure_clients.cache.miss", extra={"subscription_id": sid})
+            logger.debug("azure_clients.cache.miss",
+                         extra={"subscription_id": sid})
             return clients
         except Exception as exc:
             logger.error(
                 "azure_clients.get_clients.error",
-                extra={"subscription_id": sid, "error_type": type(exc).__name__, "error": str(exc)},
+                extra={"subscription_id": sid, "error_type": type(
+                    exc).__name__, "error": str(exc)},
                 exc_info=True,
             )
             raise

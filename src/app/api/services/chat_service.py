@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+
+from app.core.logging import get_logger
 import uuid
 from collections.abc import Sequence
 from typing import Any, Literal, cast
@@ -23,7 +25,7 @@ def cache_rich_output(correlation_id: str, output: str) -> None:
         logger.info(f"Cached rich output for correlation {correlation_id}")
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 async def run_chat(

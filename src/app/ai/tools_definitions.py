@@ -3,9 +3,10 @@ from __future__ import annotations
 import copy
 import logging
 
+from app.core.logging import get_logger
 from app.tools.registry import list_tools
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _to_openai_tool_schema(

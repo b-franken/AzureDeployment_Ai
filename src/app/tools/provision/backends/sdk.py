@@ -5,13 +5,14 @@ from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 from app.common.async_pool import bounded_gather
 from app.tools.base import ToolResult
+from app.core.logging import get_logger
 
 from .base import ApplyResult, Backend, PlanResult
 
 if TYPE_CHECKING:
     from app.tools.azure.tool import AzureProvision
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ActionArgs(TypedDict, total=False):

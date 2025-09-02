@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -12,8 +11,9 @@ from app.ai.agents.reactive import Event, EventType, ReactiveAgent
 from app.ai.agents.types import ExecutionPlan, ExecutionResult, PlanStep, StepResult, StepType
 from app.ai.generator import generate_response
 from app.ai.tools_router import maybe_call_tool
+from app.core.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class CoordinatorAgent(Agent[dict[str, Any], dict[str, Any]]):
@@ -225,10 +225,23 @@ class CoordinatorAgent(Agent[dict[str, Any], dict[str, Any]]):
         s = raw.strip()
         try:
             return StepType(s.lower())
-        except Exception:
+        except Exception as e:
+            logger = get_logger(__name__)
+            logger.debug(
+                "Failed to parse step type with lowercase, trying uppercase",
+                raw_step=s,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
             try:
                 return StepType[s.upper()]
-            except Exception:
+            except Exception as e2:
+                logger.warning(
+                    "Failed to parse step type, using MESSAGE fallback",
+                    raw_step=s,
+                    error=str(e2),
+                    error_type=type(e2).__name__,
+                )
                 return StepType.MESSAGE
 
     def _setup_event_handlers(self) -> None:

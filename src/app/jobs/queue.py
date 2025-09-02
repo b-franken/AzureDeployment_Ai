@@ -12,8 +12,9 @@ from typing import Any, cast
 
 from app.core.cache.base import CacheBackend
 from app.core.cache.dependency import get_cache
+from app.core.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class JobStatus(Enum):

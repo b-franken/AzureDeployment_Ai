@@ -11,8 +11,9 @@ from app.ai.agents.types import ExecutionPlan, ExecutionResult, PlanStep, StepRe
 from app.ai.llm.factory import get_provider_and_model
 from app.ai.tools_router import maybe_call_tool
 from app.ai.types import Message
+from app.core.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class AgentCapability(Enum):

@@ -11,13 +11,15 @@ import logging
 import time
 from typing import Any
 
+from app.core.logging import get_logger
+
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
 from app.memory.storage import AsyncMemoryStore, MessageRole, get_async_store
 from app.observability.app_insights import app_insights
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
 
 

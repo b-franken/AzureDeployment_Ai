@@ -156,11 +156,18 @@ class AVMStrategy(ProvisioningStrategy):
                         apply_result = await self._avm_backend.apply(
                             avm_context, plan_result.bicep_path
                         )
-                        # Log apply operation for observability
+                        # Log apply operation for observability with type-safe attribute access
+                        apply_success = False
+                        if isinstance(apply_result, dict):
+                            apply_success = apply_result.get("status") == "succeeded"
+                        else:
+                            apply_success = getattr(apply_result, "success", False)
+
                         logger.info(
                             "AVM apply operation completed",
                             bicep_path=plan_result.bicep_path,
-                            apply_success=hasattr(apply_result, "success") and apply_result.success,
+                            apply_success=apply_success,
+                            apply_result_type=type(apply_result).__name__,
                         )
                         # Use plan result as preview (apply_result contains deployment details)
                         result = plan_result
@@ -170,9 +177,24 @@ class AVMStrategy(ProvisioningStrategy):
 
                 execution_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
 
-                success = (hasattr(result, "success") and result.success) or (
-                    isinstance(result, dict) and result.get("status") == "succeeded"
-                )
+                # Type-safe success determination with comprehensive logging
+                success = False
+                if isinstance(result, dict):
+                    success = result.get("status") == "succeeded"
+                    logger.debug(
+                        "AVM result success check from dict",
+                        result_status=result.get("status"),
+                        success=success,
+                        result_keys=list(result.keys()),
+                    )
+                else:
+                    success = getattr(result, "success", False)
+                    logger.debug(
+                        "AVM result success check from object",
+                        result_type=type(result).__name__,
+                        success=success,
+                        has_success_attr=hasattr(result, "success"),
+                    )
 
                 span.set_attributes(
                     {
@@ -186,27 +208,116 @@ class AVMStrategy(ProvisioningStrategy):
                     resources_affected = []
                     warnings = []
 
+                    # Type-safe resource and warning extraction with enhanced logging
                     if isinstance(result, dict):
+                        # Handle dict-based results (from apply operations)
                         if "resources" in result and result["resources"]:
-                            resources_affected = [
-                                r.get("name", "unnamed") for r in result["resources"]
-                            ]
+                            try:
+                                resources_affected = [
+                                    r.get("name", "unnamed") if isinstance(r, dict) else str(r)
+                                    for r in result["resources"]
+                                ]
+                                logger.debug(
+                                    "Extracted resources from dict result",
+                                    resource_count=len(resources_affected),
+                                    # Log first 5 for brevity
+                                    resources=resources_affected[:5],
+                                )
+                            except (TypeError, AttributeError) as e:
+                                logger.warning(
+                                    "Failed to extract resource names from dict result",
+                                    error=str(e),
+                                    resources_type=type(result.get("resources")).__name__,
+                                )
+                                resources_affected = []
+
                         if "warnings" in result and result["warnings"]:
-                            warnings = result["warnings"]
+                            try:
+                                warnings = list(result["warnings"]) if result["warnings"] else []
+                                logger.debug(
+                                    "Extracted warnings from dict result",
+                                    warning_count=len(warnings),
+                                )
+                            except (TypeError, ValueError) as e:
+                                logger.warning(
+                                    "Failed to extract warnings from dict result",
+                                    error=str(e),
+                                    warnings_type=type(result.get("warnings")).__name__,
+                                )
+                                warnings = []
+
                         deployment_id = result.get("deployment_id", "")
-                        if deployment_id:
-                            resource_name_from_deployment = deployment_id.split("/")[-1].replace(
-                                "avm-deployment-", ""
-                            )
-                            if resource_name_from_deployment:
-                                resources_affected.append(resource_name_from_deployment)
+                        if deployment_id and isinstance(deployment_id, str):
+                            try:
+                                resource_name_from_deployment = deployment_id.split("/")[
+                                    -1
+                                ].replace("avm-deployment-", "")
+                                if (
+                                    resource_name_from_deployment
+                                    and resource_name_from_deployment != deployment_id
+                                ):
+                                    resources_affected.append(resource_name_from_deployment)
+                                    logger.debug(
+                                        "Extracted resource name from deployment ID",
+                                        deployment_id=deployment_id,
+                                        extracted_name=resource_name_from_deployment,
+                                    )
+                            except (IndexError, AttributeError) as e:
+                                logger.warning(
+                                    "Failed to extract resource name from deployment ID",
+                                    deployment_id=deployment_id,
+                                    error=str(e),
+                                )
                     else:
-                        if hasattr(result, "resources") and result.resources:
-                            resources_affected = [
-                                r.get("name", "unnamed") for r in result.resources
-                            ]
-                        if hasattr(result, "warnings"):
-                            warnings = result.warnings
+                        logger.debug(
+                            "Processing non-dict result object",
+                            result_type=type(result).__name__,
+                            result_attributes=[
+                                attr for attr in dir(result) if not attr.startswith("_")
+                            ],
+                        )
+
+                        if hasattr(result, "validation_results") and result.validation_results:
+                            try:
+                                validation_data = result.validation_results
+                                if (
+                                    isinstance(validation_data, dict)
+                                    and "warnings" in validation_data
+                                ):
+                                    warnings = list(validation_data["warnings"])
+                                    logger.debug(
+                                        "Extracted warnings from validation results",
+                                        warning_count=len(warnings),
+                                    )
+                            except (TypeError, AttributeError) as e:
+                                logger.warning(
+                                    "Failed to extract warnings from validation results",
+                                    error=str(e),
+                                )
+
+                        if hasattr(result, "cost_estimate") and result.cost_estimate:
+                            try:
+                                cost_data = result.cost_estimate
+                                if isinstance(cost_data, dict) and "resources" in cost_data:
+                                    cost_resources = cost_data["resources"]
+                                    if isinstance(cost_resources, list):
+                                        resources_affected = [
+                                            (
+                                                r.get("name", "unnamed")
+                                                if isinstance(r, dict)
+                                                else str(r)
+                                            )
+                                            for r in cost_resources
+                                        ]
+                                        logger.debug(
+                                            "Extracted resources from cost estimate",
+                                            resource_count=len(resources_affected),
+                                        )
+                            except (TypeError, AttributeError) as e:
+                                logger.warning(
+                                    "Failed to extract resources from cost estimate",
+                                    error=str(e),
+                                )
 
                     app_insights.track_custom_event(
                         "avm_strategy_succeeded",
@@ -1027,7 +1138,7 @@ class SDKFallbackStrategy(ProvisioningStrategy):
         """Clean up SDK fallback strategy resources."""
         with tracer.start_as_current_span("sdk_fallback_cleanup") as span:
             try:
-                if hasattr(self, '_action_registry'):
+                if hasattr(self, "_action_registry"):
                     # SDK fallback cleanup if needed
                     pass
                 span.set_status(Status(StatusCode.OK))

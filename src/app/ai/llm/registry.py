@@ -8,8 +8,9 @@ from dataclasses import dataclass
 import httpx
 
 from app.core.config import OLLAMA_BASE_URL
+from app.core.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

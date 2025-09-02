@@ -8,9 +8,11 @@ from typing import Any, Literal, cast
 
 from opentelemetry import trace
 
+from app.core.logging import get_logger
+
 from .types import Anomaly
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 tracer = trace.get_tracer("app.observability.ai.detector")
 
 Severity = Literal["low", "medium", "high", "critical"]

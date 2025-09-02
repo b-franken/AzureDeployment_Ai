@@ -5,6 +5,9 @@ from typing import Any
 
 from app.ai.llm.factory import get_provider_and_model
 from app.ai.nlu.unified_parser import DeploymentIntent, UnifiedParseResult, unified_nlu_parser
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 SYSTEM_PROMPT = (
     "You are a DevOps assistant. Convert free text into an intent for "
@@ -136,7 +139,14 @@ def _pick_args(raw: Any) -> dict[str, Any]:
         try:
             j = json.loads(raw)
             return j if isinstance(j, dict) else {}
-        except Exception:
+        except Exception as e:
+            logger.error(
+                "Failed to parse LLM function arguments",
+                raw_input=str(raw)[:200],  # Limit to avoid logging sensitive data
+                raw_type=type(raw).__name__,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
             return {}
     if isinstance(raw, dict):
         return dict(raw)

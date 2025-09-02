@@ -3,11 +3,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from app.core.logging import get_logger
 from ..clients import Clients
 from ..idempotency import safe_get
 from ..validators import validate_location
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 async def create_resource_group(

@@ -8,6 +8,7 @@ from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
 from app.ai.nlu import parse_provision_request
+from app.ai.nlu.unified_parser import DeploymentIntent
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.plugins.manager import PluginManager
@@ -19,6 +20,7 @@ from app.core.provisioning import (
     ProvisioningOrchestrator,
     SDKFallbackStrategy,
 )
+from app.core.provisioning.execution_context import ProvisioningPhase
 from app.core.vector.docker_init import get_docker_plugin_manager
 from app.memory.agent_persistence import get_agent_memory
 from app.observability.app_insights import app_insights
@@ -188,6 +190,9 @@ class IntelligentAzureProvision(Tool):
                 if not validation_result.success:
                     return cast(ToolResult, validation_result.to_tool_result())
 
+                # Initialize context variable to ensure it's always bound
+                context: ProvisionContext | None = None
+
                 # Use vector-enhanced provisioning if available
                 if self.vector_enhanced_tool:
                     span.set_attribute("execution.vector_enhanced", True)
@@ -230,7 +235,7 @@ class IntelligentAzureProvision(Tool):
                     execution_result = await self.orchestrator.execute_with_fallback(context)
 
                 # Store execution result (context will be created if using vector-enhanced)
-                if not self.vector_enhanced_tool:
+                if not self.vector_enhanced_tool and context is not None:
                     await self._store_execution_result(context, execution_result)
                 # Vector-enhanced tool already handles storage internally
 
@@ -315,29 +320,67 @@ class IntelligentAzureProvision(Tool):
 
     async def _create_provision_context(self, **kwargs: Any) -> ProvisionContext:
         with tracer.start_as_current_span("provision_create_context") as span:
-            correlation_id = kwargs.get("correlation_id") or str(uuid.uuid4())
+            try:
+                correlation_id = kwargs.get("correlation_id") or str(uuid.uuid4())
 
-            context = ProvisionContext(  # type: ignore[call-arg]
-                correlation_id=correlation_id,
-                request_text=kwargs.get("request", "").strip(),
-                user_id=kwargs.get("user_id", "system"),
-                subscription_id=kwargs.get("subscription_id"),
-                resource_group=kwargs.get("resource_group"),
-                location=kwargs.get("location", "westeurope"),
-                environment=kwargs.get("environment", "dev"),
-                name_prefix=kwargs.get("name_prefix", "app"),
-                dry_run=kwargs.get("dry_run", True),
-                tags=kwargs.get("tags", {}),
-                enable_monitoring=kwargs.get("enable_monitoring", True),
-                cost_optimization=kwargs.get("cost_optimization", True),
-                conversation_context=kwargs.get("conversation_context", []),
-            )
+                # Validate required parameters
+                subscription_id = kwargs.get("subscription_id")
+                if not subscription_id:
+                    raise ValueError("subscription_id is required for provisioning context")
+
+                request_text = kwargs.get("request", "").strip()
+                if not request_text:
+                    raise ValueError("request text is required for provisioning context")
+
+                logger.debug(
+                    "Creating ProvisionContext",
+                    correlation_id=correlation_id,
+                    user_id=kwargs.get("user_id", "system"),
+                    subscription_id=subscription_id[:8] + "..." if subscription_id else None,
+                    resource_group=kwargs.get("resource_group"),
+                    location=kwargs.get("location", "westeurope"),
+                    environment=kwargs.get("environment", "dev"),
+                )
+
+                # Create ProvisionContext with proper parameter names matching the Pydantic model
+                context = ProvisionContext(
+                    correlation_id=correlation_id,
+                    request_text=request_text,
+                    user_id=kwargs.get("user_id", "system"),
+                    # Azure-specific parameters from AzureMixin
+                    subscription_id=subscription_id,
+                    resource_group=kwargs.get("resource_group"),
+                    location=kwargs.get("location", "westeurope"),
+                    environment=kwargs.get("environment", "dev"),
+                    name_prefix=kwargs.get("name_prefix", "app"),
+                    dry_run=kwargs.get("dry_run", True),
+                    # Additional configuration
+                    tags=kwargs.get("tags", {}),
+                    enable_monitoring=kwargs.get("enable_monitoring", True),
+                    cost_optimization=kwargs.get("cost_optimization", True),
+                    conversation_context=kwargs.get("conversation_context", []),
+                )
+
+            except (ValueError, TypeError) as e:
+                error_msg = f"Failed to create provision context: {str(e)}"
+                span.record_exception(e)
+                span.set_status(Status(StatusCode.ERROR, error_msg))
+
+                logger.error(
+                    "ProvisionContext creation failed",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    provided_keys=list(kwargs.keys()),
+                )
+                raise ValueError(error_msg) from e
 
             initial_phase = self.phase_manager.determine_provisioning_phase(context)
             context.advance_phase(initial_phase)
 
             initial_phase_value = (
-                initial_phase.value if hasattr(initial_phase, "value") else str(initial_phase)
+                initial_phase.value
+                if isinstance(initial_phase, ProvisioningPhase)
+                else str(initial_phase)
             )
 
             span.set_attributes(
@@ -388,20 +431,53 @@ class IntelligentAzureProvision(Tool):
 
                 nlu_result = parse_provision_request(context.request_text)
 
-                if hasattr(nlu_result, "resources") and nlu_result.resources:
-                    context.parsed_resources = nlu_result.resources
-                elif hasattr(nlu_result, "resource_type") and nlu_result.resource_type:
-                    context.parsed_resources = [
-                        {
-                            "resource_type": nlu_result.resource_type,
-                            "resource_name": getattr(nlu_result, "resource_name", "unnamed"),
-                            "parameters": getattr(nlu_result, "parameters", {}),
-                        }
-                    ]
+                # Extract resources from UnifiedParseResult
+                # UnifiedParseResult doesn't have a 'resources' attribute,
+                # but has individual resource fields
+                if hasattr(nlu_result, "resource_type") and nlu_result.resource_type:
+                    # Build resource from UnifiedParseResult fields
+                    resource_entry = {
+                        "resource_type": nlu_result.resource_type,
+                        "resource_name": getattr(nlu_result, "resource_name", "unnamed"),
+                        "parameters": getattr(nlu_result, "parameters", {}),
+                        "action": getattr(nlu_result, "action", "create"),
+                        "confidence": getattr(nlu_result, "confidence", 0.0),
+                    }
+                    context.parsed_resources = [resource_entry]
 
-                intent_value = getattr(nlu_result, "intent", "unknown")
-                if hasattr(intent_value, "value"):
-                    intent_value = intent_value.value
+                    logger.debug(
+                        "Extracted resource from UnifiedParseResult",
+                        resource_type=nlu_result.resource_type,
+                        resource_name=resource_entry["resource_name"],
+                        action=resource_entry["action"],
+                        confidence=resource_entry["confidence"],
+                    )
+                else:
+                    logger.warning(
+                        "No valid resource_type found in UnifiedParseResult",
+                        available_attributes=[
+                            attr for attr in dir(nlu_result) if not attr.startswith("_")
+                        ],
+                    )
+
+                # Extract intent value with proper type checking
+                intent_raw: DeploymentIntent | str | Any = getattr(nlu_result, "intent", "unknown")
+                # Handle both enum values (with .value) and string values
+                if isinstance(intent_raw, DeploymentIntent):
+                    # Intent is an enum, extract its value
+                    intent_value: str = intent_raw.value
+                elif isinstance(intent_raw, str):
+                    # Intent is already a string, use as-is
+                    intent_value = intent_raw
+                else:
+                    # Fallback: convert to string
+                    intent_value = str(intent_raw)
+
+                logger.debug(
+                    "Extracted intent from UnifiedParseResult",
+                    intent_type=type(intent_value).__name__,
+                    intent_value=intent_value,
+                )
 
                 context.execution_metadata.update(
                     {

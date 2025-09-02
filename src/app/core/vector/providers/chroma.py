@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
     class ChromaDBClient(Protocol):
         def heartbeat(self) -> None: ...
+
         def create_collection(
             self,
             name: str,
@@ -40,6 +41,7 @@ if TYPE_CHECKING:
             metadatas: list[dict[str, Any]],
         ) -> None: ...
         def delete(self, ids: list[str]) -> None: ...
+
         def query(
             self,
             query_embeddings: list[list[float]] | None = None,
@@ -48,6 +50,7 @@ if TYPE_CHECKING:
             where: dict[str, Any] | None = None,
             include: list[str] | None = None,
         ) -> dict[str, Any]: ...
+
         def get(
             self,
             ids: list[str] | None = None,
@@ -88,8 +91,6 @@ class ChromaProvider(VectorProvider):
         super().__init__(config)
         self._client: Any = None
         self._collections: dict[str, Any] = {}
-
-        # ChromaDB will be imported dynamically when needed
 
     async def initialize(self) -> None:
         with tracer.start_as_current_span("vectordatabase_initialize") as span:
@@ -208,6 +209,11 @@ class ChromaProvider(VectorProvider):
         with tracer.start_as_current_span("vectordatabase_upsert_vectors") as span:
             span.set_attributes({"collection.name": collection_name, "vectors.count": len(vectors)})
 
+            ids = []
+            embeddings = []
+            documents = []
+            metadatas = []
+
             try:
                 collection = self._get_collection(collection_name)
 
@@ -228,7 +234,6 @@ class ChromaProvider(VectorProvider):
             except Exception as e:
                 span.record_exception(e)
                 span.set_status(Status(StatusCode.ERROR, str(e)))
-                # Log the actual ChromaDB error for debugging
                 import logging
 
                 logging.error(f"ChromaDB upsert failed: {str(e)}")
@@ -304,7 +309,8 @@ class ChromaProvider(VectorProvider):
                 search_results = []
                 if results["ids"] and results["ids"][0]:
                     for i in range(len(results["ids"][0])):
-                        score = 1.0 - results["distances"][0][i]  # Convert distance to similarity
+                        # Convert distance to similarity
+                        score = 1.0 - results["distances"][0][i]
 
                         if score >= query.threshold:
                             result = VectorSearchResult(

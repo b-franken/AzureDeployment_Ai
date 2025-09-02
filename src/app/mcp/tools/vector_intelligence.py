@@ -539,10 +539,10 @@ class VectorIntelligenceTools:
                 "frequent_configurations": [],
                 "optimization_opportunities": [],
             }
-            
+
             # Always initialize deployments to ensure variable is bound
             deployments: list[dict[str, Any]] = []
-            
+
             if context_result.success:
                 try:
                     deployments = context_result.result.get("semantic_matches", [])
@@ -582,7 +582,7 @@ class VectorIntelligenceTools:
                             deployment_type=type(deployment).__name__,
                         )
                         continue
-                        
+
                     metadata = deployment.get("metadata", {})
                     if not isinstance(metadata, dict):
                         self.logger.warning(
@@ -591,10 +591,10 @@ class VectorIntelligenceTools:
                             deployment_id=deployment.get("id", "unknown"),
                         )
                         continue
-                        
+
                     resource_type = metadata.get("resource_type", "unknown")
                     success = metadata.get("success", False)
-                    
+
                     # Ensure resource_type is a string
                     if not isinstance(resource_type, str):
                         resource_type = str(resource_type) if resource_type else "unknown"
@@ -615,15 +615,15 @@ class VectorIntelligenceTools:
                     patterns["success_rates_by_type"][resource_type]["total"] += 1
                     if success:
                         patterns["success_rates_by_type"][resource_type]["successful"] += 1
-                        
+
                 except Exception as e:
                     # Log but don't fail the entire analysis for one bad deployment
                     self.logger.error(
                         "Error processing deployment in pattern analysis",
                         correlation_id=correlation_id,
                         deployment_id=(
-                            deployment.get("id", "unknown") 
-                            if isinstance(deployment, dict) 
+                            deployment.get("id", "unknown")
+                            if isinstance(deployment, dict)
                             else "invalid"
                         ),
                         error=str(e),
@@ -636,8 +636,8 @@ class VectorIntelligenceTools:
                 for resource_type, stats in patterns["success_rates_by_type"].items():
                     # Defensive programming: ensure stats is a dict with required keys
                     if (
-                        not isinstance(stats, dict) 
-                        or "total" not in stats 
+                        not isinstance(stats, dict)
+                        or "total" not in stats
                         or "successful" not in stats
                     ):
                         self.logger.warning(
@@ -647,7 +647,7 @@ class VectorIntelligenceTools:
                             stats=stats,
                         )
                         continue
-                        
+
                     # Calculate success rate with zero-division protection
                     stats["success_rate"] = (
                         stats["successful"] / stats["total"] if stats["total"] > 0 else 0.0
@@ -668,7 +668,7 @@ class VectorIntelligenceTools:
                                 ),
                             }
                         )
-                        
+
                 self.logger.info(
                     "Pattern analysis completed successfully",
                     correlation_id=correlation_id,
@@ -676,7 +676,7 @@ class VectorIntelligenceTools:
                     resource_types_analyzed=len(patterns["success_rates_by_type"]),
                     optimization_opportunities=len(patterns["optimization_opportunities"]),
                 )
-                        
+
             except Exception as e:
                 self.logger.error(
                     "Error during success rate calculation and optimization analysis",

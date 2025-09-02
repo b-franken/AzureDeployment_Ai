@@ -8,10 +8,11 @@ from azure.mgmt.eventhub import EventHubManagementClient
 from azure.mgmt.eventhub.models import EHNamespace
 from azure.mgmt.eventhub.models import Sku as EventHubSku
 
+from app.core.logging import get_logger
 from ..clients import Clients
 from ..utils.credentials import ensure_sync_credential
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 async def create_eventhub(

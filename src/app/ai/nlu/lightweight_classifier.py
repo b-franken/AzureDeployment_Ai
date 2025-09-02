@@ -5,7 +5,9 @@ from __future__ import annotations
 import logging
 import re
 
-logger = logging.getLogger(__name__)
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class LightweightIntentClassifier:

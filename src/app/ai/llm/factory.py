@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from collections.abc import Callable
 from threading import Lock
 from time import monotonic
@@ -14,8 +13,9 @@ from app.ai.llm.base import LLMProvider
 from app.ai.llm.registry import ProviderAdapter, registry
 from app.ai.llm.unified_provider import UnifiedLLMProvider
 from app.core.config import GEMINI_MODEL, LLM_PROVIDER, OLLAMA_MODEL, OPENAI_MODEL
+from app.core.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _reg = registry()
 
@@ -61,7 +61,15 @@ def _fetch_openai_models() -> list[str]:
             data = r.json()
             models = [m["id"] for m in data.get("data", []) if isinstance(m, dict) and m.get("id")]
             return models or fallback
-    except Exception:
+    except Exception as e:
+        logger = get_logger(__name__)
+        logger.warning(
+            "Failed to fetch OpenAI models from API, using fallback list",
+            api_base=base,
+            fallback_models=fallback,
+            error=str(e),
+            error_type=type(e).__name__,
+        )
         return fallback
 
 

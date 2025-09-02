@@ -11,8 +11,9 @@ from app.ai.agents.provisioning import ProvisioningAgent, ProvisioningAgentConfi
 from app.ai.agents.types import AgentContext
 from app.ai.tools_router import ToolExecutionContext
 from app.api.routes.auth import TokenData, require_role
+from app.core.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 # Store references to background tasks for optional introspection/cancellation
 _background_tasks: set[asyncio.Task[Any]] = set()
 

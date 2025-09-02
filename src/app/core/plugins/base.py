@@ -90,127 +90,121 @@ class Plugin(ABC):
 
     @abstractmethod
     async def shutdown(self) -> None:
-        """Shutdown the plugin. Subclasses should implement cleanup logic."""  
+        """Shutdown the plugin. Subclasses should implement cleanup logic."""
         pass
-        
+
     async def safe_initialize(self) -> None:
         """Safe wrapper for plugin initialization with comprehensive logging."""
         from app.core.logging import get_logger
-        
+
         logger = get_logger(__name__)
-        
+
         with tracer.start_as_current_span("plugin_safe_initialize") as span:
-            span.set_attributes({
-                "plugin.name": self.metadata.name,
-                "plugin.type": self.metadata.plugin_type.value,
-                "plugin.version": self.metadata.version
-            })
-            
+            span.set_attributes(
+                {
+                    "plugin.name": self.metadata.name,
+                    "plugin.type": self.metadata.plugin_type.value,
+                    "plugin.version": self.metadata.version,
+                }
+            )
+
             try:
                 logger.debug(
                     "plugin_initialize_started",
                     plugin_name=self.metadata.name,
                     plugin_type=self.metadata.plugin_type.value,
-                    plugin_version=self.metadata.version
+                    plugin_version=self.metadata.version,
                 )
-                
+
                 await self.initialize()
-                
+
                 self._initialized = True
                 self.set_status(PluginStatus.ACTIVE)
-                
-                span.set_attributes({
-                    "initialization.success": True,
-                    "plugin.initialized": True
-                })
-                
+
+                span.set_attributes({"initialization.success": True, "plugin.initialized": True})
+
                 logger.info(
                     "plugin_initialize_completed",
                     plugin_name=self.metadata.name,
                     initialized=True,
-                    status=self.status.value
+                    status=self.status.value,
                 )
-                
+
             except Exception as e:
                 self._initialized = False
                 self.set_status(PluginStatus.ERROR, e)
-                
+
                 span.record_exception(e)
-                span.set_attributes({
-                    "initialization.success": False,
-                    "initialization.error": str(e)
-                })
-                
+                span.set_attributes(
+                    {"initialization.success": False, "initialization.error": str(e)}
+                )
+
                 logger.error(
                     "plugin_initialize_failed",
                     plugin_name=self.metadata.name,
                     error=str(e),
                     error_type=type(e).__name__,
-                    plugin_status=self.status.value
+                    plugin_status=self.status.value,
                 )
                 raise
-                
+
     async def safe_shutdown(self) -> None:
         """Safe wrapper for plugin shutdown with comprehensive logging."""
         from app.core.logging import get_logger
-        
+
         logger = get_logger(__name__)
-        
+
         with tracer.start_as_current_span("plugin_safe_shutdown") as span:
-            span.set_attributes({
-                "plugin.name": self.metadata.name,
-                "plugin.type": self.metadata.plugin_type.value,
-                "plugin.current_status": self.status.value
-            })
-            
+            span.set_attributes(
+                {
+                    "plugin.name": self.metadata.name,
+                    "plugin.type": self.metadata.plugin_type.value,
+                    "plugin.current_status": self.status.value,
+                }
+            )
+
             try:
                 logger.debug(
                     "plugin_shutdown_started",
                     plugin_name=self.metadata.name,
                     current_status=self.status.value,
-                    initialized=self._initialized
+                    initialized=self._initialized,
                 )
-                
+
                 await self.shutdown()
-                
+
                 self._initialized = False
                 self.set_status(PluginStatus.INACTIVE)
-                
-                span.set_attributes({
-                    "shutdown.success": True,
-                    "plugin.initialized": False
-                })
-                
+
+                span.set_attributes({"shutdown.success": True, "plugin.initialized": False})
+
                 logger.info(
                     "plugin_shutdown_completed",
                     plugin_name=self.metadata.name,
                     shutdown_successful=True,
-                    status=self.status.value
+                    status=self.status.value,
                 )
-                
+
             except Exception as e:
                 self.set_status(PluginStatus.ERROR, e)
-                
+
                 span.record_exception(e)
-                span.set_attributes({
-                    "shutdown.success": False,
-                    "shutdown.error": str(e)
-                })
-                
+                span.set_attributes({"shutdown.success": False, "shutdown.error": str(e)})
+
                 logger.error(
                     "plugin_shutdown_failed",
                     plugin_name=self.metadata.name,
                     error=str(e),
                     error_type=type(e).__name__,
-                    plugin_status=self.status.value
+                    plugin_status=self.status.value,
                 )
                 raise
 
     async def validate_configuration(self, config: dict[str, Any]) -> list[str]:
         from app.core.logging import get_logger
-        
+
         logger = get_logger(__name__)
-        
+
         with tracer.start_as_current_span("plugin_validate_config") as span:
             span.set_attributes(
                 {
@@ -227,7 +221,7 @@ class Plugin(ABC):
                 plugin_name=self.metadata.name,
                 plugin_type=self.metadata.plugin_type.value,
                 config_keys=list(config.keys()),
-                has_schema=self.metadata.configuration_schema is not None
+                has_schema=self.metadata.configuration_schema is not None,
             )
 
             errors: list[str] = []
@@ -239,92 +233,92 @@ class Plugin(ABC):
                 except ImportError as import_err:
                     error_msg = "jsonschema library required for configuration validation"
                     errors.append(error_msg)
-                    
+
                     logger.warning(
                         "plugin_config_validation_import_failed",
                         plugin_name=self.metadata.name,
                         error=str(import_err),
                         required_library="jsonschema",
-                        fallback_skip_validation=True
+                        fallback_skip_validation=True,
                     )
-                    
+
                     span.record_exception(import_err)
                 else:
                     # ValidationError is now guaranteed to be bound
                     try:
                         schema_keys = (
-                            list(self.metadata.configuration_schema.keys()) 
-                            if isinstance(self.metadata.configuration_schema, dict) 
+                            list(self.metadata.configuration_schema.keys())
+                            if isinstance(self.metadata.configuration_schema, dict)
                             else []
                         )
-                        
+
                         logger.debug(
                             "plugin_config_jsonschema_validation",
                             plugin_name=self.metadata.name,
                             schema_keys=schema_keys,
-                            jsonschema_available=True
+                            jsonschema_available=True,
                         )
 
                         validate(instance=config, schema=self.metadata.configuration_schema)
-                        
+
                         logger.debug(
                             "plugin_config_validation_passed",
                             plugin_name=self.metadata.name,
-                            config_valid=True
+                            config_valid=True,
                         )
 
                     except ValidationError as validation_err:
                         error_msg = f"Configuration validation error: {validation_err.message}"
                         errors.append(error_msg)
-                        
-                        validation_path = (
-                            list(validation_err.path) if validation_err.path else []
-                        )
+
+                        validation_path = list(validation_err.path) if validation_err.path else []
                         schema_path = (
                             list(validation_err.schema_path) if validation_err.schema_path else []
                         )
                         invalid_value = (
-                            str(validation_err.instance)[:200] 
-                            if hasattr(validation_err, 'instance') 
+                            str(validation_err.instance)[:200]
+                            if hasattr(validation_err, "instance")
                             else None
                         )
-                        
+
                         logger.error(
                             "plugin_config_validation_failed",
                             plugin_name=self.metadata.name,
                             validation_error=validation_err.message,
                             validation_path=validation_path,
                             schema_path=schema_path,
-                            invalid_value=invalid_value
+                            invalid_value=invalid_value,
                         )
-                        
+
                         span.record_exception(validation_err)
 
                     except Exception as e:
                         error_msg = f"Configuration validation failed: {str(e)}"
                         errors.append(error_msg)
-                        
+
                         logger.error(
                             "plugin_config_validation_unexpected_error",
                             plugin_name=self.metadata.name,
                             error=str(e),
                             error_type=type(e).__name__,
-                            config_preview=str(config)[:200] if config else "empty"
+                            config_preview=str(config)[:200] if config else "empty",
                         )
-                        
+
                         span.record_exception(e)
             else:
                 logger.debug(
                     "plugin_config_validation_skipped",
                     plugin_name=self.metadata.name,
-                    reason="no_configuration_schema"
+                    reason="no_configuration_schema",
                 )
 
             span.set_attributes(
                 {
-                    "validation.errors": len(errors), 
+                    "validation.errors": len(errors),
                     "validation.success": len(errors) == 0,
-                    "validation.error_messages": errors[:5] if errors else []  # Limit for telemetry
+                    "validation.error_messages": (
+                        errors[:5] if errors else []
+                    ),  # Limit for telemetry
                 }
             )
 
@@ -335,29 +329,29 @@ class Plugin(ABC):
                         f"Configuration validation failed with {len(errors)} errors",
                     )
                 )
-                
+
                 logger.error(
                     "plugin_config_validation_completed_with_errors",
                     plugin_name=self.metadata.name,
                     error_count=len(errors),
-                    errors=errors
+                    errors=errors,
                 )
             else:
                 span.set_status(Status(StatusCode.OK))
-                
+
                 logger.info(
                     "plugin_config_validation_completed_successfully",
                     plugin_name=self.metadata.name,
-                    config_valid=True
+                    config_valid=True,
                 )
 
             return errors
 
     async def health_check(self) -> dict[str, Any]:
         from app.core.logging import get_logger
-        
+
         logger = get_logger(__name__)
-        
+
         with tracer.start_as_current_span("plugin_health_check") as span:
             try:
                 span.set_attributes(
@@ -375,7 +369,7 @@ class Plugin(ABC):
                     plugin_name=self.metadata.name,
                     current_status=self.status.value,
                     initialized=self._initialized,
-                    has_error=self._last_error is not None
+                    has_error=self._last_error is not None,
                 )
 
                 health_status = {
@@ -394,7 +388,7 @@ class Plugin(ABC):
                         "enabled": self.config.enabled,
                         "load_priority": self.config.load_priority,
                         "auto_reload": self.config.auto_reload,
-                    }
+                    },
                 }
 
                 span.set_attributes(
@@ -411,22 +405,22 @@ class Plugin(ABC):
                     "plugin_health_check_completed",
                     plugin_name=self.metadata.name,
                     health_status=self.status.value,
-                    health_check_successful=True
+                    health_check_successful=True,
                 )
 
                 return health_status
-                
+
             except Exception as e:
                 logger.error(
                     "plugin_health_check_failed",
                     plugin_name=self.metadata.name,
                     error=str(e),
-                    error_type=type(e).__name__
+                    error_type=type(e).__name__,
                 )
-                
+
                 span.record_exception(e)
                 span.set_status(Status(StatusCode.ERROR, str(e)))
-                
+
                 # Return minimal health status on error
                 return {
                     "name": self.metadata.name,
@@ -438,9 +432,9 @@ class Plugin(ABC):
 
     def set_status(self, status: PluginStatus, error: Exception | None = None) -> None:
         from app.core.logging import get_logger
-        
+
         logger = get_logger(__name__)
-        
+
         with tracer.start_as_current_span("plugin_set_status") as span:
             try:
                 old_status = self.status
@@ -468,39 +462,39 @@ class Plugin(ABC):
                     new_status=status.value,
                     has_error=error is not None,
                     error_message=str(error) if error else None,
-                    error_type=type(error).__name__ if error else None
+                    error_type=type(error).__name__ if error else None,
                 )
 
                 if error:
                     span.record_exception(error)
                     span.set_status(Status(StatusCode.ERROR, str(error)))
-                    
+
                     logger.error(
                         "plugin_status_set_with_error",
                         plugin_name=self.metadata.name,
                         new_status=status.value,
                         error=str(error),
-                        error_type=type(error).__name__
+                        error_type=type(error).__name__,
                     )
                 else:
                     span.set_status(Status(StatusCode.OK))
-                    
+
                     logger.debug(
                         "plugin_status_set_successfully",
                         plugin_name=self.metadata.name,
                         new_status=status.value,
-                        status_change_successful=True
+                        status_change_successful=True,
                     )
-                    
+
             except Exception as e:
                 logger.error(
                     "plugin_set_status_failed",
                     plugin_name=self.metadata.name,
                     intended_status=status.value if status else "unknown",
                     error=str(e),
-                    error_type=type(e).__name__
+                    error_type=type(e).__name__,
                 )
-                
+
                 span.record_exception(e)
                 span.set_status(Status(StatusCode.ERROR, f"Failed to set status: {str(e)}"))
                 raise

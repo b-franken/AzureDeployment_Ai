@@ -14,10 +14,11 @@ from azure.mgmt.web.models import (
     SwiftVirtualNetwork,
 )
 
+from app.core.logging import get_logger
 from ..clients import Clients
 from ..validators import validate_name
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _PCall = Callable[..., Any]
 

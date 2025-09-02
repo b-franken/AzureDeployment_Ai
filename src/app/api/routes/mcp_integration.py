@@ -22,7 +22,7 @@ from app.observability.app_insights import app_insights
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
-# app_insights is imported as singleton
+
 
 router = APIRouter()
 mcp_dependency = require_role("mcp_user")
@@ -32,9 +32,12 @@ class MCPToolRequest(BaseModel):
     """Request to execute MCP tool."""
 
     tool_name: str = Field(..., description="Name of the MCP tool to execute")
-    parameters: dict[str, Any] = Field(default_factory=dict, description="Tool parameters")
-    correlation_id: str | None = Field(None, description="Optional correlation ID for tracking")
-    timeout_seconds: int = Field(30, description="Tool execution timeout in seconds", ge=1, le=300)
+    parameters: dict[str, Any] = Field(
+        default_factory=dict, description="Tool parameters")
+    correlation_id: str | None = Field(
+        None, description="Optional correlation ID for tracking")
+    timeout_seconds: int = Field(
+        30, description="Tool execution timeout in seconds", ge=1, le=300)
 
 
 class MCPToolResponse(BaseModel):
@@ -43,48 +46,63 @@ class MCPToolResponse(BaseModel):
     success: bool = Field(..., description="Execution success status")
     tool_name: str = Field(..., description="Name of the executed tool")
     correlation_id: str = Field(..., description="Request correlation ID")
-    execution_time_ms: float = Field(..., description="Execution time in milliseconds")
-    result: dict[str, Any] | None = Field(None, description="Tool execution result")
-    error: str | None = Field(None, description="Error message if execution failed")
+    execution_time_ms: float = Field(...,
+                                     description="Execution time in milliseconds")
+    result: dict[str, Any] | None = Field(
+        None, description="Tool execution result")
+    error: str | None = Field(
+        None, description="Error message if execution failed")
 
 
 class IntegratedAnalyticsRequest(BaseModel):
     """Request for integrated analytics analysis."""
 
     subscription_id: str = Field(..., description="Azure subscription ID")
-    include_security: bool = Field(True, description="Include security analysis")
+    include_security: bool = Field(
+        True, description="Include security analysis")
     include_cost: bool = Field(True, description="Include cost analysis")
     include_changes: bool = Field(True, description="Include change analysis")
     include_audit: bool = Field(True, description="Include audit analysis")
     time_range: str = Field("24h", description="Time range for analysis")
-    security_severity_filter: str = Field("all", description="Security severity filter")
+    security_severity_filter: str = Field(
+        "all", description="Security severity filter")
 
 
 class SecurityAdvisorRequest(BaseModel):
     """Request for security advisor analysis."""
 
     subscription_id: str = Field(..., description="Azure subscription ID")
-    resource_group: str | None = Field(None, description="Specific resource group")
+    resource_group: str | None = Field(
+        None, description="Specific resource group")
     severity_levels: list[str] = Field(
         default_factory=lambda: ["critical", "high", "medium"],
         description="Security severity levels",
     )
-    include_recommendations: bool = Field(True, description="Include recommendations")
-    include_compliance_scan: bool = Field(True, description="Include compliance scan")
-    include_threat_detection: bool = Field(True, description="Include threat detection")
+    include_recommendations: bool = Field(
+        True, description="Include recommendations")
+    include_compliance_scan: bool = Field(
+        True, description="Include compliance scan")
+    include_threat_detection: bool = Field(
+        True, description="Include threat detection")
 
 
 class CostIntelligenceRequest(BaseModel):
     """Request for cost intelligence analysis."""
 
     subscription_id: str = Field(..., description="Azure subscription ID")
-    resource_group: str | None = Field(None, description="Specific resource group")
+    resource_group: str | None = Field(
+        None, description="Specific resource group")
     time_range: str = Field("30d", description="Analysis time range")
-    include_forecast: bool = Field(True, description="Include cost forecasting")
-    include_optimization: bool = Field(True, description="Include optimization recommendations")
-    include_anomaly_detection: bool = Field(True, description="Include anomaly detection")
-    include_carbon_analysis: bool = Field(False, description="Include carbon footprint")
-    cost_threshold_usd: float | None = Field(None, description="Cost threshold in USD")
+    include_forecast: bool = Field(
+        True, description="Include cost forecasting")
+    include_optimization: bool = Field(
+        True, description="Include optimization recommendations")
+    include_anomaly_detection: bool = Field(
+        True, description="Include anomaly detection")
+    include_carbon_analysis: bool = Field(
+        False, description="Include carbon footprint")
+    cost_threshold_usd: float | None = Field(
+        None, description="Cost threshold in USD")
 
 
 @router.get("/tools", response_model=list[dict[str, Any]])
@@ -495,7 +513,8 @@ async def run_cost_intelligence(
 async def security_quick_scan(
     subscription_id: Annotated[str, Query(description="Azure subscription ID")],
     td: Annotated[TokenData, Depends(mcp_dependency)],
-    resource_group: Annotated[str | None, Query(description="Optional resource group")] = None,
+    resource_group: Annotated[str | None, Query(
+        description="Optional resource group")] = None,
 ) -> dict[str, Any]:
     """Run quick security scan for critical issues only."""
 

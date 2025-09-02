@@ -10,8 +10,9 @@ from azure.core.exceptions import AzureError
 from fastmcp import Context
 
 from app.core.azure_auth import build_credential
+from app.core.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class UsageRecord(TypedDict, total=False):

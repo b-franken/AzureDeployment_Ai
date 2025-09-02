@@ -154,35 +154,35 @@ class OpenAIAdapter:
                         "OpenAI stream response received",
                         model=model,
                         status_code=r.status_code,
-                        response_headers=dict(r.headers)
+                        response_headers=dict(r.headers),
                     )
                     r.raise_for_status()
-                    
+
                     chunk_count = 0
                     parsed_chunks = 0
                     parse_errors = 0
-                    
+
                     async for line in r.aiter_lines():
                         if not line or not line.startswith("data:"):
                             continue
-                        
+
                         data = line.removeprefix("data:").strip()
                         if data == "[DONE]":
                             logger.debug("OpenAI stream completed with [DONE] marker", model=model)
                             break
-                        
+
                         try:
                             obj = json.loads(data)
                             parsed_chunks += 1
-                            
+
                             choice = (obj.get("choices") or [{}])[0]
                             delta = choice.get("delta") or {}
                             piece = delta.get("content")
-                            
+
                             if piece:
                                 chunk_count += 1
                                 yield str(piece)
-                            
+
                         except json.JSONDecodeError as json_err:
                             parse_errors += 1
                             logger.debug(
@@ -190,7 +190,7 @@ class OpenAIAdapter:
                                 error=str(json_err),
                                 data_preview=data[:100],
                                 model=model,
-                                parse_error_count=parse_errors
+                                parse_error_count=parse_errors,
                             )
                             continue
                         except Exception as e:
@@ -201,7 +201,7 @@ class OpenAIAdapter:
                                 error_type=type(e).__name__,
                                 data_preview=data[:100],
                                 model=model,
-                                parse_error_count=parse_errors
+                                parse_error_count=parse_errors,
                             )
                             continue
 
@@ -240,15 +240,15 @@ class OpenAIAdapter:
 
             except httpx.HTTPStatusError as e:
                 duration_ms = (time.time() - start_time) * 1000
-                
+
                 # Defensive programming for response attributes
-                if hasattr(e, 'response') and e.response:
+                if hasattr(e, "response") and e.response:
                     status_code = e.response.status_code
                     error_detail = e.response.text
                 else:
                     status_code = 0
-                    error_detail = 'No response available'
-                
+                    error_detail = "No response available"
+
                 span.record_exception(e)
                 span.set_attributes(
                     {
@@ -265,7 +265,8 @@ class OpenAIAdapter:
                     status_code=status_code,
                     duration_ms=duration_ms,
                     error_detail=(
-                        error_detail[:500] if isinstance(error_detail, str) 
+                        error_detail[:500]
+                        if isinstance(error_detail, str)
                         else str(error_detail)[:500]
                     ),
                     error_type="HTTPStatusError",
@@ -286,7 +287,7 @@ class OpenAIAdapter:
                 duration_ms = (time.time() - start_time) * 1000
                 error_type = type(e).__name__
                 error_message = str(e)
-                
+
                 span.record_exception(e)
                 span.set_attributes(
                     {
@@ -339,10 +340,10 @@ class OpenAIAdapter:
             try:
                 resp = await client.post(self.endpoint(), json=payload, headers=self.headers())
                 logger.debug(
-                    "OpenAI API response received", 
-                    model=model, 
+                    "OpenAI API response received",
+                    model=model,
                     status_code=resp.status_code,
-                    response_headers=dict(resp.headers)
+                    response_headers=dict(resp.headers),
                 )
                 resp.raise_for_status()
 
@@ -390,7 +391,7 @@ class OpenAIAdapter:
 
             except httpx.HTTPStatusError as e:
                 duration_ms = (time.time() - start_time) * 1000
-                
+
                 # Defensive programming: resp might not be set if exception occurred during request
                 if resp is not None:
                     error_detail = resp.text
@@ -399,9 +400,9 @@ class OpenAIAdapter:
                 else:
                     error_detail = "Request failed before receiving response"
                     status_code = (
-                        e.response.status_code if hasattr(e, 'response') and e.response else 0
+                        e.response.status_code if hasattr(e, "response") and e.response else 0
                     )
-                    error_response = e.response if hasattr(e, 'response') else None
+                    error_response = e.response if hasattr(e, "response") else None
 
                 span.record_exception(e)
                 span.set_attributes(
@@ -431,9 +432,9 @@ class OpenAIAdapter:
                         if isinstance(error_json, dict) and "error" in error_json:
                             error_info = error_json["error"]
                             logger.error(
-                                "OpenAI API structured error details", 
+                                "OpenAI API structured error details",
                                 error_info=error_info,
-                                model=model
+                                model=model,
                             )
                             if isinstance(error_info, dict):
                                 span.set_attribute(
@@ -446,7 +447,7 @@ class OpenAIAdapter:
                         logger.debug(
                             "Failed to parse OpenAI error response as JSON",
                             parse_error=str(parse_error),
-                            response_content=error_detail[:200] if error_detail else "No content"
+                            response_content=error_detail[:200] if error_detail else "No content",
                         )
 
                 app_insights.track_exception(
@@ -463,7 +464,7 @@ class OpenAIAdapter:
                 error_msg = f"OpenAI API error: {status_code}"
                 if error_detail and len(error_detail.strip()) > 0:
                     error_msg += f" - {error_detail[:200]}"
-                
+
                 raise httpx.HTTPStatusError(
                     error_msg,
                     request=e.request,

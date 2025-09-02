@@ -50,21 +50,21 @@ class UnifiedParseResult:
             from app.common.envs import normalize_env
         except Exception as e:
             from app.core.logging import get_logger
-            
+
             logger = get_logger(__name__)
             logger.warning(
                 "normalize_env_import_failed",
                 error=str(e),
                 error_type=type(e).__name__,
-                using_fallback=True
+                using_fallback=True,
             )
-            
+
             def normalize_env(value: str) -> str:  # type: ignore[misc]
                 logger.debug(
                     "normalize_env_fallback_used",
                     fallback_value="dev",
                     input_value=value,
-                    reason="failed to import normalize_env from app.common.envs"
+                    reason="failed to import normalize_env from app.common.envs",
                 )
                 return "dev"
 
@@ -115,9 +115,9 @@ class UnifiedParseResult:
 
 def _to_scores_list(x: Any) -> list[float]:
     from app.core.logging import get_logger
-    
+
     logger = get_logger(__name__)
-    
+
     try:
         import numpy as np
 
@@ -130,8 +130,8 @@ def _to_scores_list(x: Any) -> list[float]:
                     return cast("list[float]", result)
                 logger.warning(
                     "numpy_array_empty_or_invalid",
-                    array_shape=getattr(x, 'shape', 'unknown'),
-                    result_type=type(result).__name__
+                    array_shape=getattr(x, "shape", "unknown"),
+                    result_type=type(result).__name__,
                 )
                 return []
             except Exception as e:
@@ -139,20 +139,14 @@ def _to_scores_list(x: Any) -> list[float]:
                     "numpy_array_conversion_failed",
                     error=str(e),
                     error_type=type(e).__name__,
-                    array_shape=getattr(x, 'shape', 'unknown')
+                    array_shape=getattr(x, "shape", "unknown"),
                 )
                 return []
     except ImportError as e:
-        logger.debug(
-            "numpy_import_failed",
-            error=str(e),
-            fallback_processing=True
-        )
+        logger.debug("numpy_import_failed", error=str(e), fallback_processing=True)
     except Exception as e:
         logger.warning(
-            "numpy_processing_unexpected_error",
-            error=str(e),
-            error_type=type(e).__name__
+            "numpy_processing_unexpected_error", error=str(e), error_type=type(e).__name__
         )
 
     if hasattr(x, "detach"):  # PyTorch tensor
@@ -163,10 +157,10 @@ def _to_scores_list(x: Any) -> list[float]:
                 "pytorch_tensor_conversion_failed",
                 error=str(e),
                 error_type=type(e).__name__,
-                tensor_type=type(x).__name__
+                tensor_type=type(x).__name__,
             )
             return []
-            
+
     if isinstance(x, list):
         try:
             if x and isinstance(x[0], list):
@@ -177,14 +171,12 @@ def _to_scores_list(x: Any) -> list[float]:
                 "list_conversion_failed",
                 error=str(e),
                 error_type=type(e).__name__,
-                list_length=len(x) if hasattr(x, '__len__') else 'unknown'
+                list_length=len(x) if hasattr(x, "__len__") else "unknown",
             )
             return []
-    
+
     logger.debug(
-        "scores_conversion_no_handler",
-        input_type=type(x).__name__,
-        fallback_empty_list=True
+        "scores_conversion_no_handler", input_type=type(x).__name__, fallback_empty_list=True
     )
     return []
 
@@ -254,32 +246,32 @@ class unified_nlu_parser:
 
     def parse(self, text: str) -> UnifiedParseResult:
         from app.core.logging import get_logger
-        
+
         logger = get_logger(__name__)
-        
+
         try:
             t = text.lower().strip()
-            
+
             logger.debug(
                 "nlu_parse_started",
                 text_length=len(text),
                 normalized_length=len(t),
-                has_embeddings=self._emb is not None
+                has_embeddings=self._emb is not None,
             )
-            
+
             intent = self._detect_intent(t)
             rtype = self._detect_resource_type(t)
             rname = self._extract_resource_name(t, rtype)
             params = self._extract_parameters(t, rtype)
-            
+
             if rname and "name" not in params:
                 params["name"] = rname
                 logger.debug("nlu_resource_name_added", resource_name=rname)
-                
+
             ctx = self._build_context(t, params)
             adv = self._build_advanced_context(t, intent, rtype)
             conf = self._confidence(t, intent, rtype, bool(rname))
-            
+
             emb_scores: list[float] | None = None
             if self._emb:
                 try:
@@ -288,21 +280,21 @@ class unified_nlu_parser:
                     logger.debug(
                         "nlu_embeddings_processed",
                         scores_length=len(emb_scores) if emb_scores else 0,
-                        embeddings_available=True
+                        embeddings_available=True,
                     )
                 except Exception as e:
                     logger.warning(
                         "nlu_embeddings_failed",
                         error=str(e),
                         error_type=type(e).__name__,
-                        fallback_none=True
+                        fallback_none=True,
                     )
                     emb_scores = None
             else:
                 logger.debug("nlu_no_embeddings_service", embeddings_available=False)
-                
+
             action = self._action(intent, rtype)
-            
+
             result = UnifiedParseResult(
                 text=text,
                 intent=intent,
@@ -315,7 +307,7 @@ class unified_nlu_parser:
                 advanced_context=adv,
                 embeddings_scores=emb_scores,
             )
-            
+
             logger.info(
                 "nlu_parse_completed",
                 intent=intent.value,
@@ -324,20 +316,20 @@ class unified_nlu_parser:
                 has_resource_name=bool(rname),
                 parameters_count=len(params),
                 context_keys=len(ctx),
-                advanced_context_keys=len(adv)
+                advanced_context_keys=len(adv),
             )
-            
+
             return result
-            
+
         except Exception as e:
             logger.error(
                 "nlu_parse_failed",
                 error=str(e),
                 error_type=type(e).__name__,
                 text_preview=text[:100] if text else "",
-                fallback_generic=True
+                fallback_generic=True,
             )
-            
+
             return UnifiedParseResult(
                 text=text,
                 intent=DeploymentIntent.create,

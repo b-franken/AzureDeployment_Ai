@@ -9,10 +9,11 @@ from azure.keyvault.secrets import SecretClient
 from azure.mgmt.keyvault.models import Sku as KvSku
 from azure.mgmt.keyvault.models import VaultCreateOrUpdateParameters, VaultProperties
 
+from app.core.logging import get_logger
 from ..clients import Clients
 from ..utils.credentials import ensure_sync_credential
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 async def create_keyvault(

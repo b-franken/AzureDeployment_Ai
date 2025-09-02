@@ -6,6 +6,10 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
+
 
 class LLMProvider(str, Enum):
     OPENAI = "openai"
@@ -36,7 +40,13 @@ class LLMMessage(BaseModel):
                 import json
 
                 return json.dumps(v, ensure_ascii=False)
-            except Exception:
+            except Exception as e:
+                logger.warning(
+                    "Failed to serialize LLM model value as JSON, falling back to string",
+                    value_type=type(v).__name__,
+                    error=str(e),
+                    error_type=type(e).__name__,
+                )
                 return str(v)
         return v
 

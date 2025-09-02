@@ -7,12 +7,13 @@ from azure.core.exceptions import HttpResponseError, ResourceExistsError
 from azure.storage.blob import BlobServiceClient
 from azure.storage.fileshare import ShareServiceClient
 
+from app.core.logging import get_logger
 from ..clients import Clients
 from ..idempotency import safe_get
 from ..utils.credentials import ensure_sync_credential
 from ..validators import validate_name
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 async def create_storage_account(

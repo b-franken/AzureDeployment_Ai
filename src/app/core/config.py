@@ -6,6 +6,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
+from app.core.logging import get_logger
+
 from cryptography.fernet import Fernet
 from pydantic import (
     AnyHttpUrl,
@@ -20,7 +22,7 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 PostgresUrl = Annotated[
     AnyUrl,

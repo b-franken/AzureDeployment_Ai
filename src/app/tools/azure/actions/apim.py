@@ -10,10 +10,11 @@ from azure.mgmt.apimanagement.models import (
     ApiManagementServiceSkuProperties,
 )
 
+from app.core.logging import get_logger
 from ..clients import Clients
 from ..utils.credentials import ensure_sync_credential
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 async def create_apim(

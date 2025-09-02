@@ -24,6 +24,7 @@ from app.core.exceptions import (
     ValidationException,
 )
 from app.tools.azure.clients import AzureOperationError
+from app.core.logging import get_logger
 
 
 class _AzureExceptionsProto(Protocol):
@@ -73,7 +74,7 @@ else:
         ServiceResponseError=_ServiceResponseError,
     )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _error_response(

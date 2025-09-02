@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 import structlog
-from pydantic import Field, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 logger = structlog.get_logger(__name__)
 
@@ -11,7 +11,7 @@ Environment = Literal["dev", "test", "staging", "prod"]
 AzureRegion = Literal["westeurope", "northeurope", "eastus", "westus2", "centralus"]
 
 
-class AzureMixin:
+class AzureMixin(BaseModel):
     subscription_id: str | None = Field(
         default=None, pattern=r"^[a-f0-9-]{36}$", description="Azure subscription identifier"
     )

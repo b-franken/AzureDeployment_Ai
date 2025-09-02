@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
 import time
 from collections.abc import Sequence
@@ -31,8 +30,9 @@ from azure.identity.aio import ManagedIdentityCredential as ManagedIdentityCrede
 from azure.identity.aio import WorkloadIdentityCredential as WorkloadIdentityCredentialAsync
 
 from app.core.config import AzureConfig, settings
+from app.core.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _ARM_SCOPE = "https://management.azure.com/.default"
 _CREDENTIAL_CACHE: TokenCredential | None = None
@@ -175,21 +175,41 @@ def build_credential(cfg: AzureConfig | None = None, use_cache: bool = True) -> 
             credentials: list[TokenCredential] = []
             try:
                 credentials.append(EnvironmentCredential(authority=authority))
-            except Exception:
-                logger.debug("EnvironmentCredential unavailable", exc_info=True)
+            except Exception as e:
+                logger.debug(
+                    "EnvironmentCredential unavailable",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    credential_type="EnvironmentCredential",
+                )
             try:
                 credentials.append(ManagedIdentityCredential())
-            except Exception:
-                logger.debug("ManagedIdentityCredential unavailable", exc_info=True)
+            except Exception as e:
+                logger.debug(
+                    "ManagedIdentityCredential unavailable",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    credential_type="ManagedIdentityCredential",
+                )
             if cfg.enable_cli_fallback:
                 try:
                     credentials.append(AzureCliCredential())
-                except Exception:
-                    logger.debug("AzureCliCredential unavailable", exc_info=True)
+                except Exception as e:
+                    logger.debug(
+                        "AzureCliCredential unavailable",
+                        error=str(e),
+                        error_type=type(e).__name__,
+                        credential_type="AzureCliCredential",
+                    )
             try:
                 credentials.append(AzureDeveloperCliCredential())
-            except Exception:
-                logger.debug("AzureDeveloperCliCredential unavailable", exc_info=True)
+            except Exception as e:
+                logger.debug(
+                    "AzureDeveloperCliCredential unavailable",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    credential_type="AzureDeveloperCliCredential",
+                )
             credential = (
                 ChainedTokenCredential(*credentials)
                 if credentials
@@ -281,21 +301,41 @@ async def build_async_credential(
             credentials: list[AsyncTokenCredential] = []
             try:
                 credentials.append(EnvironmentCredentialAsync(authority=authority))
-            except Exception:
-                logger.debug("EnvironmentCredentialAsync unavailable", exc_info=True)
+            except Exception as e:
+                logger.debug(
+                    "EnvironmentCredentialAsync unavailable",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    credential_type="EnvironmentCredentialAsync",
+                )
             try:
                 credentials.append(ManagedIdentityCredentialAsync())
-            except Exception:
-                logger.debug("ManagedIdentityCredentialAsync unavailable", exc_info=True)
+            except Exception as e:
+                logger.debug(
+                    "ManagedIdentityCredentialAsync unavailable",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    credential_type="ManagedIdentityCredentialAsync",
+                )
             if cfg.enable_cli_fallback:
                 try:
                     credentials.append(AzureCliCredentialAsync())
-                except Exception:
-                    logger.debug("AzureCliCredentialAsync unavailable", exc_info=True)
+                except Exception as e:
+                    logger.debug(
+                        "AzureCliCredentialAsync unavailable",
+                        error=str(e),
+                        error_type=type(e).__name__,
+                        credential_type="AzureCliCredentialAsync",
+                    )
             try:
                 credentials.append(AzureDeveloperCliCredentialAsync())
-            except Exception:
-                logger.debug("AzureDeveloperCliCredentialAsync unavailable", exc_info=True)
+            except Exception as e:
+                logger.debug(
+                    "AzureDeveloperCliCredentialAsync unavailable",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    credential_type="AzureDeveloperCliCredentialAsync",
+                )
             credential = (
                 ChainedTokenCredentialAsync(*credentials)
                 if credentials

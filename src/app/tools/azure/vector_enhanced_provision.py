@@ -281,7 +281,7 @@ class VectorEnhancedProvisioningTool:
             final_location = kwargs.get("location") or extracted_location
             final_name_prefix = kwargs.get("name_prefix") or extracted_name or "app"
 
-            context = ProvisionContext(  # type: ignore[call-arg]
+            context = ProvisionContext(
                 request_text=request_text,
                 user_id=user_id,
                 correlation_id=correlation_id,

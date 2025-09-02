@@ -7,9 +7,10 @@ import shutil
 import subprocess
 from collections.abc import Sequence
 
+from app.core.logging import get_logger
 from app.tools.base import Tool, ToolResult
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _TOOLS: dict[str, Tool] = {}
 _LOADED = False

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import logging
 import uuid
 from typing import Any
 
 from app.common.envs import ALLOWED_ENVS, normalize_env
 from app.core.config import settings
+from app.core.logging import get_logger
 from app.tools.base import Tool, ToolResult
 
 from .actions.deployment import store_pending_deployment
@@ -28,7 +28,7 @@ from .tags import standard_tags
 from .utils.response import err, ok
 from .validation import DeploymentValidator, ValidationLevel
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class AzureProvision(Tool):
@@ -96,12 +96,23 @@ class AzureProvision(Tool):
                     "summary": "Missing required parameter",
                     "output": "Action parameter is required",
                 }
-            logger.info("Azure provision tool called with action='%s' params=%s", action, params)
+            logger.info(
+                "Azure provision tool called",
+                action=action,
+                params=params,
+            )
 
             env_in = str(params.get("env") or params.get("environment") or "dev")
             try:
                 canon_env = normalize_env(env_in)
-            except Exception:
+            except Exception as e:
+                logger.warning(
+                    "Failed to normalize environment, using dev fallback",
+                    raw_env=env_in,
+                    fallback_env="dev",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                )
                 canon_env = "dev"
             params["env"] = canon_env
             params["environment"] = canon_env

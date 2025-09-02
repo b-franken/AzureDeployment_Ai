@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, TypeVar, cast
 
 import asyncpg
 from opentelemetry import trace
@@ -104,7 +104,7 @@ class PostgresStore(DataStore):
         await conn.execute(f"SET application_name = '{app_name}'")
 
     @asynccontextmanager
-    async def acquire(self) -> AsyncIterator[asyncpg.Connection]:
+    async def acquire(self) -> AsyncIterator[Any]:  # Pool returns proxy, not Connection directly
         pool = self._pool
         if pool is None:
             raise RuntimeError("postgres pool not initialized")
@@ -112,13 +112,14 @@ class PostgresStore(DataStore):
             yield conn
 
     @asynccontextmanager
-    async def transaction(self) -> AsyncIterator[asyncpg.Connection]:
+    async def transaction(self) -> AsyncIterator[Any]:  # Returns pool proxy
         async with self.acquire() as conn:
             async with conn.transaction():
                 yield conn
 
     async def execute(self, query: str, *args: Any) -> str:
-        return await self._run("execute", lambda c: c.execute(query, *args))
+        result = await self._run("execute", lambda c: c.execute(query, *args))
+        return cast(str, result)
 
     async def executemany(self, query: str, args_iter: list[tuple[Any, ...]]) -> None:
         async def _fn(c: asyncpg.Connection) -> None:
@@ -127,10 +128,12 @@ class PostgresStore(DataStore):
         await self._run("executemany", _fn)
 
     async def fetch(self, query: str, *args: Any) -> list[asyncpg.Record]:
-        return await self._run("fetch", lambda c: c.fetch(query, *args))
+        result = await self._run("fetch", lambda c: c.fetch(query, *args))
+        return cast(list[asyncpg.Record], result)
 
     async def fetchrow(self, query: str, *args: Any) -> asyncpg.Record | None:
-        return await self._run("fetchrow", lambda c: c.fetchrow(query, *args))
+        result = await self._run("fetchrow", lambda c: c.fetchrow(query, *args))
+        return cast(asyncpg.Record | None, result)
 
     async def fetchval(self, query: str, *args: Any) -> Any:
         return await self._run("fetchval", lambda c: c.fetchval(query, *args))
@@ -395,6 +398,8 @@ class Repository(Generic[T], ABC):
         )
         async with self.data.transaction() as conn:
             row = await conn.fetchrow(sql, *values)
+        if row is None:
+            raise RuntimeError(f"Failed to upsert record in {self.table_name}")
         out = self.model_class(**dict(row))
         await self.data.cache_set(
             self._cache_key(out.model_dump().get("id", data["id"])), out.model_dump()

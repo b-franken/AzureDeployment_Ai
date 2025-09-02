@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from app.tools.azure.clients import get_clients
@@ -31,12 +32,11 @@ class AzureQuotaCheck(Tool):
         "additionalProperties": False,
     }
 
-    async def run(
-        self,
-        subscription_id: str,
-        location: str,
-        focus: list[str] | None = None,
-    ) -> ToolResult:
+    async def run(self, **kwargs: Any) -> ToolResult:
+        subscription_id: str = kwargs["subscription_id"]
+        location: str = kwargs["location"]
+        focus: list[str] | None = kwargs.get("focus")
+
         clients = await get_clients(subscription_id)
         usages = await clients.run(clients.cmp.usage.list, location)
         rows: list[dict[str, Any]] = []
@@ -63,4 +63,5 @@ class AzureQuotaCheck(Tool):
             f"{sum(1 for r in rows if r['available'] <= 0)} exhausted, "
             f"{sum(1 for r in rows if 0 < r['available'] < 10)} low."
         )
-        return {"ok": True, "summary": summary, "output": {"region": location, "items": rows}}
+        output_data = {"region": location, "items": rows}
+        return {"ok": True, "summary": summary, "output": json.dumps(output_data, indent=2)}

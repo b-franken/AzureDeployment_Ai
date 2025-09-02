@@ -44,7 +44,7 @@ async def create_recovery_services_vault(
     from azure.mgmt.recoveryservices import RecoveryServicesClient
     from azure.mgmt.recoveryservices.models import Sku as VaultSku
     from azure.mgmt.recoveryservices.models import Vault
-    from azure.mgmt.recoveryservicesbackup import (
+    from azure.mgmt.recoveryservicesbackup import (  # type: ignore[import-untyped]
         BackupStorageConfig,
         RecoveryServicesBackupClient,
     )

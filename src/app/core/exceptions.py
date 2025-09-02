@@ -90,7 +90,7 @@ class ErrorContext:
     affected_resources: list[str] = field(default_factory=list)
     estimated_impact: str | None = None
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "error_id": self.error_id,
             "timestamp": self.timestamp.isoformat(),
@@ -480,7 +480,7 @@ def handle_errors(
         async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> Any:
             handler = ErrorHandler()
             try:
-                return await func(*args, **kwargs)  # type: ignore[misc]
+                return await func(*args, **kwargs)
             except Exception as e:
                 try:
                     return await handler.handle_error(e, recover=recover)
@@ -504,7 +504,7 @@ def handle_errors(
         def sync_wrapper(*args: P.args, **kwargs: P.kwargs) -> Any:
             handler = ErrorHandler()
             try:
-                return func(*args, **kwargs)  # type: ignore[misc]
+                return func(*args, **kwargs)
             except Exception as e:
                 try:
                     try:
@@ -581,12 +581,12 @@ def retry_on_error(
             DeprecationWarning,
             stacklevel=2,
         )
-        base = delay
+        base: float = delay
     else:
         base = base_delay
 
     def backoff(attempt: int) -> float:
-        return min(max_delay, base * (2**attempt)) * random.uniform(0.5, 1.5)
+        return float(min(max_delay, base * (2**attempt)) * random.uniform(0.5, 1.5))
 
     def decorator(func: Callable[P, Any]) -> Callable[P, Any]:
         @wraps(func)
@@ -594,7 +594,7 @@ def retry_on_error(
             last: BaseException | None = None
             for attempt in range(max_retries):
                 try:
-                    return await func(*args, **kwargs)  # type: ignore[misc]
+                    return await func(*args, **kwargs)
                 except exceptions as e:
                     if predicate and not predicate(e):
                         raise
@@ -611,7 +611,7 @@ def retry_on_error(
             last: BaseException | None = None
             for attempt in range(max_retries):
                 try:
-                    return func(*args, **kwargs)  # type: ignore[misc]
+                    return func(*args, **kwargs)
                 except exceptions as e:
                     if predicate and not predicate(e):
                         raise

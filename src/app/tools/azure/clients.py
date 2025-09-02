@@ -27,13 +27,13 @@ from azure.mgmt.containerregistry.aio import ContainerRegistryManagementClient
 from azure.mgmt.containerservice.aio import ContainerServiceClient
 from azure.mgmt.cosmosdb.aio import CosmosDBManagementClient
 from azure.mgmt.keyvault.aio import KeyVaultManagementClient
-from azure.mgmt.loganalytics.aio import LogAnalyticsManagementClient
+from azure.mgmt.loganalytics.aio import LogAnalyticsManagementClient  # type: ignore[import-untyped]
 from azure.mgmt.msi.aio import ManagedServiceIdentityClient
 from azure.mgmt.network.aio import NetworkManagementClient
 from azure.mgmt.privatedns.aio import PrivateDnsManagementClient
 from azure.mgmt.redis.aio import RedisManagementClient
 from azure.mgmt.resource import ResourceManagementClient
-from azure.mgmt.sql.aio import SqlManagementClient
+from azure.mgmt.sql.aio import SqlManagementClient  # type: ignore[import-untyped]
 from azure.mgmt.storage.aio import StorageManagementClient
 from azure.mgmt.web.aio import WebSiteManagementClient
 

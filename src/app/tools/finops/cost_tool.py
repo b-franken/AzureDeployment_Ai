@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timedelta
 from typing import Any
@@ -68,7 +69,7 @@ class AzureCosts(Tool):
             return {
                 "ok": True,
                 "summary": f"analyzed {cost.resource_name}",
-                "output": cost.__dict__,
+                "output": json.dumps(cost.__dict__, default=str),
             }
 
         if act == "budget_status":
@@ -87,11 +88,15 @@ class AzureCosts(Tool):
                 return {
                     "ok": True,
                     "summary": f"budget set {out.get('budget_id', '')}",
-                    "output": out,
+                    "output": json.dumps(out, default=str),
                 }
 
             out = {"budget_id": bid, "status": "unknown", "amount": 0.0}
-            return {"ok": True, "summary": f"budget {bid} status", "output": out}
+            return {
+                "ok": True,
+                "summary": f"budget {bid} status",
+                "output": json.dumps(out, default=str),
+            }
 
         if act == "optimize":
             level_str = (kwargs.get("level") or "balanced").lower()
@@ -106,7 +111,7 @@ class AzureCosts(Tool):
             return {
                 "ok": True,
                 "summary": f"{len(recs)} recs",
-                "output": [r.__dict__ for r in recs],
+                "output": json.dumps([r.__dict__ for r in recs], default=str),
             }
 
         if act == "report":
@@ -115,7 +120,11 @@ class AzureCosts(Tool):
             if fmt == "csv":
                 text = self._insights_to_csv(insights)
                 return {"ok": True, "summary": "report csv", "output": text}
-            return {"ok": True, "summary": "report json", "output": insights}
+            return {
+                "ok": True,
+                "summary": "report json",
+                "output": json.dumps(insights, default=str),
+            }
 
         return {"ok": False, "summary": "unknown action", "output": ""}
 

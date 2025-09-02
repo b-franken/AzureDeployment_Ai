@@ -3,8 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from opentelemetry import trace
-
 from app.core.logging import get_logger
 from app.memory.storage import get_async_store
 from app.observability.agent_tracing import get_agent_tracer
@@ -28,7 +26,7 @@ class LearningIntegrationService:
         pass
 
     async def enhance_recommendations_with_learning(
-        self, 
+        self,
         user_id: str,
         base_recommendations: list[dict[str, Any]],
         current_resource_types: list[str],
@@ -40,7 +38,7 @@ class LearningIntegrationService:
                 "user_id": user_id,
                 "recommendations_count": len(base_recommendations),
                 "environment": environment,
-            }
+            },
         ) as span:
             logger.info(
                 "Enhancing recommendations with deployment learning",
@@ -51,7 +49,7 @@ class LearningIntegrationService:
             )
 
             store = await get_async_store()
-            
+
             user_patterns = await store.get_deployment_patterns(user_id)
             user_optimizations = await store.get_optimization_insights(user_id)
             user_failures = await store.get_failure_insights(user_id)
@@ -59,16 +57,22 @@ class LearningIntegrationService:
             enhanced_recommendations = []
             for rec in base_recommendations:
                 enhanced = await self._enhance_single_recommendation(
-                    rec, user_patterns, user_optimizations, user_failures, 
-                    current_resource_types, environment
+                    rec,
+                    user_patterns,
+                    user_optimizations,
+                    user_failures,
+                    current_resource_types,
+                    environment,
                 )
                 enhanced_recommendations.append(enhanced)
 
-            span.set_attributes({
-                "enhanced_recommendations": len(enhanced_recommendations),
-                "user_patterns_analyzed": len(user_patterns),
-                "user_optimizations_analyzed": len(user_optimizations),
-            })
+            span.set_attributes(
+                {
+                    "enhanced_recommendations": len(enhanced_recommendations),
+                    "user_patterns_analyzed": len(user_patterns),
+                    "user_optimizations_analyzed": len(user_optimizations),
+                }
+            )
 
             logger.info(
                 "Recommendations enhanced with learning data",
@@ -89,11 +93,12 @@ class LearningIntegrationService:
         environment: str,
     ) -> LearningEnhancedRecommendation:
         rec_type = recommendation.get("type", "")
-        
+
         similar_patterns = [
-            p for p in user_patterns
-            if rec_type in p.get("resource_types", []) or 
-            any(rt in p.get("resource_types", []) for rt in current_resource_types)
+            p
+            for p in user_patterns
+            if rec_type in p.get("resource_types", [])
+            or any(rt in p.get("resource_types", []) for rt in current_resource_types)
         ]
 
         historical_success = 0.0
@@ -102,9 +107,9 @@ class LearningIntegrationService:
             historical_success = sum(success_rates) / len(success_rates)
 
         relevant_optimizations = [
-            opt for opt in user_optimizations
-            if opt.get("resource_type") == rec_type and
-            environment in opt.get("environments", [])
+            opt
+            for opt in user_optimizations
+            if opt.get("resource_type") == rec_type and environment in opt.get("environments", [])
         ]
 
         adoption_likelihood = 0.5
@@ -125,9 +130,10 @@ class LearningIntegrationService:
                 cost_impact = "low_savings"
 
         relevant_failures = [
-            f for f in user_failures
-            if rec_type in str(f.get("resource_context", {})) and
-            environment in f.get("environments", [])
+            f
+            for f in user_failures
+            if rec_type in str(f.get("resource_context", {}))
+            and environment in f.get("environments", [])
         ]
 
         learning_confidence = self._calculate_learning_confidence(
@@ -146,13 +152,13 @@ class LearningIntegrationService:
     def _calculate_learning_confidence(
         self,
         similar_patterns: list[dict[str, Any]],
-        optimizations: list[dict[str, Any]], 
+        optimizations: list[dict[str, Any]],
         failures: list[dict[str, Any]],
     ) -> float:
         pattern_confidence = min(len(similar_patterns) / 5.0, 1.0)
-        optimization_confidence = min(len(optimizations) / 3.0, 1.0) 
+        optimization_confidence = min(len(optimizations) / 3.0, 1.0)
         failure_penalty = max(0.0, 1.0 - len(failures) / 10.0)
-        
+
         base_confidence = (pattern_confidence + optimization_confidence) / 2.0
         return base_confidence * failure_penalty
 
@@ -177,7 +183,7 @@ class LearningIntegrationService:
                 "success": success,
                 "environment": environment,
                 "recommendations_followed_count": len(recommendations_followed or []),
-            }
+            },
         ) as span:
             logger.info(
                 "Recording deployment result for machine learning",
@@ -190,7 +196,7 @@ class LearningIntegrationService:
             )
 
             store = await get_async_store()
-            
+
             error_type = None
             error_message = None
             if error_details:
@@ -215,22 +221,24 @@ class LearningIntegrationService:
                     user_id, deployment_id, recommendations_followed, success
                 )
 
-            span.set_attributes({
-                "learning_recorded": True,
-                "recommendations_tracked": len(recommendations_followed or []),
-            })
+            span.set_attributes(
+                {
+                    "learning_recorded": True,
+                    "recommendations_tracked": len(recommendations_followed or []),
+                }
+            )
 
     async def _record_recommendation_adoption(
         self,
         user_id: str,
-        deployment_id: str, 
+        deployment_id: str,
         recommendations_followed: list[str],
         deployment_success: bool,
     ) -> None:
         from app.memory.deployment_learning import get_deployment_learning_service
-        
+
         learning_service = await get_deployment_learning_service()
-        
+
         for rec_type in recommendations_followed:
             await learning_service.record_cost_optimization(
                 user_id=user_id,
@@ -243,12 +251,9 @@ class LearningIntegrationService:
                 applied=deployment_success,
             )
 
-    async def get_personalized_insights(
-        self, user_id: str, current_request: str
-    ) -> dict[str, Any]:
+    async def get_personalized_insights(self, user_id: str, current_request: str) -> dict[str, Any]:
         async with tracer.trace_operation(
-            "get_personalized_insights",
-            {"user_id": user_id}
+            "get_personalized_insights", {"user_id": user_id}
         ) as span:
             logger.debug("Generating personalized deployment insights", user_id=user_id)
 
@@ -267,12 +272,14 @@ class LearningIntegrationService:
                 ),
             }
 
-            span.set_attributes({
-                "insights_generated": len(insights),
-                "patterns_analyzed": len(patterns),
-                "optimizations_analyzed": len(optimizations),
-                "failures_analyzed": len(failures),
-            })
+            span.set_attributes(
+                {
+                    "insights_generated": len(insights),
+                    "patterns_analyzed": len(patterns),
+                    "optimizations_analyzed": len(optimizations),
+                    "failures_analyzed": len(failures),
+                }
+            )
 
             logger.info(
                 "Personalized insights generated",
@@ -286,7 +293,7 @@ class LearningIntegrationService:
     def _analyze_deployment_velocity(self, patterns: list[dict[str, Any]]) -> dict[str, Any]:
         if not patterns:
             return {"status": "insufficient_data", "velocity": "unknown"}
-        
+
         total_deployments = sum(p.get("frequency", 0) for p in patterns)
         if total_deployments > 50:
             return {"status": "high_velocity", "deployments_analyzed": total_deployments}
@@ -295,67 +302,79 @@ class LearningIntegrationService:
         else:
             return {"status": "low_velocity", "deployments_analyzed": total_deployments}
 
-    def _identify_cost_opportunities(self, optimizations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _identify_cost_opportunities(
+        self, optimizations: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
         opportunities = []
         for opt in optimizations:
             if opt.get("cost_savings_percentage", 0) > 15 and opt.get("adoption_rate", 0) < 0.5:
-                opportunities.append({
-                    "resource_type": opt.get("resource_type"),
-                    "potential_savings": opt.get("cost_savings_percentage"),
-                    "adoption_barrier": "low_adoption_rate",
-                    "recommendation": "Review performance impact and consider gradual adoption",
-                })
+                opportunities.append(
+                    {
+                        "resource_type": opt.get("resource_type"),
+                        "potential_savings": opt.get("cost_savings_percentage"),
+                        "adoption_barrier": "low_adoption_rate",
+                        "recommendation": "Review performance impact and consider gradual adoption",
+                    }
+                )
         return opportunities
 
     def _assess_risk_factors(self, failures: list[dict[str, Any]]) -> list[dict[str, Any]]:
         risk_factors = []
         for failure in failures:
             if failure.get("frequency", 0) > 3:
-                risk_factors.append({
-                    "risk_type": failure.get("error_type"),
-                    "frequency": failure.get("frequency"),
-                    "environments": failure.get("environments", []),
-                    "mitigation": failure.get("recommended_solutions", [])[:2],
-                })
+                risk_factors.append(
+                    {
+                        "risk_type": failure.get("error_type"),
+                        "frequency": failure.get("frequency"),
+                        "environments": failure.get("environments", []),
+                        "mitigation": failure.get("recommended_solutions", [])[:2],
+                    }
+                )
         return risk_factors
 
     def _extract_success_patterns(self, patterns: list[dict[str, Any]]) -> list[dict[str, Any]]:
         success_patterns = []
         for pattern in patterns:
             if pattern.get("success_rate", 0) > 0.9 and pattern.get("frequency", 0) > 5:
-                success_patterns.append({
-                    "resource_combination": pattern.get("resource_types", []),
-                    "success_rate": pattern.get("success_rate"),
-                    "frequency": pattern.get("frequency"),
-                    "common_config": pattern.get("common_configurations", {}),
-                })
+                success_patterns.append(
+                    {
+                        "resource_combination": pattern.get("resource_types", []),
+                        "success_rate": pattern.get("success_rate"),
+                        "frequency": pattern.get("frequency"),
+                        "common_config": pattern.get("common_configurations", {}),
+                    }
+                )
         return success_patterns[:5]
 
     def _generate_personalized_recommendations(
-        self, patterns: list[dict[str, Any]], optimizations: list[dict[str, Any]], current_request: str
+        self,
+        patterns: list[dict[str, Any]],
+        optimizations: list[dict[str, Any]],
+        current_request: str,
     ) -> list[str]:
         recommendations = []
-        
+
         high_success_resources = set()
         for pattern in patterns:
             if pattern.get("success_rate", 0) > 0.95:
                 high_success_resources.update(pattern.get("resource_types", []))
-        
+
         if high_success_resources:
             recommendations.append(
-                f"Consider using {', '.join(list(high_success_resources)[:3])} - high success rate in your history"
+                f"Consider using {', '.join(list(high_success_resources)[:3])} - "
+                "high success rate in your history"
             )
-        
+
         high_value_optimizations = [
-            opt for opt in optimizations 
-            if opt.get("cost_savings_percentage", 0) > 20
+            opt for opt in optimizations if opt.get("cost_savings_percentage", 0) > 20
         ]
         if high_value_optimizations:
             top_opt = high_value_optimizations[0]
             recommendations.append(
-                f"Apply {top_opt.get('resource_type')} optimization for {top_opt.get('cost_savings_percentage'):.1f}% cost savings"
+                f"Apply {top_opt.get('resource_type')} optimization for "
+                f"{top_opt.get('cost_savings_percentage'):.1f}% cost savings"
             )
-        
+
         return recommendations
 
 

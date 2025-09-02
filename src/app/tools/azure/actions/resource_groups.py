@@ -21,7 +21,8 @@ async def create_resource_group(
     **kwargs: Any,
 ) -> tuple[str, Any]:
     logger.info(
-        f"create_resource_group called: resource_group={resource_group}, location={location}, dry_run={dry_run}, force={force}"
+        f"create_resource_group called: resource_group={resource_group}, "
+        f"location={location}, dry_run={dry_run}, force={force}"
     )
 
     if not validate_location(location):

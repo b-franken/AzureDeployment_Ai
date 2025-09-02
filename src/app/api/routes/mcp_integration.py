@@ -174,6 +174,7 @@ async def execute_tool(
                 correlation_id=correlation_id,
                 execution_time_ms=execution_time,
                 result=result,
+                error=None,
             )
 
             logger.info(
@@ -223,6 +224,7 @@ async def execute_tool(
                 tool_name=request.tool_name,
                 correlation_id=correlation_id,
                 execution_time_ms=execution_time,
+                result=None,
                 error=f"Tool execution timeout after {request.timeout_seconds} seconds",
             )
 
@@ -263,6 +265,7 @@ async def execute_tool(
                 tool_name=request.tool_name,
                 correlation_id=correlation_id,
                 execution_time_ms=execution_time,
+                result=None,
                 error=str(e),
             )
 
@@ -316,7 +319,7 @@ async def run_integrated_analytics(
                 },
             )
 
-            return result
+            return result if isinstance(result, dict) else {"result": result}
 
         except Exception as e:
             span.record_exception(e)
@@ -387,7 +390,7 @@ async def run_security_advisor(
                 },
             )
 
-            return result
+            return result if isinstance(result, dict) else {"result": result}
 
         except Exception as e:
             span.record_exception(e)
@@ -460,7 +463,7 @@ async def run_cost_intelligence(
                 },
             )
 
-            return result
+            return result if isinstance(result, dict) else {"result": result}
 
         except Exception as e:
             span.record_exception(e)
@@ -491,8 +494,8 @@ async def run_cost_intelligence(
 @router.get("/security/quick-scan")
 async def security_quick_scan(
     subscription_id: Annotated[str, Query(description="Azure subscription ID")],
+    td: Annotated[TokenData, Depends(mcp_dependency)],
     resource_group: Annotated[str | None, Query(description="Optional resource group")] = None,
-    td: Annotated[TokenData, Depends(mcp_dependency)] = None,
 ) -> dict[str, Any]:
     """Run quick security scan for critical issues only."""
 
@@ -528,7 +531,7 @@ async def security_quick_scan(
                 },
             )
 
-            return result
+            return result if isinstance(result, dict) else {"result": result}
 
         except Exception as e:
             span.record_exception(e)
@@ -559,7 +562,7 @@ async def security_quick_scan(
 @router.get("/cost/quick-insights")
 async def cost_quick_insights(
     subscription_id: Annotated[str, Query(description="Azure subscription ID")],
-    td: Annotated[TokenData, Depends(mcp_dependency)] = None,
+    td: Annotated[TokenData, Depends(mcp_dependency)],
 ) -> dict[str, Any]:
     """Get quick cost insights and key metrics."""
 
@@ -594,7 +597,7 @@ async def cost_quick_insights(
                 },
             )
 
-            return result
+            return result if isinstance(result, dict) else {"result": result}
 
         except Exception as e:
             span.record_exception(e)

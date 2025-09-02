@@ -67,8 +67,7 @@ class DynamicBatchProcessor:
             return await self._embed_fn(texts)
 
         future: asyncio.Future[list[list[float]]] = asyncio.Future()
-        request = BatchRequest(
-            texts=texts, future=future, timestamp=time.time())
+        request = BatchRequest(texts=texts, future=future, timestamp=time.time())
 
         async with self._queue_lock:
             if len(self._queue) >= self._max_queue_size:
@@ -114,7 +113,7 @@ class DynamicBatchProcessor:
             return
 
         batch_requests = self._queue[: self._batch_size]
-        self._queue = self._queue[self._batch_size:]
+        self._queue = self._queue[self._batch_size :]
 
         try:
             await self._process_batch(batch_requests)
@@ -195,6 +194,5 @@ def get_batch_processor(
     """Get or create a global batch processor instance."""
     global _batch_processor
     if _batch_processor is None:
-        _batch_processor = DynamicBatchProcessor(
-            embed_fn, batch_size, batch_wait_ms)
+        _batch_processor = DynamicBatchProcessor(embed_fn, batch_size, batch_wait_ms)
     return _batch_processor

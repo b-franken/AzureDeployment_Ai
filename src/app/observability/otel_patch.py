@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Callable
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -18,7 +19,7 @@ def patch_opentelemetry_attributes() -> None:
             if hasattr(otel_attrs, "_clean_attribute_value"):
                 original_clean = otel_attrs._clean_attribute_value
 
-                def patched_clean_attribute_value(value, limit):
+                def patched_clean_attribute_value(value: Any, limit: int | None) -> Any:
                     if is_logger_object(value):
                         return f"<{value.__class__.__name__}>"
                     return original_clean(value, limit)
@@ -29,7 +30,9 @@ def patch_opentelemetry_attributes() -> None:
             if hasattr(otel_attrs, "_clean_extended_attribute_value"):
                 original_extended_clean = otel_attrs._clean_extended_attribute_value
 
-                def patched_clean_extended_attribute_value(value, max_len=None):
+                def patched_clean_extended_attribute_value(
+                    value: Any, max_len: int | None = None
+                ) -> Any:
                     if is_logger_object(value):
                         return f"<{value.__class__.__name__}>"
                     return original_extended_clean(value, max_len)
@@ -83,7 +86,9 @@ def patch_opentelemetry_attributes() -> None:
                 if original_is_valid is None:
                     continue
 
-                def create_patched_validator(orig_func):
+                def create_patched_validator(
+                    orig_func: Callable[[Any], bool],
+                ) -> Callable[[Any], bool]:
                     def patched_is_valid_attribute_value(value: Any) -> bool:
                         if is_logger_object(value):
                             return False
@@ -100,11 +105,16 @@ def patch_opentelemetry_attributes() -> None:
                                 if is_logger_object(item):
                                     return False
 
-                        return orig_func(value)
+                        try:
+                            return orig_func(value)
+                        except Exception:
+                            return False
 
                     return patched_is_valid_attribute_value
 
-                module.is_valid_attribute_value = create_patched_validator(original_is_valid)
+                setattr(  # noqa: B010
+                    module, "is_valid_attribute_value", create_patched_validator(original_is_valid)
+                )
                 logger.info(f"Patched {module_name} attribute validation")
 
             except ImportError:
@@ -121,7 +131,11 @@ def patch_opentelemetry_attributes() -> None:
                 def patched_private_validator(value: Any) -> bool:
                     if is_logger_object(value):
                         return False
-                    return original(value)
+                    try:
+                        result = original(value)
+                        return bool(result)
+                    except Exception:
+                        return False
 
                 otel_attrs._is_valid_attribute_value = patched_private_validator
                 logger.info("Patched private attribute validator")
@@ -133,12 +147,17 @@ def patch_opentelemetry_attributes() -> None:
 
             original_warn = warnings.warn
 
-            def filtered_warn(message, category=None, stacklevel=1, source=None):
+            def filtered_warn(
+                message: str | Warning,
+                category: type[Warning] | None = None,
+                stacklevel: int = 1,
+                source: Any = None,
+            ) -> None:
                 if isinstance(message, str) and "_FixedFindCallerLogger" in message:
                     return None
                 return original_warn(message, category, stacklevel, source)
 
-            warnings.warn = filtered_warn
+            warnings.warn = filtered_warn  # type: ignore[assignment]
             logger.info("Patched warnings.warn to suppress _FixedFindCallerLogger warnings")
         except Exception as e:
             logger.debug(f"Could not patch warnings: {e}")
@@ -205,8 +224,8 @@ def patch_logging_handlers() -> None:
             ):
                 original_emit = getattr(handler, "_original_emit", None) or handler.emit
 
-                def create_safe_emit(orig_emit):
-                    def safe_emit(record):
+                def create_safe_emit(orig_emit: Callable[[Any], None]) -> Callable[[Any], None]:
+                    def safe_emit(record: Any) -> None:
                         if hasattr(record, "__dict__"):
                             clean_dict = {}
                             for key, value in record.__dict__.items():
@@ -230,8 +249,8 @@ def patch_logging_handlers() -> None:
 
                     return safe_emit
 
-                handler._original_emit = original_emit
-                handler.emit = create_safe_emit(original_emit)
+                handler._original_emit = original_emit  # type: ignore[attr-defined]
+                handler.emit = create_safe_emit(original_emit)  # type: ignore[assignment]
 
         logger.info("OpenTelemetry logging handlers patched")
 

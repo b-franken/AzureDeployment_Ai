@@ -115,15 +115,17 @@ class IntegratedAnalyticsResponse(BaseModel):
 class IntegratedAnalyticsTool:
     """Integrated analytics tool combining security, cost, change, and audit analysis."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.audit_logger = AuditLogger()
         self.cost_system = CostManagementSystem()
-        self.clients = None
+        self.clients: Clients | None = None
 
     async def _ensure_clients(self) -> Clients:
         """Ensure Azure clients are initialized."""
         if self.clients is None:
-            self.clients = await Clients.create()
+            from app.tools.azure.clients import get_clients
+
+            self.clients = await get_clients(None)
         return self.clients
 
     async def analyze_security_posture(
@@ -163,9 +165,7 @@ class IntegratedAnalyticsTool:
                     security_score = 95.0  # Default good score
 
                 # Get compliance status
-                compliance_status = await self._get_compliance_status(
-                    clients, request.subscription_id
-                )
+                compliance_status = await self._get_compliance_status(request.subscription_id)
 
                 logger.info(
                     "Security analysis completed",
@@ -393,7 +393,10 @@ class IntegratedAnalyticsTool:
 
                 # Query audit logs
                 audit_query = AuditQuery(
-                    start_time=start_date, end_time=end_date, user_id=request.user_id, limit=1000
+                    start_time=start_date,
+                    end_time=end_date,
+                    user_ids=[request.user_id] if request.user_id else None,
+                    limit=1000,
                 )
 
                 events = await self.audit_logger.query_events(audit_query)
@@ -409,7 +412,7 @@ class IntegratedAnalyticsTool:
                 suspicious_activities = await self._detect_suspicious_activities(events)
 
                 # Get top users by activity
-                user_activity = {}
+                user_activity: dict[str, int] = {}
                 for event in events:
                     user_id = getattr(event, "user_id", "unknown")
                     user_activity[user_id] = user_activity.get(user_id, 0) + 1
@@ -686,7 +689,7 @@ class IntegratedAnalyticsTool:
             suspicious = []
 
             # Group events by user
-            user_events = {}
+            user_events: dict[str, list[Any]] = {}
             for event in events:
                 user_id = getattr(event, "user_id", "unknown")
                 if user_id not in user_events:
@@ -769,10 +772,8 @@ async def run_integrated_analysis(
         )
 
         tool = IntegratedAnalyticsTool()
-        response = IntegratedAnalyticsResponse(
-            success=True,
-            correlation_id=correlation_id,
-            subscription_id=subscription_id,
+        response = IntegratedAnalyticsResponse.model_validate(
+            {"success": True, "correlation_id": correlation_id, "subscription_id": subscription_id}
         )
 
         try:
@@ -893,10 +894,10 @@ async def run_integrated_analysis(
             return response
 
 
-def register_integrated_analytics_tool(mcp_instance):
+def register_integrated_analytics_tool(mcp_instance: Any) -> None:
     """Register integrated analytics tool with MCP server."""
 
-    @mcp_instance.tool(
+    @mcp_instance.tool(  # type: ignore[misc]
         name="integrated_analytics",
         description=(
             "Comprehensive Azure analytics combining security, cost, change, and audit analysis"
@@ -922,19 +923,27 @@ def register_integrated_analytics_tool(mcp_instance):
         # Build analysis requests based on parameters
         security_request = None
         if include_security:
-            security_request = SecurityAnalysisRequest(
-                subscription_id=subscription_id, severity_filter=security_severity_filter
+            from typing import Literal, cast
+
+            severity_filter = cast(
+                Literal["critical", "high", "medium", "low", "all"], security_severity_filter
+            )
+            security_request = SecurityAnalysisRequest.model_validate(
+                {"subscription_id": subscription_id, "severity_filter": severity_filter}
             )
 
         change_request = None
         if include_changes:
-            change_request = ChangeAnalysisRequest(
-                subscription_id=subscription_id, time_range=time_range
+            time_range_literal = cast(Literal["1h", "6h", "12h", "24h", "7d", "30d"], time_range)
+            change_request = ChangeAnalysisRequest.model_validate(
+                {"subscription_id": subscription_id, "time_range": time_range_literal}
             )
 
         audit_request = None
         if include_audit:
-            audit_request = AuditAnalysisRequest(subscription_id=subscription_id)
+            audit_request = AuditAnalysisRequest.model_validate(
+                {"subscription_id": subscription_id}
+            )
 
         # Run integrated analysis
         result = await run_integrated_analysis(

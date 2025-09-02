@@ -5,7 +5,7 @@ import logging
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import NotRequired, Protocol, TypedDict, runtime_checkable
+from typing import Any, NotRequired, Protocol, TypedDict, cast, runtime_checkable
 
 from app.ai.arg_mapper import map_args_with_function_call
 from app.ai.generator import generate_response
@@ -13,6 +13,8 @@ from app.ai.llm.factory import get_provider_and_model
 from app.ai.nlu import maybe_map_provision, maybe_map_provision_async
 from app.ai.nlu.embeddings_classifier import EmbeddingsClassifierService
 from app.ai.tools_definitions import build_openai_tools
+from app.ai.types import ChatHistory
+from app.ai.types import Message as AIMessage
 from app.common.envs import Env
 from app.platform.audit.logger import (
     AuditEvent,
@@ -36,30 +38,6 @@ DIRECT_TOOL_RE = re.compile(
 )
 
 
-class ToolFunction(TypedDict, total=False):
-    name: str
-    arguments: object
-
-
-class ToolCall(TypedDict, total=False):
-    id: NotRequired[str]
-    type: NotRequired[str]
-    function: ToolFunction
-
-
-class Message(TypedDict, total=False):
-    content: str
-    tool_calls: list[ToolCall]
-
-
-class Choice(TypedDict):
-    message: Message
-
-
-class ChatResponse(TypedDict, total=False):
-    choices: list[Choice]
-
-
 @dataclass
 class ToolExecutionContext:
     user_id: str
@@ -75,10 +53,10 @@ class ToolExecutionContext:
     audit_logger: AuditLogger | None = None
     tool_execution_count: int = 0
     max_tool_executions: int = 10
-    executed_tools: set[str] = None
+    executed_tools: set[str] | None = None
     last_tool_output: str | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.executed_tools is None:
             self.executed_tools = set()
 
@@ -164,29 +142,166 @@ async def _log_error(error: Exception, context: ToolExecutionContext | None) -> 
 
 
 def _estimate_tokens(messages: Sequence[dict[str, object]]) -> int:
+    from app.core.logging import get_logger
+
+    logger = get_logger(__name__)
     total = 0
-    for m in messages:
-        c = m.get("content")
-        if isinstance(c, str):
-            total += max(1, len(c) // 4)
-        elif isinstance(c, dict):
-            total += max(1, len(json.dumps(c)) // 4)
+
+    try:
+        for m in messages:
+            try:
+                c = m.get("content")
+                if isinstance(c, str):
+                    total += max(1, len(c) // 4)
+                elif isinstance(c, dict):
+                    total += max(1, len(json.dumps(c)) // 4)
+                else:
+                    logger.debug(
+                        "message_content_unknown_type",
+                        content_type=type(c).__name__,
+                        message_keys=list(m.keys()) if isinstance(
+                            m, dict) else []
+                    )
+            except Exception as e:
+                logger.warning(
+                    "message_processing_failed",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    message_preview=str(m)[:100] if m else "None"
+                )
+    except Exception as e:
+        logger.error(
+            "token_estimation_failed",
+            error=str(e),
+            error_type=type(e).__name__,
+            fallback_zero=True
+        )
+        return 0
+
     return total
 
 
 def _within_budget(messages: Sequence[dict[str, object]], limit: int) -> bool:
-    return _estimate_tokens(messages) < limit
+    try:
+        return _estimate_tokens(messages) < limit
+    except Exception as e:
+        from app.core.logging import get_logger
+
+        logger = get_logger(__name__)
+        logger.warning(
+            "budget_check_failed",
+            error=str(e),
+            error_type=type(e).__name__,
+            limit=limit,
+            fallback_false=True
+        )
+        return False
+
+
+def _within_budget_ai_messages(messages: list[AIMessage], limit: int) -> bool:
+    from app.core.logging import get_logger
+
+    logger = get_logger(__name__)
+
+    try:
+        converted_messages: list[dict[str, object]] = []
+
+        for msg in messages:
+            try:
+                converted_msg: dict[str, object] = {
+                    "role": msg.get("role", ""),
+                    "content": msg.get("content", "")
+                }
+
+                if "tool_calls" in msg and msg["tool_calls"]:
+                    converted_msg["tool_calls"] = msg["tool_calls"]
+
+                if "tool_call_id" in msg and msg["tool_call_id"]:
+                    converted_msg["tool_call_id"] = msg["tool_call_id"]
+
+                if "name" in msg and msg["name"]:
+                    converted_msg["name"] = msg["name"]
+
+                converted_messages.append(converted_msg)
+
+            except Exception as e:
+                logger.warning(
+                    "message_conversion_failed",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    message_keys=list(msg.keys()) if isinstance(
+                        msg, dict) else [],
+                    skipping_message=True
+                )
+                continue
+
+        return _within_budget(converted_messages, limit)
+
+    except Exception as e:
+        logger.error(
+            "ai_message_budget_check_failed",
+            error=str(e),
+            error_type=type(e).__name__,
+            limit=limit,
+            messages_count=len(messages) if hasattr(
+                messages, '__len__') else 'unknown',
+            fallback_false=True
+        )
+        return False
 
 
 def _pick_args(raw_args: object) -> dict[str, object]:
+    from app.core.logging import get_logger
+
+    logger = get_logger(__name__)
+
     if isinstance(raw_args, str):
         try:
             j = json.loads(raw_args)
-            return j if isinstance(j, dict) else {}
-        except Exception:
+            if isinstance(j, dict):
+                return dict(j)
+            else:
+                logger.warning(
+                    "args_string_not_dict",
+                    parsed_type=type(j).__name__,
+                    raw_args_preview=raw_args[:100] if raw_args else "",
+                    fallback_empty_dict=True
+                )
+                return {}
+        except json.JSONDecodeError as e:
+            logger.warning(
+                "args_json_decode_failed",
+                error=str(e),
+                raw_args_preview=raw_args[:100] if raw_args else "",
+                fallback_empty_dict=True
+            )
             return {}
+        except Exception as e:
+            logger.warning(
+                "args_processing_unexpected_error",
+                error=str(e),
+                error_type=type(e).__name__,
+                fallback_empty_dict=True
+            )
+            return {}
+
     if isinstance(raw_args, dict):
-        return dict(raw_args)
+        try:
+            return dict(raw_args)
+        except Exception as e:
+            logger.warning(
+                "args_dict_copy_failed",
+                error=str(e),
+                error_type=type(e).__name__,
+                fallback_empty_dict=True
+            )
+            return {}
+
+    logger.debug(
+        "args_unknown_type",
+        args_type=type(raw_args).__name__,
+        fallback_empty_dict=True
+    )
     return {}
 
 
@@ -225,7 +340,10 @@ def _maybe_wrap_approval(
 
 
 async def _run_tool(
-    name: str, args: dict[str, object], context: ToolExecutionContext | None = None, conversation_context: list[dict] | None = None
+    name: str,
+    args: dict[str, object],
+    context: ToolExecutionContext | None = None,
+    conversation_context: list[dict[str, Any]] | None = None,
 ) -> dict[str, object]:
     if context:
         context.tool_execution_count += 1
@@ -244,7 +362,11 @@ async def _run_tool(
                 ),
             }
         is_provisioning_tool = name in ["azure_provision"]
-        if tool_signature in context.executed_tools and not is_provisioning_tool:
+        if (
+            context.executed_tools
+            and tool_signature in context.executed_tools
+            and not is_provisioning_tool
+        ):
             logger.warning(
                 (
                     "Duplicate tool execution detected: %s with identical args. "
@@ -259,13 +381,18 @@ async def _run_tool(
                     f"Tool {name} was already executed with these parameters to prevent loops."
                 ),
             }
-        if is_provisioning_tool and tool_signature in context.executed_tools:
+        if (
+            is_provisioning_tool
+            and context.executed_tools
+            and tool_signature in context.executed_tools
+        ):
             logger.info(
                 "Re-executing provisioning tool %s - this is allowed for deployment operations.",
                 name,
             )
 
-            context.executed_tools.add(tool_signature)
+            if context.executed_tools is not None:
+                context.executed_tools.add(tool_signature)
 
     execution_num = context.tool_execution_count if context else "unknown"
     logger.info("Executing tool: %s with args: %s (execution #%s)",
@@ -317,19 +444,46 @@ async def _run_tool(
         logger.error(
             f"Tool {name} execution failed with exception: {e!s}", exc_info=True)
         raise
-    result = raw if isinstance(raw, dict) else {
-        "ok": True, "summary": "", "output": raw}
+    result: dict[str, object] = cast(
+        dict[str, object],
+        raw if isinstance(raw, dict) else {
+            "ok": True, "summary": "", "output": raw},
+    )
     if isinstance(result, dict):
         result = _maybe_wrap_approval(result, context)
     return result
 
 
+class ToolFunction(TypedDict, total=False):
+    name: str
+    arguments: object
+
+
+class ToolCall(TypedDict, total=False):
+    id: NotRequired[str]
+    type: NotRequired[str]
+    function: ToolFunction
+
+
+class Message(TypedDict, total=False):
+    content: str
+    tool_calls: list[ToolCall]
+
+
+class Choice(TypedDict):
+    message: Message
+
+
+class ChatResponse(TypedDict, total=False):
+    choices: list[Choice]
+
+
 @runtime_checkable
-class SupportsChatRaw(Protocol):
+class SupportsOpenAIToolsAPI(Protocol):
     async def chat_raw(
         self,
         model: str,
-        messages: list[dict[str, object]],
+        messages: list[AIMessage],
         tools: list[dict[str, object]] | None = None,
         tool_choice: str | None = "auto",
         temperature: float | None = None,
@@ -347,19 +501,67 @@ async def _openai_tools_orchestrator(
     token_budget: int,
     context: ToolExecutionContext | None,
 ) -> str | None:
+    from app.core.logging import get_logger
+
+    logger = get_logger(__name__)
+
     ensure_tools_loaded()
     tools = build_openai_tools()
     if not tools:
+        logger.debug("openai_orchestrator_no_tools",
+                     provider=provider, model=model)
         return None
+
     llm, selected_model = await get_provider_and_model(provider, model)
     logger.info(
-        f"OpenAI orchestrator using provider={provider} -> selected_model={selected_model}")
-    if not isinstance(llm, SupportsChatRaw):
+        "openai_orchestrator_provider_selected",
+        provider=provider,
+        selected_model=selected_model,
+        tools_count=len(tools)
+    )
+
+    if not hasattr(llm, 'chat_raw'):
         logger.warning(
-            f"Provider {provider} does not support chat_raw, skipping OpenAI orchestrator"
+            "openai_orchestrator_no_chat_raw_method",
+            provider=provider,
+            provider_type=type(llm).__name__
         )
         return None
-    messages: list[dict[str, object]] = [
+
+    try:
+        # Check method signature compatibility for tools API
+        import inspect
+        sig = inspect.signature(llm.chat_raw)
+        params = list(sig.parameters.keys())
+        has_tools_param = 'tools' in params or 'kwargs' in params
+
+        if not has_tools_param:
+            logger.warning(
+                "openai_orchestrator_no_tools_support",
+                provider=provider,
+                provider_type=type(llm).__name__,
+                chat_raw_params=params
+            )
+            return None
+
+        logger.debug(
+            "openai_orchestrator_tools_compatibility_verified",
+            provider=provider,
+            provider_type=type(llm).__name__,
+            has_tools_param=has_tools_param
+        )
+
+    except Exception as e:
+        logger.warning(
+            "openai_orchestrator_compatibility_check_failed",
+            error=str(e),
+            error_type=type(e).__name__,
+            provider=provider,
+            provider_type=type(llm).__name__,
+            fallback_continue=True
+        )
+        # Continue anyway - let the actual call fail if incompatible
+    messages: list[AIMessage] = [
         {
             "role": "system",
             "content": (
@@ -383,9 +585,33 @@ async def _openai_tools_orchestrator(
         }
     ]
     if memory:
-        messages.extend([{"role": m["role"], "content": m["content"]}
-                        for m in memory])
-    messages.append({"role": "user", "content": user_input})
+        from app.core.logging import get_logger
+
+        logger = get_logger(__name__)
+
+        for m in memory:
+            try:
+                role = m.get("role")
+                content = m.get("content")
+                if role and content:
+                    messages.append(
+                        cast(AIMessage, {"role": role, "content": content}))
+                else:
+                    logger.warning(
+                        "memory_entry_missing_fields",
+                        missing_role=not role,
+                        missing_content=not content,
+                        memory_entry=m
+                    )
+            except Exception as e:
+                logger.warning(
+                    "memory_entry_processing_failed",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    memory_entry=m
+                )
+
+    messages.append(cast(AIMessage, {"role": "user", "content": user_input}))
 
     last_rich_response: str | None = None
 
@@ -399,47 +625,122 @@ async def _openai_tools_orchestrator(
                 temperature=0.01,
             )
         except Exception as e:
-            logger.error(f"OpenAI orchestrator single call failed: {e}")
+            logger.error(
+                "openai_orchestrator_single_call_failed",
+                error=str(e),
+                error_type=type(e).__name__,
+                provider=provider,
+                model=selected_model,
+                tools_count=len(tools)
+            )
             return f"Failed to process request: {e!s}"
         choices = first.get("choices", [])
         if not choices:
+            logger.warning(
+                "openai_orchestrator_no_choices",
+                provider=provider,
+                model=selected_model,
+                response_keys=list(first.keys()) if isinstance(
+                    first, dict) else []
+            )
             return None
-        msg = choices[0]["message"]
-        tool_calls = msg.get("tool_calls") or []
-        if not tool_calls:
-            content = (msg.get("content") or "").strip()
-            return content or None
-        call = tool_calls[0]
-        if call.get("type") != "function":
-            return "Tool call not supported."
-        fn = call.get("function") or {}
-        tname = (fn.get("name") or "").strip()
-        args = _pick_args(fn.get("arguments") or {})
+
+        try:
+            msg = choices[0]["message"]
+            tool_calls = msg.get("tool_calls") or []
+
+            if not tool_calls:
+                content = str(msg.get("content") or "").strip()
+                logger.debug(
+                    "openai_orchestrator_no_tool_calls",
+                    provider=provider,
+                    model=selected_model,
+                    content_length=len(content)
+                )
+                return content or None
+
+            call = tool_calls[0]
+            if call.get("type") != "function":
+                logger.warning(
+                    "openai_orchestrator_unsupported_call_type",
+                    call_type=call.get("type"),
+                    provider=provider,
+                    model=selected_model
+                )
+                return "Tool call not supported."
+
+            fn = call.get("function") or {}
+            tname = str(fn.get("name") or "").strip()
+
+            if not tname:
+                logger.warning(
+                    "openai_orchestrator_missing_tool_name",
+                    provider=provider,
+                    model=selected_model,
+                    function_keys=list(fn.keys()) if isinstance(
+                        fn, dict) else []
+                )
+                return "Tool call missing function name."
+
+            args = _pick_args(fn.get("arguments") or {})
+
+            logger.debug(
+                "openai_orchestrator_tool_call_extracted",
+                tool_name=tname,
+                args_count=len(args),
+                provider=provider,
+                model=selected_model
+            )
+
+        except (KeyError, IndexError, TypeError) as e:
+            logger.error(
+                "openai_orchestrator_response_parsing_failed",
+                error=str(e),
+                error_type=type(e).__name__,
+                provider=provider,
+                model=selected_model,
+                choices_count=len(choices) if choices else 0
+            )
+            return "Failed to parse tool response."
         result = await _run_tool(tname, args, context)
 
         if (
             isinstance(result, dict)
             and isinstance(result.get("output"), str)
             and (
-                "## Bicep Infrastructure Code" in result.get("output", "")
-                or "## Terraform Infrastructure Code" in result.get("output", "")
+                "## Bicep Infrastructure Code" in str(result.get("output", ""))
+                or "## Terraform Infrastructure Code" in str(result.get("output", ""))
             )
         ):
             output = result.get("output")
 
+            if output is None:
+                from app.core.logging import get_logger
+
+                logger = get_logger(__name__)
+                logger.warning(
+                    "tool_output_none",
+                    tool_name=tname,
+                    result_keys=list(result.keys()) if isinstance(
+                        result, dict) else [],
+                    fallback_empty_string=True
+                )
+                output = ""
+
             if context:
-                context.last_tool_output = output
+                context.last_tool_output = str(
+                    output) if output is not None else ""
             logger.info(
                 f"Found infrastructure code in {tname} output (single call), returning directly"
             )
-            return output
+            return str(output) if output is not None else ""
 
         body = result.get("output") if isinstance(result, dict) else result
         if isinstance(body, dict):
             body = json.dumps(body, ensure_ascii=False, indent=2)
         return f"{tname} • {result.get('summary', '')}\n\njson\n{body}\n"
     steps = 0
-    while steps < max_chain_steps and _within_budget(messages, token_budget):
+    while steps < max_chain_steps and _within_budget_ai_messages(messages, token_budget):
         try:
             resp = await llm.chat_raw(
                 model=selected_model,
@@ -449,30 +750,76 @@ async def _openai_tools_orchestrator(
                 temperature=0.01,
             )
         except Exception as e:
-            logger.error(f"OpenAI orchestrator chain step {steps} failed: {e}")
+            logger.error(
+                "openai_orchestrator_chain_step_failed",
+                error=str(e),
+                error_type=type(e).__name__,
+                step=steps,
+                provider=provider,
+                model=selected_model,
+                tools_count=len(tools)
+            )
             return f"Tool execution failed at step {steps}: {e!s}"
         choices2 = resp.get("choices", [])
         if not choices2:
-            return None
-        msg = choices2[0]["message"]
-        tool_calls = msg.get("tool_calls") or []
-        if not tool_calls:
-            content = (msg.get("content") or "").strip()
-            logger.info(
-                f"OpenAI orchestrator finished - no more tool calls requested (step {steps})"
+            logger.warning(
+                "openai_orchestrator_chain_no_choices",
+                step=steps,
+                provider=provider,
+                model=selected_model,
+                response_keys=list(resp.keys()) if isinstance(
+                    resp, dict) else []
             )
-            if last_rich_response:
+            return None
+
+        try:
+            msg = choices2[0]["message"]
+            tool_calls = msg.get("tool_calls") or []
+
+            if not tool_calls:
+                content = str(msg.get("content") or "").strip()
                 logger.info(
-                    "Returning rich infrastructure response instead of generic OpenAI response"
+                    "openai_orchestrator_chain_finished",
+                    step=steps,
+                    provider=provider,
+                    model=selected_model,
+                    content_length=len(content),
+                    has_rich_response=last_rich_response is not None
                 )
-                return last_rich_response
-            return content or None
+
+                if last_rich_response:
+                    logger.info(
+                        "openai_orchestrator_returning_rich_response",
+                        provider=provider,
+                        model=selected_model,
+                        response_length=len(last_rich_response)
+                    )
+                    return last_rich_response
+                return content or None
+
+        except (KeyError, IndexError, TypeError) as e:
+            logger.error(
+                "openai_orchestrator_chain_parsing_failed",
+                error=str(e),
+                error_type=type(e).__name__,
+                step=steps,
+                provider=provider,
+                model=selected_model,
+                choices_count=len(choices2) if choices2 else 0
+            )
+            return "Failed to parse chain response."
         messages.append(
-            {"role": "assistant", "content": msg.get(
-                "content") or "", "tool_calls": tool_calls}
+            cast(
+                AIMessage,
+                {
+                    "role": "assistant",
+                    "content": msg.get("content") or "",
+                    "tool_calls": tool_calls
+                }
+            )
         )
         for call in tool_calls:
-            if steps >= max_chain_steps or not _within_budget(messages, token_budget):
+            if steps >= max_chain_steps or not _within_budget_ai_messages(messages, token_budget):
                 break
             if call.get("type") != "function":
                 continue
@@ -484,29 +831,38 @@ async def _openai_tools_orchestrator(
             if isinstance(result, dict) and isinstance(result.get("output"), str):
                 output = result.get("output")
                 if (
-                    "## Bicep Infrastructure Code" in output
-                    or "## Terraform Infrastructure Code" in output
+                    "## Bicep Infrastructure Code" in str(output)
+                    or "## Terraform Infrastructure Code" in str(output)
                 ):
-                    last_rich_response = output
+                    last_rich_response = str(output)
 
                     if context:
-                        context.last_tool_output = output
+                        context.last_tool_output = str(output)
                     logger.info(
                         f"Captured rich infrastructure response from {tname}")
 
-            result_summary = result.get("summary", "").lower(
-            ) if isinstance(result, dict) else ""
+            result_summary_raw = result.get(
+                "summary", "") if isinstance(result, dict) else ""
+            result_summary = str(result_summary_raw).lower(
+            ) if result_summary_raw else ""
             result_output = result.get(
                 "output", "") if isinstance(result, dict) else ""
             result_ok = result.get("ok") if isinstance(result, dict) else False
 
+            output_length = len(str(result_output)) if result_output else 0
+
             logger.info(
-                f"COMPLETION DETECTION DEBUG: tool={tname}, result_type={type(result)}, "
-                f"ok={result_ok}, "
-                f"summary='{result.get('summary', '') if isinstance(result, dict) else 'N/A'}', "
-                f"output_length={len(result_output)}, "
-                f"has_bicep_code={'## Bicep Infrastructure Code' in result_output}, "
-                f"has_terraform_code={'## Terraform Infrastructure Code' in result_output}"
+                "completion_detection_debug",
+                tool=tname,
+                result_type=type(result).__name__,
+                ok=result_ok,
+                summary=result.get('summary', '') if isinstance(
+                    result, dict) else 'N/A',
+                output_length=output_length,
+                has_bicep_code='## Bicep Infrastructure Code' in str(
+                    result_output),
+                has_terraform_code='## Terraform Infrastructure Code' in str(
+                    result_output)
             )
 
             is_successful_completion = (
@@ -517,13 +873,11 @@ async def _openai_tools_orchestrator(
                         keyword in result_summary
                         for keyword in ["success", "deployed", "created", "completed", "executed"]
                     )
-                    or
-                    (
-                        "## Bicep Infrastructure Code" in result_output
-                        or "## Terraform Infrastructure Code" in result_output
+                    or (
+                        "## Bicep Infrastructure Code" in str(result_output)
+                        or "## Terraform Infrastructure Code" in str(result_output)
                     )
-                    or
-                    (tname == "azure_provision" and result_ok is True)
+                    or (tname == "azure_provision" and result_ok is True)
                 )
             )
 
@@ -537,12 +891,12 @@ async def _openai_tools_orchestrator(
                 )
 
             messages.append(
-                {
+                cast(AIMessage, {
                     "role": "tool",
                     "tool_call_id": call.get("id"),
                     "name": tname,
                     "content": json.dumps(result, ensure_ascii=False),
-                }
+                })
             )
             steps += 1
             if is_successful_completion and tname in [
@@ -568,8 +922,6 @@ async def _openai_tools_orchestrator(
                 output = result.get("output", str(result))
                 return output if isinstance(output, str) else json.dumps(result, indent=2)
 
-            (
-            )
             if (
                 tname == "azure_provision"
                 and steps >= 2
@@ -595,7 +947,14 @@ async def _openai_tools_orchestrator(
             temperature=0.01,
         )
     except Exception as e:
-        logger.error(f"OpenAI orchestrator final call failed: {e}")
+        logger.error(
+            "openai_orchestrator_final_call_failed",
+            error=str(e),
+            error_type=type(e).__name__,
+            steps_completed=steps,
+            provider=provider,
+            model=selected_model
+        )
         return f"Failed to generate final response: {e!s}"
     choicesf = final.get("choices", [])
     if not choicesf:
@@ -621,19 +980,30 @@ async def _run_tool_and_explain(
     provider: str | None,
     model: str | None,
     context: ToolExecutionContext | None,
-    conversation_context: list[dict] | None = None,
+    conversation_context: list[dict[str, Any]] | None = None,
 ) -> str:
     result = await _run_tool(name, args, context, conversation_context)
-    
+
     # For deployment tools, return the technical output directly without summarization
     if name in ["azure_provision", "provision_orchestrator"] and isinstance(result, dict):
         output = result.get("output", "")
-        if output and any(marker in output for marker in [
-            "```bicep", "```hcl", "```terraform", "## Azure Verified Module", "## Terraform Infrastructure"
-        ]):
+        if (
+            output
+            and isinstance(output, str)
+            and any(
+                marker in output
+                for marker in [
+                    "```bicep",
+                    "```hcl",
+                    "```terraform",
+                    "## Azure Verified Module",
+                    "## Terraform Infrastructure",
+                ]
+            )
+        ):
             logger.info(f"Returning technical output directly for tool {name}")
-            return output
-    
+            return str(output)
+
     summary = json.dumps(result, ensure_ascii=False)
     return await generate_response(
         f"Tool {name} executed with args {json.dumps(args, ensure_ascii=False)}.\n"
@@ -655,7 +1025,7 @@ async def maybe_call_tool(
     preferred_tool: str | None = None,
     context: ToolExecutionContext | None = None,
     return_json: bool = False,
-    conversation_context: list[dict] | None = None,
+    conversation_context: list[dict[str, Any]] | None = None,
 ) -> str:
     from app.core.config import settings
 
@@ -664,29 +1034,45 @@ async def maybe_call_tool(
         f"model={model} enable_tools={enable_tools}"
     )
     await _log_request(user_input, context)
-    
+
     # Handle proceed commands specially to avoid LLM reinterpretation
-    if enable_tools and user_input.lower().strip() in ["proceed", "confirm", "deploy it", "deploy now", "yes deploy", "go ahead"]:
-        logger.info(f"Detected proceed command: '{user_input}' - bypassing LLM orchestration")
+    if enable_tools and user_input.lower().strip() in [
+        "proceed",
+        "confirm",
+        "deploy it",
+        "deploy now",
+        "yes deploy",
+        "go ahead",
+    ]:
+        logger.info(
+            f"Detected proceed command: '{user_input}' - bypassing LLM orchestration")
         return await _run_tool_and_explain(
-            "azure_provision", 
-            {"request": user_input.strip()}, 
-            provider, 
-            model, 
-            context, 
-            conversation_context
+            "azure_provision",
+            {"request": user_input.strip()},
+            provider,
+            model,
+            context,
+            conversation_context,
         )
 
     if context and context.classifier and settings.environment != "development":
         try:
             _ = context.classifier.predict_proba([user_input])
         except Exception as exc:
-            logger.debug("Classifier prediction failed: %s", exc)
+            from app.core.logging import get_logger
+
+            structured_logger = get_logger(__name__)
+            structured_logger.warning(
+                "classifier_prediction_failed",
+                error=str(exc),
+                error_type=type(exc).__name__,
+                user_input_length=len(user_input),
+                fallback_continue=True
+            )
     if not enable_tools:
         try:
-            return await generate_response(
-                user_input, list(memory or []), model=model, provider=provider
-            )
+            memory_list = cast(ChatHistory, list(memory or []))
+            return await generate_response(user_input, memory_list, model=model, provider=provider)
         except Exception as e:
             await _log_error(e, context)
             return "Failed to generate response."
@@ -702,11 +1088,17 @@ async def maybe_call_tool(
             and isinstance(mapped.get("args"), dict)
         ):
             if return_json:
-                res = await _run_tool(str(mapped["tool"]), dict(mapped["args"]), context)
+                args_dict = cast(dict[str, Any], mapped["args"])
+                res = await _run_tool(str(mapped["tool"]), args_dict, context)
                 return json.dumps(res, ensure_ascii=False, indent=2)
+            args_dict = cast(dict[str, Any], mapped["args"])
             return await _run_tool_and_explain(
-                str(mapped["tool"]), dict(
-                    mapped["args"]), provider, model, context, conversation_context
+                str(mapped["tool"]),
+                args_dict,
+                provider,
+                model,
+                context,
+                conversation_context,
             )
         tools = list_tools()
         if allowlist:
@@ -740,7 +1132,10 @@ async def maybe_call_tool(
                 if return_json:
                     res = await _run_tool(name, dict(args_obj), context)
                     return json.dumps(res, ensure_ascii=False, indent=2)
-                return await _run_tool_and_explain(name, dict(args_obj), provider, model, context, conversation_context)
+                return await _run_tool_and_explain(
+                    name, dict(
+                        args_obj), provider, model, context, conversation_context
+                )
             except Exception:
                 return "Invalid direct tool syntax. Use: tool:tool_name {json-args}"
         if preferred_tool:
@@ -760,6 +1155,15 @@ async def maybe_call_tool(
                     model=model,
                 )
             except ValueError as e:
+                from app.core.logging import get_logger
+
+                structured_logger = get_logger(__name__)
+                structured_logger.error(
+                    "preferred_tool_args_mapping_failed",
+                    error=str(e),
+                    preferred_tool=preferred_tool,
+                    user_input_length=len(user_input)
+                )
                 return f"Invalid tool arguments: {e}"
             if return_json:
                 res = await _run_tool(preferred_tool, mapped_args, context)
@@ -771,9 +1175,10 @@ async def maybe_call_tool(
             "\n".join(
                 f"- {t.name}: {t.description} schema={t.schema}" for t in tools) or "None"
         )
+        memory_list = cast(ChatHistory, list(memory or []))
         plan = await generate_response(
             f"{_TOOLS_PLAN}\n\nAvailable tools:\n{tools_desc}\n\nUser: {user_input}",
-            list(memory or []),
+            memory_list,
             model=model,
             provider=provider,
         )
@@ -791,7 +1196,9 @@ async def maybe_call_tool(
         if return_json:
             res = await _run_tool(name, args, context)
             return json.dumps(res, ensure_ascii=False, indent=2)
-        return await _run_tool_and_explain(name, args, provider, model, context, conversation_context)
+        return await _run_tool_and_explain(
+            name, args, provider, model, context, conversation_context
+        )
     except Exception as e:
         await _log_error(e, context)
         return "An unexpected error occurred."

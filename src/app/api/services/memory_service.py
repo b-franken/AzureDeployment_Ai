@@ -32,7 +32,7 @@ class UserMemoryService:
     - Thread and agent-based conversation tracking
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._store: AsyncMemoryStore | None = None
         self._initialization_lock = False
 
@@ -498,7 +498,11 @@ class UserMemoryService:
                 }
 
                 span.set_attribute("total_messages", message_count)
-                span.set_attribute("memory_utilization", stats["memory_utilization_percent"])
+                utilization = stats.get("memory_utilization_percent", 0)
+                span.set_attribute(
+                    "memory_utilization",
+                    float(utilization) if isinstance(utilization, int | float | str) else 0.0,
+                )
 
                 logger.info("User memory statistics generated", extra={"user_id": user_id, **stats})
 

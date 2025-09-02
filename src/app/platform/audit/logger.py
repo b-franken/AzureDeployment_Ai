@@ -415,9 +415,9 @@ class AuditLogger:
                 resource_id=row["resource_id"],
                 action=row["action"],
             )
-            ok = event._calculate_hash() == row["hash"]
-            logger.info("audit_verify_done", event_id=event_id, ok=ok)
-            return ok
+            hash_matches: bool = event._calculate_hash() == row["hash"]
+            logger.info("audit_verify_done", event_id=event_id, ok=hash_matches)
+            return hash_matches
         except Exception:
             logger.error("audit_verify_failed", exc_info=True, event_id=event_id)
             return False

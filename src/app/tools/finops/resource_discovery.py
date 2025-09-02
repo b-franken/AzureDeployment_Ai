@@ -3,18 +3,65 @@ from __future__ import annotations
 import asyncio
 import time
 from datetime import datetime
-from typing import Any, TypedDict, cast
+from typing import Any, Protocol, TypedDict, cast
 
 import structlog
 from azure.core.exceptions import AzureError
 from azure.mgmt.monitor import MonitorManagementClient
 from azure.mgmt.resource import ResourceManagementClient
-from azure.mgmt.resourcegraph import ResourceGraphClient
-from azure.mgmt.resourcegraph.models import QueryRequest, QueryRequestOptions
 from opentelemetry import trace
 
 from app.core.azure_auth import build_credential
 from app.core.exceptions import ExternalServiceException, retry_on_error
+
+
+class QueryRequestProtocol(Protocol):
+    """Protocol for Azure Resource Graph QueryRequest."""
+
+    def __init__(
+        self, query: str, subscriptions: list[str] | None = None, options: Any = None, **kwargs: Any
+    ) -> None: ...
+
+
+class QueryRequestOptionsProtocol(Protocol):
+    """Protocol for Azure Resource Graph QueryRequestOptions."""
+
+    def __init__(
+        self,
+        top: int | None = None,
+        skip: int | None = None,
+        skip_token: str | None = None,
+        **kwargs: Any,
+    ) -> None: ...
+
+
+class ResourceGraphClientProtocol(Protocol):
+    """Protocol for Azure Resource Graph client."""
+
+    def __init__(self, credential: Any, subscription_id: str | None = None) -> None: ...
+    def resources(self, query: QueryRequestProtocol) -> Any: ...
+
+
+def _get_resource_graph_classes() -> tuple[
+    type[ResourceGraphClientProtocol] | None,
+    type[QueryRequestProtocol] | None,
+    type[QueryRequestOptionsProtocol] | None,
+]:
+    """Get Azure Resource Graph classes with proper error handling."""
+    try:
+        from azure.mgmt.resourcegraph import ResourceGraphClient  # type: ignore[import-untyped]
+        from azure.mgmt.resourcegraph.models import (  # type: ignore[import-untyped]
+            QueryRequest,
+            QueryRequestOptions,
+        )
+
+        return (
+            ResourceGraphClient,
+            QueryRequest,
+            QueryRequestOptions,
+        )
+    except ImportError:
+        return None, None, None
 
 
 class ResourceGroupInfo(TypedDict):
@@ -38,10 +85,13 @@ class ResourceDiscoveryService:
             self._clients[key] = ResourceManagementClient(self._credential, subscription_id)
         return cast("ResourceManagementClient", self._clients[key])
 
-    def _get_graph_client(self) -> ResourceGraphClient:
+    def _get_graph_client(self) -> ResourceGraphClientProtocol:
         if "graph" not in self._clients:
-            self._clients["graph"] = ResourceGraphClient(self._credential)
-        return cast("ResourceGraphClient", self._clients["graph"])
+            graph_client_class, _, _ = _get_resource_graph_classes()
+            if graph_client_class is None:
+                raise ImportError("Azure Resource Graph client not available")
+            self._clients["graph"] = graph_client_class(self._credential)
+        return cast("ResourceGraphClientProtocol", self._clients["graph"])
 
     def _get_monitor_client(self, subscription_id: str) -> MonitorManagementClient:
         key = f"monitor_{subscription_id}"
@@ -58,7 +108,6 @@ class ResourceDiscoveryService:
         if isinstance(dt, datetime):
             return dt.isoformat()
         try:
-            # type: ignore[redundant-cast]
             return cast("datetime", dt).isoformat()
         except Exception:
             return datetime.utcnow().isoformat()
@@ -266,10 +315,14 @@ class ResourceDiscoveryService:
                 top = min(max_results - len(all_results), 1000)
                 if top <= 0:
                     break
-                request = QueryRequest(
+                _, query_request_class, query_options_class = _get_resource_graph_classes()
+                if query_request_class is None or query_options_class is None:
+                    raise ImportError("Azure Resource Graph classes not available")
+
+                request = query_request_class(
                     query=query,
                     subscriptions=subscriptions,
-                    options=QueryRequestOptions(
+                    options=query_options_class(
                         top=top,
                         skip=None if skip_token else skip,
                         skip_token=skip_token,

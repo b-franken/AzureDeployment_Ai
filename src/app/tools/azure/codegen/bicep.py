@@ -214,7 +214,8 @@ resource aks 'Microsoft.ContainerService/managedClusters@2023-05-01' = {{
 
 output aksClusterId string = aks.id
 output aksClusterName string = aks.name
-output kubeconfigCommand string = 'az aks get-credentials --resource-group ${{resourceGroup().name}} --name ${{aks.name}}'
+output kubeconfigCommand string = 'az aks get-credentials ' + 
+  '--resource-group ${{resourceGroup().name}} --name ${{aks.name}}'
 """
 
     return f"""// Generic resource template for {action}

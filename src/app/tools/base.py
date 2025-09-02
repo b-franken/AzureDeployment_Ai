@@ -12,9 +12,13 @@ class ToolResult(TypedDict, total=False):
 
 
 class Tool(abc.ABC):
+    """Base class for all tools with proper type annotations."""
+
     name: str
     description: str
     schema: dict[str, Any]
 
     @abc.abstractmethod
-    async def run(self, **kwargs: Any) -> ToolResult: ...
+    async def run(self, **kwargs: Any) -> ToolResult:
+        """Execute the tool with given parameters."""
+        ...

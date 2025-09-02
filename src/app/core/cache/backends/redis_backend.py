@@ -21,7 +21,7 @@ class RedisCache(CacheBackend):
         self._pool = ConnectionPool.from_url(
             url,
             max_connections=max_connections,
-            decode_responses=False,
+            decode_responses=True,
         )
         self._client: Redis | None = None
 
@@ -35,18 +35,18 @@ class RedisCache(CacheBackend):
     async def get(self, key: str) -> Any | None:
         try:
             cli = await self._client_or_init()
-            fut = cast("Awaitable[bytes | None]", cli.get(key))
+            fut = cast("Awaitable[str | None]", cli.get(key))
             raw = await fut
             if raw is None:
                 return None
-            return loads(raw)
+            return loads(raw.encode("utf-8"))
         except RedisError:
             raise
 
     async def set(self, key: str, value: Any, ttl: int | None = None) -> bool:
         try:
             cli = await self._client_or_init()
-            data = dumps(value)
+            data = dumps(value).decode("utf-8")
             seconds = ttl if ttl is not None else self.default_ttl
             if seconds > 0:
                 fut = cast("Awaitable[bool]", cli.setex(key, seconds, data))
@@ -99,7 +99,8 @@ class RedisCache(CacheBackend):
     async def hset(self, name: str, key: str, value: Any) -> int:
         try:
             cli = await self._client_or_init()
-            fut = cast("Awaitable[int]", cli.hset(name, key, dumps(value)))
+            serialized_value = dumps(value).decode("utf-8")
+            fut = cast("Awaitable[int]", cli.hset(name, key, serialized_value))
             return await fut
         except RedisError:
             raise
@@ -107,11 +108,11 @@ class RedisCache(CacheBackend):
     async def hget(self, name: str, key: str) -> Any | None:
         try:
             cli = await self._client_or_init()
-            fut = cast("Awaitable[bytes | None]", cli.hget(name, key))
+            fut = cast("Awaitable[str | None]", cli.hget(name, key))
             raw = await fut
             if raw is None:
                 return None
-            return loads(raw)
+            return loads(raw.encode("utf-8"))
         except RedisError:
             raise
 

@@ -8,7 +8,7 @@ from app.tools.azure.deployment_phases import DeploymentState
 
 class DeploymentOutputFormatter:
     """Professional output formatting for Azure deployments without emojis."""
-    
+
     @staticmethod
     def format_preview_output(
         state: DeploymentState,
@@ -17,7 +17,7 @@ class DeploymentOutputFormatter:
     ) -> str:
         """Format deployment preview output for user confirmation."""
         monthly_cost = state.cost_estimate.get("monthly_estimate", 0.0)
-        
+
         sections = [
             "## Azure Deployment Preview",
             "",
@@ -26,7 +26,7 @@ class DeploymentOutputFormatter:
             f"- Resource Name: {resource_name}",
             f"- Resource Group: {state.resource_group}",
             f"- Location: {state.location}",
-            f"- Environment: dev",
+            "- Environment: dev",
             f"- Estimated Monthly Cost: ${monthly_cost:.2f} USD",
             "",
             "## Bicep Template Preview",
@@ -40,37 +40,43 @@ class DeploymentOutputFormatter:
             "```",
             "",
         ]
-        
+
         if state.what_if_analysis:
-            sections.extend([
-                "## What-If Analysis",
-                "```",
-                state.what_if_analysis,
-                "```",
-                "",
-            ])
-        
+            sections.extend(
+                [
+                    "## What-If Analysis",
+                    "```",
+                    state.what_if_analysis,
+                    "```",
+                    "",
+                ]
+            )
+
         if state.cost_estimate:
-            sections.extend([
-                "## Cost Breakdown",
-                "```json",
-                json.dumps(state.cost_estimate, indent=2),
-                "```",
+            sections.extend(
+                [
+                    "## Cost Breakdown",
+                    "```json",
+                    json.dumps(state.cost_estimate, indent=2),
+                    "```",
+                    "",
+                ]
+            )
+
+        sections.extend(
+            [
+                "## Next Steps",
+                "Review the templates and cost analysis above.",
                 "",
-            ])
-        
-        sections.extend([
-            "## Next Steps",
-            "Review the templates and cost analysis above.",
-            "",
-            "**To proceed with deployment, reply with: `proceed`**",
-            "",
-            f"**Preview ID:** {state.deployment_id}",
-            f"**Expires:** {state.expires_at.strftime('%H:%M:%S')} (30 minutes)",
-        ])
-        
+                "**To proceed with deployment, reply with: `proceed`**",
+                "",
+                f"**Preview ID:** {state.deployment_id}",
+                f"**Expires:** {state.expires_at.strftime('%H:%M:%S')} (30 minutes)",
+            ]
+        )
+
         return "\n".join(sections)
-    
+
     @staticmethod
     def format_deployment_output(
         deployment_result: dict[str, Any],
@@ -83,7 +89,7 @@ class DeploymentOutputFormatter:
     ) -> str:
         """Format successful deployment output."""
         outputs = deployment_result.get("outputs", {})
-        
+
         sections = [
             "## Azure Deployment Completed",
             "",
@@ -116,9 +122,9 @@ class DeploymentOutputFormatter:
             "",
             "**Note:** These templates represent the actual deployed infrastructure.",
         ]
-        
+
         return "\n".join(sections)
-    
+
     @staticmethod
     def format_deployment_error(
         error_message: str,
@@ -131,25 +137,27 @@ class DeploymentOutputFormatter:
             "",
             f"**Error:** {error_message}",
         ]
-        
+
         if deployment_id:
             sections.append(f"**Deployment ID:** {deployment_id}")
         if resource_group:
             sections.append(f"**Resource Group:** {resource_group}")
-            
-        sections.extend([
-            "",
-            "## Troubleshooting Steps",
-            "1. Check Azure Portal for detailed error information",
-            "2. Verify subscription permissions and quotas",
-            "3. Review resource naming conventions",
-            "4. Check for resource conflicts or dependencies",
-            "",
-            "**Need help?** Review the error details above or contact your Azure administrator.",
-        ])
-        
+
+        sections.extend(
+            [
+                "",
+                "## Troubleshooting Steps",
+                "1. Check Azure Portal for detailed error information",
+                "2. Verify subscription permissions and quotas",
+                "3. Review resource naming conventions",
+                "4. Check for resource conflicts or dependencies",
+                "",
+                "**Need help?** Review the error details above or contact your Azure admin.",
+            ]
+        )
+
         return "\n".join(sections)
-    
+
     @staticmethod
     def format_state_not_found_error(user_id: str) -> str:
         """Format error when deployment state is not found or expired."""
@@ -166,9 +174,10 @@ class DeploymentOutputFormatter:
 1. Generate a new deployment preview
 2. Confirm deployment within 30 minutes of preview
 
-**Example:** Create a new deployment request like "create storage account mystore in resource group rg-prod"
+**Example:** Create a new deployment request like "create storage account mystore in "
+"resource group rg-prod"
 """
-    
+
     @staticmethod
     def format_confirmation_timeout_error(deployment_id: str) -> str:
         """Format error when user tries to confirm expired deployment."""
@@ -188,7 +197,7 @@ class DeploymentOutputFormatter:
 
 class TerraformGenerator:
     """Generate Terraform configurations from deployed Azure resources."""
-    
+
     @staticmethod
     def generate_from_storage_account(
         storage_name: str,

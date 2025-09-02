@@ -18,7 +18,7 @@ class ChainLink:
 
 
 class ChainAgent(Agent[list[ChainLink], Any]):
-    def __init__(self, context: AgentContext | None = None):
+    def __init__(self, context: AgentContext | None = None) -> None:
         super().__init__(context)
         self.links: list[ChainLink] = []
         self._middleware: list[Callable[[Any], Awaitable[Any]]] = []

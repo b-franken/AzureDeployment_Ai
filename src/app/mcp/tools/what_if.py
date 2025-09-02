@@ -5,7 +5,7 @@ from typing import Any
 
 from azure.identity import AzureCliCredential, ChainedTokenCredential, ManagedIdentityCredential
 from azure.mgmt.resource import ResourceManagementClient
-from azure.mgmt.resource.resources.models import DeploymentMode  # type: ignore
+from azure.mgmt.resource.resources.models import DeploymentMode
 from mcp.server.fastmcp import FastMCP
 
 

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from .base import Plugin, PluginMetadata
-from .registry import PluginRegistry, register_plugin
 from .manager import PluginManager
-from .templates.base import TemplateEngine, ResourceTemplate
+from .registry import PluginRegistry, register_plugin
+from .templates.base import ResourceTemplate, TemplateEngine
 
 __all__ = [
     "Plugin",

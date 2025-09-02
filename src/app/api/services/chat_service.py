@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Sequence
+from typing import Any, Literal, cast
 
 from app.ai.reviewer import senior_review
 from app.ai.tools_router import ToolExecutionContext, maybe_call_tool
@@ -27,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 async def run_chat(
     input_text: str,
-    memory: Sequence[dict] | None,
+    memory: Sequence[dict[str, Any]] | None,
     provider: str | None,
     model: str | None,
     enable_tools: bool,
@@ -88,7 +89,10 @@ async def run_chat(
             correlation_id=effective_correlation_id,
             subscription_id=effective_subscription_id,
             resource_group=resource_group,
-            environment=environment,
+            environment=cast(
+                Literal["dev", "tst", "acc", "prod"],
+                "dev" if environment not in ["dev", "tst", "acc", "prod"] else environment,
+            ),
             audit_enabled=True,
             dry_run=bool(dry_run),
             max_tool_executions=5,
@@ -99,7 +103,8 @@ async def run_chat(
     if context:
         logger.info(
             f"Created tool execution context: correlation_id={context.correlation_id}, "
-            f"max_executions={context.max_tool_executions}, subscription_id={context.subscription_id}"
+            f"max_executions={context.max_tool_executions}, "
+            f"subscription_id={context.subscription_id}"
         )
 
     # Track tools that will be used for metadata
@@ -114,12 +119,14 @@ async def run_chat(
         preferred_tool=preferred_tool,
         allowlist=list(allowlist or []),
         context=context,
-        conversation_context=[{"role": msg["role"], "content": msg["content"]} for msg in mem] if mem else None,
+        conversation_context=(
+            [{"role": msg["role"], "content": msg["content"]} for msg in mem] if mem else None
+        ),
     )
 
     # Extract tool usage information if available from context
     if context and hasattr(context, "executed_tools"):
-        tools_used = list(context.executed_tools)
+        tools_used = list(context.executed_tools) if context.executed_tools else []
     elif enable_tools and "azure" in result.lower() and "deploy" in result.lower():
         tools_used = ["azure_provision"]  # Infer tool usage from response content
 

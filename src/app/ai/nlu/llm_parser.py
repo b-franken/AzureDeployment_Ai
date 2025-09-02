@@ -148,12 +148,20 @@ async def parse_with_llm(
 ) -> UnifiedParseResult:
     llm, selected = await get_provider_and_model(provider, model)
     tools = _tools()
+    from typing import cast
+
+    from app.ai.types import Message
+
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": text},
     ]
     resp = await llm.chat_raw(
-        model=selected, messages=messages, tools=tools, tool_choice="auto", temperature=0.01
+        model=selected,
+        messages=cast(list[Message], messages),
+        tools=tools,
+        tool_choice="auto",
+        temperature=0.01,
     )
     choices = resp.get("choices") or []
     if not choices:

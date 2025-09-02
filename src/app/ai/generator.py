@@ -5,7 +5,7 @@ import logging
 import httpx
 
 from app.ai.llm.factory import get_provider_and_model
-from app.ai.types import ChatHistory
+from app.ai.types import ChatHistory, Role
 from app.ai.types import Message as AIMessage
 from app.core.exceptions import BaseApplicationException
 from app.memory.storage import get_async_store
@@ -19,7 +19,7 @@ SYSTEM_PROMPT = (
 )
 
 
-def _msg(role: str, content: str) -> AIMessage:
+def _msg(role: Role, content: str) -> AIMessage:
     return {"role": role, "content": content}
 
 
@@ -36,12 +36,15 @@ async def generate_response(
 ) -> str:
     store = await get_async_store() if user_id else None
     if memory is None and store and user_id:
-        memory = await store.get_user_memory(
+        memory_data = await store.get_user_memory(
             user_id=user_id,
             thread_id=thread_id,
             agent=agent,
             limit=history_limit,
         )
+        from typing import cast
+
+        memory = cast(ChatHistory, memory_data) if isinstance(memory_data, list) else []
 
     messages: list[AIMessage] = [_msg("system", SYSTEM_PROMPT)]
     if memory:

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any
 
-from app.tools.finops.cost_ingestion import CostIngestionService
+from app.tools.finops.cost_ingestion import CostIngestionService, ResourceCost
 from app.tools.finops.resource_discovery import ResourceDiscoveryService
 
 
@@ -103,7 +103,7 @@ class OptimizationService:
         self,
         subscription_id: str,
         resource: dict[str, Any],
-        cost_info: dict[str, Any],
+        cost_info: ResourceCost | dict[str, Any],
         strategy: OptimizationStrategy,
     ) -> list[OptimizationRecommendation]:
         recommendations: list[OptimizationRecommendation] = []
@@ -213,7 +213,7 @@ class OptimizationService:
         self,
         subscription_id: str,
         resource: dict[str, Any],
-        cost_info: dict[str, Any],
+        cost_info: ResourceCost | dict[str, Any],
         strategy: OptimizationStrategy,
     ) -> list[OptimizationRecommendation]:
         recommendations: list[OptimizationRecommendation] = []
@@ -280,7 +280,7 @@ class OptimizationService:
         self,
         subscription_id: str,
         resource: dict[str, Any],
-        cost_info: dict[str, Any],
+        cost_info: ResourceCost | dict[str, Any],
         strategy: OptimizationStrategy,
     ) -> list[OptimizationRecommendation]:
         recommendations: list[OptimizationRecommendation] = []
@@ -349,7 +349,7 @@ class OptimizationService:
         self,
         subscription_id: str,
         resource: dict[str, Any],
-        cost_info: dict[str, Any],
+        cost_info: ResourceCost | dict[str, Any],
         strategy: OptimizationStrategy,
     ) -> list[OptimizationRecommendation]:
         recommendations: list[OptimizationRecommendation] = []

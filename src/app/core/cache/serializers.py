@@ -36,7 +36,10 @@ def dumps(obj: Any) -> bytes:
         return bytes(obj)
     if msgspec is not None:
         try:
-            return msgspec.json.encode(obj)
+            result = msgspec.json.encode(obj)
+            if isinstance(result, bytes):
+                return result
+            logger.warning("msgspec.json.encode returned non-bytes type: %s", type(result))
         except Exception as exc:
             logger.debug(
                 "cache.serializers.msgspec_encode_failed",
@@ -45,7 +48,10 @@ def dumps(obj: Any) -> bytes:
             )
     if orjson is not None:
         try:
-            return orjson.dumps(obj)
+            result = orjson.dumps(obj)
+            if isinstance(result, bytes):
+                return result
+            logger.warning("orjson.dumps returned non-bytes type: %s", type(result))
         except Exception as exc:
             logger.debug(
                 "cache.serializers.orjson_dumps_failed",

@@ -8,13 +8,14 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
 
+from mcp.server.fastmcp import FastMCP
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 from pydantic import BaseModel, Field
 
 from app.core.logging import get_logger
 from app.observability.app_insights import app_insights
-from app.tools.azure.clients import Clients
+from app.tools.azure.clients import Clients, get_clients
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -95,13 +96,13 @@ class SecurityAdvisorResponse(BaseModel):
 class SecurityAdvisorTool:
     """Azure Security Advisory tool for comprehensive security analysis."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.clients: Clients | None = None
 
-    async def _ensure_clients(self) -> Clients:
+    async def _ensure_clients(self, subscription_id: str | None = None) -> Clients:
         """Ensure Azure clients are initialized."""
         if self.clients is None:
-            self.clients = await Clients.create()
+            self.clients = await get_clients(subscription_id)
         return self.clients
 
     async def analyze_security_posture(
@@ -123,11 +124,17 @@ class SecurityAdvisorTool:
             )
 
             response = SecurityAdvisorResponse(
-                success=True, subscription_id=request.subscription_id, overall_security_score=0.0
+                success=True,
+                subscription_id=request.subscription_id,
+                overall_security_score=0.0,
+                security_score_trend=None,
+                total_findings=0,
+                security_alerts_24h=0,
+                failed_sign_ins=0,
             )
 
             try:
-                clients = await self._ensure_clients()
+                clients = await self._ensure_clients(request.subscription_id)
 
                 # 1. Get security center assessments
                 findings = await self._get_security_assessments(clients, request)
@@ -589,7 +596,7 @@ class SecurityAdvisorTool:
             quick_wins = []
 
             # Group findings by category for better recommendations
-            categories = {}
+            categories: dict[str, list[dict[str, Any]]] = {}
             for finding in findings:
                 category = finding.get("category", "general")
                 if category not in categories:
@@ -721,7 +728,7 @@ class SecurityAdvisorTool:
             return {"alerts_24h": 0, "failed_sign_ins": 0, "suspicious_activities": []}
 
 
-def register_security_advisor_tool(mcp_instance):
+def register_security_advisor_tool(mcp_instance: FastMCP) -> None:
     """Register security advisor tool with MCP server."""
 
     @mcp_instance.tool(
@@ -730,8 +737,8 @@ def register_security_advisor_tool(mcp_instance):
     )
     async def security_advisor(
         subscription_id: str,
-        resource_group: str = None,
-        severity_levels: list[str] = None,
+        resource_group: str | None = None,
+        severity_levels: list[str] | None = None,
         include_recommendations: bool = True,
         include_compliance_scan: bool = True,
         include_threat_detection: bool = True,
@@ -766,7 +773,7 @@ def register_security_advisor_tool(mcp_instance):
     )
     async def security_quick_scan(
         subscription_id: str,
-        resource_group: str = None,
+        resource_group: str | None = None,
         correlation_id: str = "auto",
     ) -> dict[str, Any]:
         """Run quick security scan for critical issues only."""

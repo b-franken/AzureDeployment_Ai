@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from threading import Event, Thread
-from typing import Any, cast
+from typing import Any
 
 from azure.core.credentials import AccessToken, TokenCredential
 from azure.core.credentials_async import AsyncTokenCredential
@@ -29,7 +29,7 @@ class AsyncToSyncCredentialAdapter(TokenCredential):
         if loop is None:
             raise RuntimeError("credential loop not ready")
         fut = asyncio.run_coroutine_threadsafe(self._async_cred.get_token(*scopes, **kwargs), loop)
-        return cast("AccessToken", fut.result())
+        return fut.result()
 
     def close(self) -> None:
         loop = self._loop

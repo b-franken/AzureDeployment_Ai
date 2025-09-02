@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
 
@@ -14,7 +14,7 @@ metrics_role_dependency = require_role("metrics_viewer")
 
 
 @router.get("")
-async def metrics(td: Annotated[TokenData, Depends(metrics_role_dependency)]) -> dict:
+async def metrics(td: Annotated[TokenData, Depends(metrics_role_dependency)]) -> dict[str, Any]:
     end = datetime.utcnow()
     start = end - timedelta(days=30)
     stats = await alog.get_statistics(start, end)

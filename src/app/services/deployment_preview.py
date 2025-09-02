@@ -1,19 +1,19 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, UTC
-from typing import Any, Dict, Optional
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
+from app.ai.nlu.unified_parser import UnifiedParseResult
 from app.core.logging import get_logger
 from app.tools.finops.cost_tool import AzureCosts
-from app.tools.provision.backends.avm_bicep.engine import BicepAvmBackend, ProvisionContext
-from app.ai.nlu.unified_parser import UnifiedParseResult
+from app.tools.provision.backends.avm_bicep.engine import BicepAvmBackend
 
 logger = get_logger(__name__)
 
 
 class DeploymentPreviewService:
-    def __init__(self):
+    def __init__(self) -> None:
         self.cost_service = AzureCosts()
         self.bicep_backend = BicepAvmBackend()
 
@@ -23,25 +23,28 @@ class DeploymentPreviewService:
         subscription_id: str,
         resource_group: str | None = None,
         location: str = "westeurope",
-        environment: str = "dev"
+        environment: str = "dev",
     ) -> str:
         logger.info(
             "Generating deployment preview",
             resource_type=nlu_result.resource_type,
             resource_name=nlu_result.resource_name,
-            subscription_id=subscription_id
+            subscription_id=subscription_id,
         )
 
         preview_id = str(uuid.uuid4())[:8]
         expires_at = datetime.now(UTC) + timedelta(minutes=30)
 
-        resource_group = resource_group or nlu_result.parameters.get(
-            "resource_group", "default-rg")
+        resource_group = resource_group or nlu_result.parameters.get("resource_group", "default-rg")
         resource_name = nlu_result.resource_name or "unnamed-resource"
 
         cost_estimate = await self._estimate_cost(nlu_result, subscription_id)
         bicep_content, terraform_content = await self._generate_infrastructure_files(
             nlu_result, subscription_id, resource_group, location, environment
+        )
+
+        high_availability_status = (
+            "Enabled" if nlu_result.advanced_context.get("security_enhanced") else "Standard"
         )
 
         response = f"""##  Azure Deployment Preview
@@ -61,7 +64,7 @@ class DeploymentPreviewService:
 ###  Deployment Summary
 - Strategy: Azure Verified Modules (AVM)
 - Compliance: Production ready
-- High Availability: {"Enabled" if nlu_result.advanced_context.get("security_enhanced") else "Standard"}
+- High Availability: {high_availability_status}
 - Monitoring: Enabled with Application Insights
 
 ###  Infrastructure as Code
@@ -90,7 +93,7 @@ class DeploymentPreviewService:
             "Preview generated successfully",
             preview_id=preview_id,
             estimated_cost=cost_estimate,
-            resource_name=resource_name
+            resource_name=resource_name,
         )
 
         return response
@@ -107,7 +110,7 @@ class DeploymentPreviewService:
                 "vm": 120.0,
                 "keyvault": 2.0,
                 "vnet": 0.0,
-                "acr": 15.0
+                "acr": 15.0,
             }
 
             base_cost = cost_estimates.get(resource_type, 50.0)
@@ -127,8 +130,7 @@ class DeploymentPreviewService:
             return round(base_cost, 2)
 
         except Exception as e:
-            logger.warning(
-                "Cost estimation failed, using default", error=str(e))
+            logger.warning("Cost estimation failed, using default", error=str(e))
             return 25.0
 
     async def _generate_infrastructure_files(
@@ -137,7 +139,7 @@ class DeploymentPreviewService:
         subscription_id: str,
         resource_group: str,
         location: str,
-        environment: str
+        environment: str,
     ) -> tuple[str, str]:
         try:
             resource_type = nlu_result.resource_type
@@ -154,16 +156,11 @@ class DeploymentPreviewService:
             return bicep_template, terraform_template
 
         except Exception as e:
-            logger.warning(
-                "Infrastructure file generation failed", error=str(e))
+            logger.warning("Infrastructure file generation failed", error=str(e))
             return self._get_fallback_templates(nlu_result.resource_type)
 
     def _generate_bicep_template(
-        self,
-        resource_type: str,
-        resource_name: str,
-        location: str,
-        parameters: Dict[str, Any]
+        self, resource_type: str, resource_name: str, location: str, parameters: dict[str, Any]
     ) -> str:
         if resource_type == "storage":
             sku = parameters.get("sku", "Standard_LRS")
@@ -249,7 +246,7 @@ param location string = '{location}'
         resource_name: str,
         location: str,
         resource_group: str,
-        parameters: Dict[str, Any]
+        parameters: dict[str, Any],
     ) -> str:
         if resource_type == "storage":
             sku = parameters.get("sku", "Standard_LRS")

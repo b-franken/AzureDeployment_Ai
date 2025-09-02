@@ -16,13 +16,18 @@ audit_role_dependency = require_role("audit_viewer")
 
 @router.get("/logs", response_model=LogsResponse)
 async def get_audit_logs(
+    td: Annotated[TokenData, Depends(audit_role_dependency)],
     start_date: Annotated[datetime | None, Query(description="ISO 8601, inclusive")] = None,
     end_date: Annotated[datetime | None, Query(description="ISO 8601, inclusive")] = None,
     user_id: Annotated[str | None, Query(description="Filter by user id")] = None,
     _page: Annotated[int, Query(ge=1, alias="page")] = 1,
     page_size: Annotated[int, Query(ge=1, le=1000)] = 100,
-    td: Annotated[TokenData, Depends(audit_role_dependency)] = None,
 ) -> LogsResponse:
-    q = AuditQuery(start_time=start_date, end_time=end_date, user_id=user_id, limit=page_size)
+    q = AuditQuery(
+        start_time=start_date,
+        end_time=end_date,
+        user_ids=[user_id] if user_id else None,
+        limit=page_size,
+    )
     items = await alog.query_events(q)
     return LogsResponse(logs=[e.__dict__ for e in items], count=len(items))

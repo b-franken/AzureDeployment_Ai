@@ -6,7 +6,7 @@ import os
 import secrets
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -16,7 +16,7 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 
 try:
-    from passlib.context import CryptContext
+    from passlib.context import CryptContext  # type: ignore[import-untyped]
 
     pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 except Exception:
@@ -132,14 +132,14 @@ class UserInDB(User):
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     try:
-        return pwd_context.verify(plain_password, hashed_password)
+        return cast(bool, pwd_context.verify(plain_password, hashed_password))
     except Exception as e:
         logger.exception("Password verification error: %s", e)
         return False
 
 
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
+    return cast(str, pwd_context.hash(password))
 
 
 def get_user(email: str) -> UserInDB | None:

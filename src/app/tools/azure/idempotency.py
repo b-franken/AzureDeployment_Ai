@@ -4,7 +4,7 @@ import asyncio
 import inspect
 import logging
 from collections.abc import Awaitable, Callable
-from typing import Any, cast
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -21,14 +21,13 @@ async def safe_get(
 ) -> tuple[bool, Any]:
     try:
         if callable(callable_obj):
-            func = cast("Callable[..., Any]", callable_obj)
-            result = func(*args, **kwargs)
+            result = callable_obj(*args, **kwargs)
             if inspect.isawaitable(result):
-                res = await cast("Awaitable[Any]", result)
+                res = await result
             else:
-                res = await asyncio.to_thread(func, *args, **kwargs)
+                res = await asyncio.to_thread(callable_obj, *args, **kwargs)
         elif inspect.isawaitable(callable_obj):
-            res = await cast("Awaitable[Any]", callable_obj)
+            res = await callable_obj
         else:
             raise TypeError("safe_get expects a callable or awaitable")
         return True, res

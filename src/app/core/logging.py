@@ -85,7 +85,7 @@ def install_log_record_sanitizer() -> None:
     original_factory = current_factory
 
     def factory(*args: Any, **kwargs: Any) -> logging.LogRecord:
-        record = original_factory(*args, **kwargs)  # type: ignore[misc]
+        record = original_factory(*args, **kwargs)
 
         # Remove all private attributes (starting with _)
         for key in list(record.__dict__.keys()):
@@ -249,7 +249,7 @@ class LoggerFactory:
     def get_logger(self, name: str) -> structlog.BoundLogger:
         if not self._configured:
             self.configure()
-        return structlog.get_logger(name)
+        return cast("structlog.BoundLogger", structlog.get_logger(name))
 
     def add_context(self, **kwargs: Any) -> None:
         bind_contextvars(**kwargs)

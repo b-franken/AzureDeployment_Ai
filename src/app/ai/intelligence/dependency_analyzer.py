@@ -1,11 +1,7 @@
 from __future__ import annotations
 
-import asyncio
-from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Any
-
-from opentelemetry import trace
 
 from app.core.logging import get_logger
 from app.observability.agent_tracing import get_agent_tracer
@@ -116,8 +112,8 @@ class DependencyAnalyzer:
             {
                 "resource_count": len(resources),
                 "environment": environment,
-                "operation.type": "analysis_start"
-            }
+                "operation.type": "analysis_start",
+            },
         ) as span:
             logger.info(
                 "Starting dependency analysis",
@@ -153,12 +149,9 @@ class DependencyAnalyzer:
                 parallel_opportunities=parallel_ops,
                 warnings_count=len(warnings),
             )
-            
+
             tracer.track_agent_metrics(
-                "dependency_analysis",
-                float(total_time * 1000),
-                True,
-                len(deployment_groups)
+                "dependency_analysis", float(total_time * 1000), True, len(deployment_groups)
             )
 
             return plan
@@ -169,7 +162,9 @@ class DependencyAnalyzer:
         resource_deps: list[ResourceDependency] = []
 
         for resource in resources:
-            resource_type = resource.get("type", "").lower().replace("microsoft.web/sites", "webapp")
+            resource_type = (
+                resource.get("type", "").lower().replace("microsoft.web/sites", "webapp")
+            )
             resource_name = resource.get("name", f"unnamed_{resource_type}")
 
             template = self._resource_templates.get(resource_type, {})
@@ -208,7 +203,9 @@ class DependencyAnalyzer:
 
         if resource_type in ["microsoft.web/sites", "webapp"]:
             required_plan = f"{resource.get('name', 'app')}-plan"
-            if required_plan in resource_names or any("serverfarm" in r.get("type", "") for r in all_resources):
+            if required_plan in resource_names or any(
+                "serverfarm" in r.get("type", "") for r in all_resources
+            ):
                 plan_name = next(
                     (
                         r.get("name", required_plan)
@@ -249,7 +246,6 @@ class DependencyAnalyzer:
     def _calculate_deployment_groups(
         self, resource_deps: list[ResourceDependency]
     ) -> list[list[ResourceDependency]]:
-        name_to_resource = {r.resource_name: r for r in resource_deps}
         groups: list[list[ResourceDependency]] = []
         deployed: set[str] = set()
 
@@ -336,14 +332,18 @@ class DependencyAnalyzer:
         for resource in resource_deps:
             for dep in resource.depends_on:
                 if dep not in resource_names:
-                    warning = f"Resource '{resource.resource_name}' depends on '{dep}' which is not in deployment"
+                    warning = (
+                        f"Resource '{resource.resource_name}' depends on '{dep}' "
+                        "which is not in deployment"
+                    )
                     warnings.append(warning)
 
             if resource.resource_type == "aks_cluster" and not any(
                 dep for dep in resource_deps if dep.resource_type == "log_analytics_workspace"
             ):
                 warnings.append(
-                    f"AKS cluster '{resource.resource_name}' should have Log Analytics workspace for monitoring"
+                    f"AKS cluster '{resource.resource_name}' should have "
+                    "Log Analytics workspace for monitoring"
                 )
 
         return warnings
@@ -356,8 +356,8 @@ class DependencyAnalyzer:
             {
                 "original_groups": len(plan.deployment_groups),
                 "original_time_seconds": plan.total_estimated_time_seconds,
-                "operation.type": "optimization_start"
-            }
+                "operation.type": "optimization_start",
+            },
         ) as span:
             optimizations: dict[str, Any] = {}
             original_time = plan.total_estimated_time_seconds

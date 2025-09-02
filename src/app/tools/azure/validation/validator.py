@@ -435,11 +435,10 @@ class DeploymentValidator:
         resource_type = resource.get("type", "")
         properties = resource.get("properties", {})
 
-        encryption_checks = {
-            "Microsoft.Storage/storageAccounts": lambda p: p.get("encryption", {})
-            .get("services", {})
-            .get("blob", {})
-            .get("enabled"),
+        encryption_checks: dict[str, Callable[[dict[str, Any]], bool]] = {
+            "Microsoft.Storage/storageAccounts": lambda p: bool(
+                p.get("encryption", {}).get("services", {}).get("blob", {}).get("enabled")
+            ),
             "Microsoft.Sql/servers/databases": lambda p: p.get("transparentDataEncryption", {}).get(
                 "status"
             )

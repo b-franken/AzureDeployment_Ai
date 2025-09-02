@@ -1,19 +1,20 @@
 from __future__ import annotations
-from app.observability.otel_patch import apply_all_patches
-from app.core.logging import get_logger
-from app.core.config import settings
-from opentelemetry.sdk.resources import Resource
-from opentelemetry.instrumentation.requests import RequestsInstrumentor
-from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
-from opentelemetry import metrics, trace
-from azure.monitor.opentelemetry import configure_azure_monitor
 
 import logging
 import os
 from typing import Any
 from urllib.parse import urlparse
 
+from azure.monitor.opentelemetry import configure_azure_monitor
+from opentelemetry import metrics, trace
+from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+from opentelemetry.instrumentation.requests import RequestsInstrumentor
+from opentelemetry.sdk.resources import Resource
+
+from app.core.config import settings
+from app.core.logging import get_logger
 from app.observability.otel_fixes import ensure_proper_otel_initialization
+from app.observability.otel_patch import apply_all_patches
 
 ensure_proper_otel_initialization()
 
@@ -45,8 +46,7 @@ class ApplicationInsights:
         )
 
         if not connection_string:
-            logger.warning(
-                "Application Insights connection string not configured")
+            logger.warning("Application Insights connection string not configured")
             return
 
         service_name = settings.observability.otel_service_name or os.getenv(
@@ -198,8 +198,7 @@ class ApplicationInsights:
             self.auth_failure_counter.add(1, attributes)
 
     def track_token_validation(self, duration_ms: float, success: bool) -> None:
-        self.token_validation_histogram.record(
-            duration_ms, {"validation.success": str(success)})
+        self.token_validation_histogram.record(duration_ms, {"validation.success": str(success)})
 
     def track_deployment(self, environment: str, success: bool, resource_type: str) -> None:
         self.deployment_counter.add(
@@ -252,7 +251,7 @@ class ApplicationInsights:
         duration: int = 0,
         success: bool = True,
         result_code: str = "200",
-        properties: dict[str, Any] | None = None
+        properties: dict[str, Any] | None = None,
     ) -> None:
         span = trace.get_current_span()
         if span:
@@ -262,33 +261,24 @@ class ApplicationInsights:
                 "dependency.target": target or "unknown",
                 "dependency.duration": duration,
                 "dependency.success": success,
-                "dependency.result_code": result_code
+                "dependency.result_code": result_code,
             }
             if properties:
                 for key, value in properties.items():
                     attributes[f"dependency.{key}"] = str(value)
             if data:
                 attributes["dependency.data"] = data[:1000] if len(data) > 1000 else data
-            
-            span.add_event("dependency_call", attributes=attributes)
+
+            # Convert dict[str, object] to dict[str, str] for OpenTelemetry compatibility
+            otel_attributes: dict[str, str] = {}
+            for key, value in attributes.items():
+                otel_attributes[key] = str(value)
+            span.add_event("dependency_call", attributes=otel_attributes)
 
     def _patch_otel_attributes(self) -> None:
         """Patch OpenTelemetry attribute validation to handle logger objects."""
-        try:
-            from opentelemetry.util import attributes
-
-            original_is_valid_attribute_value = attributes.is_valid_attribute_value
-
-            def patched_is_valid_attribute_value(value: Any) -> bool:
-                if hasattr(value, "__class__") and "Logger" in value.__class__.__name__:
-                    return False
-                return original_is_valid_attribute_value(value)
-
-            attributes.is_valid_attribute_value = patched_is_valid_attribute_value
-            logger.debug(
-                "OpenTelemetry attribute validation patched successfully")
-        except (ImportError, AttributeError, TypeError) as e:
-            logger.warning(f"Failed to patch OpenTelemetry attributes: {e}")
+        # Skip patching since the module doesn't exist in newer versions
+        logger.debug("Skipping OpenTelemetry attribute patching - module not available")
 
     def _sanitize_attributes(self, attrs: dict[str, Any]) -> dict[str, Any]:
         """Sanitize attributes to prevent OpenTelemetry validation errors."""
@@ -329,7 +319,7 @@ class ApplicationInsights:
             try:
                 from opentelemetry.instrumentation.asyncpg import AsyncPGInstrumentor
 
-                AsyncPGInstrumentor().instrument(
+                AsyncPGInstrumentor().instrument(  # type: ignore[no-untyped-call]
                     tracer_provider=trace.get_tracer_provider(),
                     enable_commenter=True,
                     commenter_options={
@@ -340,8 +330,7 @@ class ApplicationInsights:
                         "driver_paramstyle": True,
                     },
                 )
-                logger.info(
-                    "AsyncPG database instrumentation configured successfully")
+                logger.info("AsyncPG database instrumentation configured successfully")
 
             except ImportError:
                 logger.debug("AsyncPG instrumentation not available, skipping")
@@ -353,18 +342,15 @@ class ApplicationInsights:
                     tracer_provider=trace.get_tracer_provider(),
                     enable_commenter=True,
                 )
-                logger.info(
-                    "Psycopg2 database instrumentation configured successfully")
+                logger.info("Psycopg2 database instrumentation configured successfully")
 
             except ImportError:
-                logger.debug(
-                    "Psycopg2 instrumentation not available, skipping")
+                logger.debug("Psycopg2 instrumentation not available, skipping")
 
             logger.info("Database instrumentation setup completed")
 
         except (ImportError, RuntimeError, ValueError) as e:
-            logger.warning(
-                f"Failed to configure database instrumentation: {e}")
+            logger.warning(f"Failed to configure database instrumentation: {e}")
 
     def _http_request_hook(self, span: Any, request: Any) -> None:
         """Hook to enrich HTTP request spans with additional context."""
@@ -382,13 +368,11 @@ class ApplicationInsights:
 
                             body = json.loads(request.content.decode("utf-8"))
                             if isinstance(body, dict) and "model" in body:
-                                span.set_attribute(
-                                    "llm.request.model", body["model"])
+                                span.set_attribute("llm.request.model", body["model"])
                         except (ValueError, TypeError, KeyError, AttributeError):
                             pass
 
-                span.set_attribute("http.request.method",
-                                   getattr(request, "method", "unknown"))
+                span.set_attribute("http.request.method", getattr(request, "method", "unknown"))
                 span.set_attribute("component", "http_client")
 
         except (AttributeError, TypeError, ValueError) as e:
@@ -398,8 +382,7 @@ class ApplicationInsights:
         """Hook to enrich HTTP response spans with additional context."""
         try:
             if hasattr(response, "status_code"):
-                span.set_attribute(
-                    "http.response.status_code", response.status_code)
+                span.set_attribute("http.response.status_code", response.status_code)
 
                 if 200 <= response.status_code < 400:
                     span.set_attribute("http.response.success", True)
@@ -413,15 +396,13 @@ class ApplicationInsights:
                         try:
                             import json
 
-                            response_data = json.loads(
-                                response.content.decode("utf-8"))
+                            response_data = json.loads(response.content.decode("utf-8"))
                             if isinstance(response_data, dict) and "usage" in response_data:
                                 usage = response_data["usage"]
                                 if isinstance(usage, dict):
                                     for key, value in usage.items():
                                         if isinstance(value, int | float):
-                                            span.set_attribute(
-                                                f"llm.usage.{key}", value)
+                                            span.set_attribute(f"llm.usage.{key}", value)
                         except (ValueError, TypeError, KeyError, AttributeError):
                             pass
 
@@ -431,8 +412,7 @@ class ApplicationInsights:
     def _configure_logger_levels(self) -> None:
         """Configure third-party logger levels based on application settings."""
 
-        configured_level = getattr(
-            logging, settings.log_level.upper(), logging.INFO)
+        configured_level = getattr(logging, settings.log_level.upper(), logging.INFO)
 
         if settings.debug:
 
@@ -448,8 +428,7 @@ class ApplicationInsights:
             azure_level=logging.getLevelName(azure_level),
         )
 
-        logging.getLogger(
-            "azure.core.pipeline.policies.http_logging_policy").setLevel(azure_level)
+        logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(azure_level)
         logging.getLogger("azure.monitor.opentelemetry").setLevel(azure_level)
         logging.getLogger("azure.core").setLevel(azure_level)
         logging.getLogger("azure.identity").setLevel(azure_level)

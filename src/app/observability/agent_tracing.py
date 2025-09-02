@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import asyncio
 import time
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Any, AsyncGenerator
+from typing import Any
 
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
@@ -72,7 +72,7 @@ class AgentTracer:
         }
 
         if request_data:
-            span_attributes["request.size"] = len(str(request_data))
+            span_attributes["request.size"] = str(len(str(request_data)))
             if "goal" in request_data:
                 span_attributes["request.goal"] = str(request_data["goal"])[:200]
 
@@ -118,8 +118,9 @@ class AgentTracer:
         )
 
         from app.observability.app_insights import app_insights
+
         service_name = AgentServiceMapper.get_service_name(self.agent_name)
-        
+
         app_insights.track_custom_event(
             f"agent_{operation}_completed",
             {
@@ -129,8 +130,8 @@ class AgentTracer:
                 "success": success,
                 "resource_count": resource_count,
                 "cloud_RoleName": service_name,
-                "service_name": f"ai.agents.{self.agent_name.lower()}"
-            }
+                "service_name": f"ai.agents.{self.agent_name.lower()}",
+            },
         )
 
     def create_dependency_span(
@@ -146,7 +147,7 @@ class AgentTracer:
             "dependency.operation": operation,
             "agent.name": self.agent_name,
         }
-        
+
         if data:
             span_attributes.update({f"dependency.{k}": v for k, v in data.items()})
 
@@ -175,14 +176,14 @@ class AgentTracingManager:
         data: dict[str, Any] | None = None,
     ) -> trace.Span:
         caller_tracer = cls.get_tracer(caller_agent)
-        
+
         span_attributes = {
             "interaction.type": "agent_to_agent",
             "interaction.caller": caller_agent,
             "interaction.target": target_agent,
             "interaction.operation": operation,
         }
-        
+
         if data:
             span_attributes.update({f"interaction.{k}": v for k, v in data.items()})
 

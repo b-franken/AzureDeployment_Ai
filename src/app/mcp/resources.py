@@ -18,7 +18,9 @@ class ResourceManager:
     def _get_subscription_client(self) -> SubscriptionClient:
         if "subscription" not in self._clients:
             self._clients["subscription"] = SubscriptionClient(self._credential)
-        return self._clients["subscription"]
+        from typing import cast
+
+        return cast(SubscriptionClient, self._clients["subscription"])
 
     def _get_resource_client(
         self,
@@ -30,7 +32,9 @@ class ResourceManager:
                 self._credential,
                 subscription_id,
             )
-        return self._clients[key]
+        from typing import cast
+
+        return cast(ResourceManagementClient, self._clients[key])
 
     async def list_subscriptions(self) -> list[dict[str, Any]]:
         client = self._get_subscription_client()

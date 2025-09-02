@@ -69,9 +69,10 @@ class DeploymentLearningService:
     async def initialize(self) -> None:
         store = await get_async_store()
         await store.initialize()
-        
+
         async with store.get_connection() as conn:
-            await conn.execute("""
+            await conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS deployment_outcomes (
                     id BIGSERIAL PRIMARY KEY,
                     user_id TEXT NOT NULL,
@@ -114,7 +115,8 @@ class DeploymentLearningService:
 
                 CREATE INDEX IF NOT EXISTS idx_cost_optimizations_resource
                     ON cost_optimizations (resource_type, cost_savings_percentage DESC);
-            """)
+            """
+            )
 
     async def record_deployment_outcome(
         self,
@@ -170,11 +172,13 @@ class DeploymentLearningService:
                     duration_seconds,
                 )
 
-            span.set_attributes({
-                "outcome_recorded": True,
-                "has_error": error_type is not None,
-                "has_cost": cost_estimate is not None,
-            })
+            span.set_attributes(
+                {
+                    "outcome_recorded": True,
+                    "has_error": error_type is not None,
+                    "has_cost": cost_estimate is not None,
+                }
+            )
 
             app_insights.track_custom_event(
                 "deployment_outcome_recorded",
@@ -287,7 +291,7 @@ class DeploymentLearningService:
             for row in rows:
                 resource_types = row["resource_types"]
                 pattern_id = f"{user_id}:{hash(tuple(sorted(resource_types)))}"
-                
+
                 common_configs = {}
                 if row["configs"]:
                     configs = [json.loads(c) for c in row["configs"].split("|||")]
@@ -444,6 +448,7 @@ class DeploymentLearningService:
             logger.info("Generating comprehensive deployment insights", user_id=user_id)
 
             import asyncio
+
             patterns, failures, optimizations = await asyncio.gather(
                 self.get_deployment_patterns(user_id),
                 self.get_failure_patterns(user_id),
@@ -453,12 +458,14 @@ class DeploymentLearningService:
             user_preferences = await self._extract_user_preferences(user_id)
             confidence = self._calculate_recommendation_confidence(patterns, failures)
 
-            span.set_attributes({
-                "successful_patterns": len(patterns),
-                "failure_patterns": len(failures),
-                "cost_optimizations": len(optimizations),
-                "recommendation_confidence": confidence,
-            })
+            span.set_attributes(
+                {
+                    "successful_patterns": len(patterns),
+                    "failure_patterns": len(failures),
+                    "cost_optimizations": len(optimizations),
+                    "recommendation_confidence": confidence,
+                }
+            )
 
             insights = DeploymentInsights(
                 successful_patterns=patterns,
@@ -491,7 +498,7 @@ class DeploymentLearningService:
             if len(set(str(v) for v in values)) == 1:
                 common[key] = values[0]
             elif len(values) > len(configs) * 0.6:
-                value_counts = defaultdict(int)
+                value_counts: dict[str, int] = defaultdict(int)
                 for v in values:
                     value_counts[str(v)] += 1
                 most_common = max(value_counts.items(), key=lambda x: x[1])
@@ -502,7 +509,7 @@ class DeploymentLearningService:
     def _extract_common_causes(self, messages: str) -> list[str]:
         causes = []
         message_lower = messages.lower()
-        
+
         if "quota" in message_lower or "limit" in message_lower:
             causes.append("Resource quota or limit exceeded")
         if "permission" in message_lower or "unauthorized" in message_lower:
@@ -513,7 +520,7 @@ class DeploymentLearningService:
             causes.append("Invalid resource configuration")
         if "dependency" in message_lower:
             causes.append("Missing resource dependencies")
-            
+
         return causes if causes else ["Unknown cause"]
 
     def _generate_solutions(self, error_type: str) -> list[str]:
@@ -539,12 +546,15 @@ class DeploymentLearningService:
                 "Review firewall and routing settings",
             ],
         }
-        
-        return solutions_map.get(error_type, [
-            "Review error details and Azure documentation",
-            "Check resource configuration parameters",
-            "Verify dependencies and prerequisites",
-        ])
+
+        return solutions_map.get(
+            error_type,
+            [
+                "Review error details and Azure documentation",
+                "Check resource configuration parameters",
+                "Verify dependencies and prerequisites",
+            ],
+        )
 
     async def _extract_user_preferences(self, user_id: str) -> dict[str, Any]:
         store = await get_async_store()
@@ -595,12 +605,14 @@ class DeploymentLearningService:
 
         total_deployments = sum(p.frequency for p in patterns)
         successful_deployments = sum(p.frequency * p.success_rate for p in patterns)
-        
-        base_confidence = successful_deployments / total_deployments if total_deployments > 0 else 0.0
-        
+
+        base_confidence = (
+            successful_deployments / total_deployments if total_deployments > 0 else 0.0
+        )
+
         pattern_diversity = min(len(patterns) / 5.0, 1.0)
         failure_impact = max(0.0, 1.0 - len(failures) / 10.0)
-        
+
         return min(base_confidence * pattern_diversity * failure_impact, 1.0)
 
     def _invalidate_pattern_cache(self, user_id: str) -> None:

@@ -94,7 +94,7 @@ def build_resource_definition(action: str, params: dict[str, Any]) -> dict[str, 
     }
 
 
-def extract_resource_summary(payload: dict) -> dict[str, str]:
+def extract_resource_summary(payload: dict[str, Any]) -> dict[str, str]:
     summary: dict[str, str] = {}
     if isinstance(payload, dict):
         if "resource_group" in payload:

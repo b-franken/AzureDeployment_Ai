@@ -116,14 +116,16 @@ class CostIntelligenceResponse(BaseModel):
 class CostIntelligenceTool:
     """Azure Cost Intelligence tool for comprehensive cost analysis."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.cost_system = CostManagementSystem()
         self.clients: Clients | None = None
 
     async def _ensure_clients(self) -> Clients:
         """Ensure Azure clients are initialized."""
         if self.clients is None:
-            self.clients = await Clients.create()
+            from app.tools.azure.clients import get_clients
+
+            self.clients = await get_clients(None)
         return self.clients
 
     async def analyze_cost_intelligence(
@@ -156,14 +158,16 @@ class CostIntelligenceTool:
             end_date = datetime.utcnow()
             start_date = end_date - time_ranges.get(request.time_range, timedelta(days=30))
 
-            response = CostIntelligenceResponse(
-                success=True,
-                subscription_id=request.subscription_id,
-                analysis_period={
-                    "start": start_date.isoformat(),
-                    "end": end_date.isoformat(),
-                    "range": request.time_range,
-                },
+            response = CostIntelligenceResponse.model_validate(
+                {
+                    "success": True,
+                    "subscription_id": request.subscription_id,
+                    "analysis_period": {
+                        "start": start_date.isoformat(),
+                        "end": end_date.isoformat(),
+                        "range": request.time_range,
+                    },
+                }
             )
 
             try:
@@ -812,22 +816,22 @@ class CostIntelligenceTool:
             return {"alerts": [], "breaches": []}
 
 
-def register_cost_intelligence_tool(mcp_instance):
+def register_cost_intelligence_tool(mcp_instance: Any) -> None:
     """Register cost intelligence tool with MCP server."""
 
-    @mcp_instance.tool(
+    @mcp_instance.tool(  # type: ignore[misc]
         name="cost_intelligence",
         description="Comprehensive Azure cost analysis, forecasting, and optimization",
     )
     async def cost_intelligence(
         subscription_id: str,
-        resource_group: str = None,
+        resource_group: str | None = None,
         time_range: str = "30d",
         include_forecast: bool = True,
         include_optimization: bool = True,
         include_anomaly_detection: bool = True,
         include_carbon_analysis: bool = False,
-        cost_threshold_usd: float = None,
+        cost_threshold_usd: float | None = None,
         correlation_id: str = "auto",
     ) -> dict[str, Any]:
         """Run comprehensive cost intelligence analysis."""
@@ -837,10 +841,13 @@ def register_cost_intelligence_tool(mcp_instance):
         if correlation_id == "auto":
             correlation_id = str(uuid.uuid4())
 
+        from typing import Literal, cast
+
+        time_range_literal = cast(Literal["7d", "30d", "90d", "12m"], time_range)
         request = CostIntelligenceRequest(
             subscription_id=subscription_id,
             resource_group=resource_group,
-            time_range=time_range,
+            time_range=time_range_literal,
             include_forecast=include_forecast,
             include_optimization=include_optimization,
             include_anomaly_detection=include_anomaly_detection,
@@ -853,7 +860,7 @@ def register_cost_intelligence_tool(mcp_instance):
 
         return result.dict()
 
-    @mcp_instance.tool(
+    @mcp_instance.tool(  # type: ignore[misc]
         name="cost_quick_insights", description="Quick cost insights and key metrics"
     )
     async def cost_quick_insights(
@@ -867,13 +874,15 @@ def register_cost_intelligence_tool(mcp_instance):
         if correlation_id == "auto":
             correlation_id = str(uuid.uuid4())
 
-        request = CostIntelligenceRequest(
-            subscription_id=subscription_id,
-            time_range="30d",
-            include_forecast=True,
-            include_optimization=True,
-            include_anomaly_detection=False,
-            include_carbon_analysis=False,
+        request = CostIntelligenceRequest.model_validate(
+            {
+                "subscription_id": subscription_id,
+                "time_range": "30d",
+                "include_forecast": True,
+                "include_optimization": True,
+                "include_anomaly_detection": False,
+                "include_carbon_analysis": False,
+            }
         )
 
         tool = CostIntelligenceTool()

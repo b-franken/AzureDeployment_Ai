@@ -7,7 +7,7 @@ from .validation import ValidationMixin
 
 __all__ = [
     "AzureMixin",
-    "CacheMixin", 
+    "CacheMixin",
     "SerializationMixin",
     "ValidationMixin",
 ]

@@ -43,11 +43,11 @@ class InjectionToken[T]:
 
 @dataclass
 class ServiceDescriptor:
-    service_type: type[Any] | InjectionToken
-    implementation: type[Any] | Callable | Any
+    service_type: type[Any] | InjectionToken[Any]
+    implementation: type[Any] | Callable[..., Any] | Any
     scope: Scope
-    factory: Callable | None = None
-    dependencies: list[type[Any] | InjectionToken] = field(default_factory=list)
+    factory: Callable[..., Any] | None = None
+    dependencies: list[type[Any] | InjectionToken[Any]] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -72,12 +72,12 @@ class ServiceProvider(ABC):
 
 class Container(ServiceProvider):
     def __init__(self) -> None:
-        self._services: dict[type | InjectionToken, list[ServiceDescriptor]] = {}
-        self._singletons: dict[type | InjectionToken, Any] = {}
-        self._scoped_instances: WeakKeyDictionary[Any, dict[type | InjectionToken, Any]] = (
-            WeakKeyDictionary()
-        )
-        self._resolving: set[type | InjectionToken] = set()
+        self._services: dict[type[Any] | InjectionToken[Any], list[ServiceDescriptor]] = {}
+        self._singletons: dict[type[Any] | InjectionToken[Any], Any] = {}
+        self._scoped_instances: WeakKeyDictionary[
+            Any, dict[type[Any] | InjectionToken[Any], Any]
+        ] = WeakKeyDictionary()
+        self._resolving: set[type[Any] | InjectionToken[Any]] = set()
         self._parent: Container | None = None
         self._children: WeakValueDictionary[str, Container] = WeakValueDictionary()
 
@@ -184,7 +184,9 @@ class Container(ServiceProvider):
         finally:
             self._resolving.discard(service_type)
 
-    def _get_descriptors(self, service_type: type | InjectionToken) -> list[ServiceDescriptor]:
+    def _get_descriptors(
+        self, service_type: type[Any] | InjectionToken[Any]
+    ) -> list[ServiceDescriptor]:
         descriptors = self._services.get(service_type, [])
         if not descriptors and self._parent:
             descriptors = self._parent._get_descriptors(service_type)
@@ -228,7 +230,7 @@ class Container(ServiceProvider):
             return impl(**dependencies)
         return impl(**dependencies)
 
-    def _extract_dependencies(self, target: Any) -> list[type | InjectionToken]:
+    def _extract_dependencies(self, target: Any) -> list[type[Any] | InjectionToken[Any]]:
         if target is None or not callable(target):
             return []
         if inspect.isclass(target):
@@ -237,7 +239,7 @@ class Container(ServiceProvider):
         else:
             signature = inspect.signature(target)
             params = list(signature.parameters.values())
-        deps: list[type | InjectionToken] = []
+        deps: list[type[Any] | InjectionToken[Any]] = []
         for param in params:
             ann = param.annotation
             if ann == inspect.Parameter.empty:
@@ -251,7 +253,7 @@ class Container(ServiceProvider):
             deps.append(ann)
         return deps
 
-    def _get_param_name(self, target: Any, dep_type: type | InjectionToken) -> str:
+    def _get_param_name(self, target: Any, dep_type: type[Any] | InjectionToken[Any]) -> str:
         if not callable(target):
             return "dependency"
         if inspect.isclass(target):

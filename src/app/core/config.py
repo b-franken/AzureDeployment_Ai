@@ -4,7 +4,7 @@ import logging
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Any, Literal, cast
+from typing import Annotated, Any, Literal
 
 from cryptography.fernet import Fernet
 from pydantic import (
@@ -121,6 +121,9 @@ class AzureConfig(BaseModel):
     )
     default_resource_group: str | None = None
     environment: Literal["dev", "test", "acc", "prod"] = "dev"
+    api_app_id_uri: str | None = None
+    issuer: str | None = None
+    jwks_url: str | None = None
     name_prefix: str = "ff"
     enable_cli_fallback: bool = True
     tags: dict[str, str] = Field(default_factory=lambda: {"managed_by": "devops-ai"})
@@ -264,7 +267,7 @@ class Settings(BaseSettings):
             }
             resolved = aliases.get(val)
             if resolved:
-                self.llm.default_provider = cast("ProviderLiteral", resolved)
+                self.llm.default_provider = resolved
             else:
                 logger.warning(
                     "settings.invalid_llm_provider",
@@ -386,6 +389,9 @@ AZURE_CLIENT_ID = settings.azure.client_id
 AZURE_CLIENT_SECRET = (
     settings.azure.client_secret.get_secret_value() if settings.azure.client_secret else None
 )
+API_APP_ID_URI = settings.azure.api_app_id_uri
+ISSUER = settings.azure.issuer
+JWKS_URL = settings.azure.jwks_url
 
 LLM_PROVIDER = settings.llm.default_provider
 OPENAI_API_KEY = (

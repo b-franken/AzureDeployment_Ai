@@ -99,12 +99,24 @@ class DeploymentStateMachine:
         self._initialize_handlers()
 
     def _initialize_handlers(self) -> None:
-        self.state_handlers[DeploymentState.VALIDATING] = ValidationHandler(self.intelligent_error_handler)
-        self.state_handlers[DeploymentState.APPROVED] = ApprovalHandler(self.intelligent_error_handler)
-        self.state_handlers[DeploymentState.PROVISIONING] = ProvisioningHandler(self.intelligent_error_handler)
-        self.state_handlers[DeploymentState.CONFIGURING] = ConfigurationHandler(self.intelligent_error_handler)
-        self.state_handlers[DeploymentState.VERIFYING] = VerificationHandler(self.intelligent_error_handler)
-        self.state_handlers[DeploymentState.ROLLING_BACK] = RollbackHandler(self.intelligent_error_handler)
+        self.state_handlers[DeploymentState.VALIDATING] = ValidationHandler(
+            self.intelligent_error_handler
+        )
+        self.state_handlers[DeploymentState.APPROVED] = ApprovalHandler(
+            self.intelligent_error_handler
+        )
+        self.state_handlers[DeploymentState.PROVISIONING] = ProvisioningHandler(
+            self.intelligent_error_handler
+        )
+        self.state_handlers[DeploymentState.CONFIGURING] = ConfigurationHandler(
+            self.intelligent_error_handler
+        )
+        self.state_handlers[DeploymentState.VERIFYING] = VerificationHandler(
+            self.intelligent_error_handler
+        )
+        self.state_handlers[DeploymentState.ROLLING_BACK] = RollbackHandler(
+            self.intelligent_error_handler
+        )
 
     async def execute(self, context: DeploymentContext) -> DeploymentContext:
         with tracer.start_as_current_span(
@@ -203,7 +215,10 @@ class DeploymentStateMachine:
                                 state=context.state.value,
                                 retry_count=context.retry_count,
                             )
-                            if context.rollback_enabled and context.state != DeploymentState.VALIDATING:
+                            if (
+                                context.rollback_enabled
+                                and context.state != DeploymentState.VALIDATING
+                            ):
                                 context.state = DeploymentState.ROLLING_BACK
                             else:
                                 context.state = DeploymentState.FAILED
@@ -215,14 +230,16 @@ class DeploymentStateMachine:
                             error=str(e),
                             exc_info=True,
                         )
-                        
+
                         await self._handle_intelligent_error_recovery(context, e)
 
-            span.set_attributes({
-                "final_state": context.state.value,
-                "retry_count": context.retry_count,
-                "execution_time_minutes": (datetime.utcnow() - start_time).total_seconds() / 60,
-            })
+            span.set_attributes(
+                {
+                    "final_state": context.state.value,
+                    "retry_count": context.retry_count,
+                    "execution_time_minutes": (datetime.utcnow() - start_time).total_seconds() / 60,
+                }
+            )
 
             logger.info(
                 "Deployment state machine execution completed",
@@ -305,7 +322,8 @@ class DeploymentStateMachine:
             key = f"deployment:{deployment_id}"
             value = await self.redis_client.get(key)
             if value:
-                return json.loads(value)
+                result: dict[str, Any] = json.loads(value)
+                return result
         return None
 
     async def _handle_intelligent_error_recovery(
@@ -348,7 +366,7 @@ class DeploymentStateMachine:
                 analysis = await self.intelligent_error_handler.analyze_error(
                     error, error_context, deployment_history
                 )
-                
+
                 remediation_plan = await self.intelligent_error_handler.generate_remediation_plan(
                     analysis, error_context
                 )
@@ -372,12 +390,14 @@ class DeploymentStateMachine:
                     "intelligent_suggestions": analysis.suggested_actions,
                 }
 
-                span.set_attributes({
-                    "analysis_category": analysis.error_category,
-                    "analysis_severity": analysis.severity,
-                    "retry_feasible": analysis.retry_feasible,
-                    "success_probability": remediation_plan.estimated_success_probability,
-                })
+                span.set_attributes(
+                    {
+                        "analysis_category": analysis.error_category,
+                        "analysis_severity": analysis.severity,
+                        "retry_feasible": analysis.retry_feasible,
+                        "success_probability": remediation_plan.estimated_success_probability,
+                    }
+                )
 
                 if analysis.retry_feasible and remediation_plan.estimated_success_probability > 0.6:
                     logger.info(
@@ -386,9 +406,9 @@ class DeploymentStateMachine:
                         adjustments=remediation_plan.configuration_adjustments,
                         success_probability=remediation_plan.estimated_success_probability,
                     )
-                    
+
                     await self._apply_configuration_adjustments(context, remediation_plan)
-                    
+
                     if context.retry_count < context.max_retries:
                         context.retry_count += 1
                         context.state = (
@@ -432,19 +452,20 @@ class DeploymentStateMachine:
 
     def _extract_primary_resource_type(self, context: DeploymentContext) -> str:
         if context.resources:
-            return context.resources[0].get("type", "unknown")
+            resource_type: str = context.resources[0].get("type", "unknown")
+            return resource_type
         return "unknown"
 
     async def _apply_configuration_adjustments(
         self, context: DeploymentContext, remediation_plan: Any
     ) -> None:
         adjustments = remediation_plan.configuration_adjustments
-        
+
         if "location" in adjustments:
             context.location = adjustments["location"]
             for resource in context.resources:
                 resource["location"] = adjustments["location"]
-            
+
             logger.info(
                 "Applied location adjustment",
                 deployment_id=context.deployment_id,
@@ -455,7 +476,7 @@ class DeploymentStateMachine:
             for resource in context.resources:
                 if resource.get("type") in ["virtual_machine", "app_service"]:
                     resource["sku"] = adjustments["sku"]
-            
+
             logger.info(
                 "Applied SKU adjustment",
                 deployment_id=context.deployment_id,
@@ -468,7 +489,7 @@ class DeploymentStateMachine:
                     resource["address_space"] = adjustments["address_space"]
                     if "subnet_cidr" in adjustments:
                         resource["subnet_cidr"] = adjustments["subnet_cidr"]
-            
+
             logger.info(
                 "Applied network configuration adjustment",
                 deployment_id=context.deployment_id,

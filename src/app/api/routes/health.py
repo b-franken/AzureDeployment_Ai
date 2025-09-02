@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
@@ -10,12 +11,12 @@ router = APIRouter()
 
 
 @router.get("/health")
-async def health() -> dict:
+async def health() -> dict[str, Any]:
     return {"api": "healthy", "timestamp": datetime.utcnow().isoformat()}
 
 
 @router.get("/health/llm")
-async def health_llm() -> dict:
+async def health_llm() -> dict[str, str]:
     s = get_settings()
     ok = bool(s.llm.openai_api_key)
     if not ok:

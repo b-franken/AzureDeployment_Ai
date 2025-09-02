@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from time import perf_counter
 from typing import Annotated, Any
 
@@ -40,6 +41,11 @@ async def insights(
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid strategy"
                 ) from e
+            if not td.subscription_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="subscription_id is required for cost insights",
+                )
             data = await cms.get_cost_insights(td.subscription_id)
             recs = await cms.get_optimization_recommendations(
                 td.subscription_id,
@@ -121,10 +127,20 @@ async def analyze(
         span.set_attribute("include.forecast", bool(req.include_forecast))
         span.set_attribute("include.recommendations", bool(req.include_recommendations))
         try:
+            # Parse date strings to datetime objects
+            try:
+                start_date = datetime.fromisoformat(req.start_date.replace("Z", "+00:00"))
+                end_date = datetime.fromisoformat(req.end_date.replace("Z", "+00:00"))
+            except ValueError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid date format. Use ISO format: {e}",
+                ) from e
+
             analysis = await cms.analyze_costs(
                 req.subscription_id,
-                req.start_date,
-                req.end_date,
+                start_date,
+                end_date,
                 req.group_by,
             )
             if req.include_forecast:

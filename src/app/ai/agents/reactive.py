@@ -18,12 +18,14 @@ class EventType(Enum):
     DEPLOYMENT_STARTED = "deployment_started"
     DEPLOYMENT_COMPLETE = "deployment_complete"
     DEPLOYMENT_FAILED = "deployment_failed"
+    DEPLOYMENT_FINISHED = "deployment_finished"  # Alias for DEPLOYMENT_COMPLETE
     RESOURCE_CREATED = "resource_created"
     RESOURCE_UPDATED = "resource_updated"
     RESOURCE_DELETED = "resource_deleted"
     RESOURCE_FAILURE = "resource_failure"
     COST_THRESHOLD = "cost_threshold"
     SECURITY_ALERT = "security_alert"
+    ALERT = "alert"  # Generic alert type
     HEALTH_CHECK = "health_check"
 
 
@@ -40,12 +42,12 @@ EventHandler = Callable[[Event], Awaitable[None]]
 
 
 class ReactiveAgent(Agent[dict[str, Any], dict[str, Any]]):
-    def __init__(self, context: AgentContext | None = None):
+    def __init__(self, context: AgentContext | None = None) -> None:
         super().__init__(context)
         self.event_handlers: dict[EventType, list[EventHandler]] = {}
         self.event_queue: asyncio.Queue[Event] = asyncio.Queue()
         self._running = False
-        self._worker_task: asyncio.Task | None = None
+        self._worker_task: asyncio.Task[Any] | None = None
 
     def on(self, event_type: EventType, handler: EventHandler) -> None:
         """Register an event handler for a specific event type."""
@@ -120,7 +122,7 @@ class ReactiveAgent(Agent[dict[str, Any], dict[str, Any]]):
                 "event.type": event.type.value,
                 "event.source": event.source or "unknown",
                 "event.correlation_id": event.correlation_id or "none",
-            }
+            },
         ) as span:
             handlers = self.event_handlers.get(event.type, [])
             span.set_attribute("handlers_count", len(handlers))
@@ -131,8 +133,7 @@ class ReactiveAgent(Agent[dict[str, Any], dict[str, Any]]):
                 return
 
             async with self.tracer.trace_operation(
-                "execute_handlers",
-                {"handlers_count": len(handlers)}
+                "execute_handlers", {"handlers_count": len(handlers)}
             ):
                 tasks = [self._safe_handler_call(handler, event) for handler in handlers]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -145,7 +146,7 @@ class ReactiveAgent(Agent[dict[str, Any], dict[str, Any]]):
                         f"Handler {handlers[i].__name__} failed for event {event.type}: {result}",
                         exc_info=result,
                     )
-            
+
             span.set_attribute("handlers.executed", len(handlers))
             span.set_attribute("handlers.failed", failed_count)
             span.set_attribute("result", "completed" if failed_count == 0 else "partial_failure")
@@ -227,3 +228,28 @@ class ReactiveAgent(Agent[dict[str, Any], dict[str, Any]]):
             duration_ms=(time.perf_counter() - start_time) * 1000,
             step_results=step_results,
         )
+
+    async def handle(self, event: Event) -> ExecutionResult[dict[str, Any]]:
+        """Handle a single event and return execution result."""
+        import time
+
+        start_time = time.perf_counter()
+
+        try:
+            await self._handle_event(event)
+            return ExecutionResult(
+                success=True,
+                result={
+                    "event_type": event.type.value,
+                    "handled": True,
+                    "handlers_count": len(self.event_handlers.get(event.type, [])),
+                },
+                duration_ms=(time.perf_counter() - start_time) * 1000,
+            )
+        except Exception as e:
+            return ExecutionResult(
+                success=False,
+                result={"event_type": event.type.value, "handled": False},
+                error=str(e),
+                duration_ms=(time.perf_counter() - start_time) * 1000,
+            )

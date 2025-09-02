@@ -24,7 +24,10 @@ async def _get_redis_client() -> redis.Redis | None:
     try:
         settings = get_settings()
         if hasattr(settings, "redis") and settings.redis.url:
-            return redis.from_url(settings.redis.url)
+            client: redis.Redis = redis.from_url(  # type: ignore[no-untyped-call]
+                settings.redis.url, decode_responses=True
+            )
+            return client
     except Exception as e:
         logger.warning(f"Could not connect to Redis: {e}")
     return None

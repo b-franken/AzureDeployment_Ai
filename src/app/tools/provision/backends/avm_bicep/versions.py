@@ -11,9 +11,11 @@ def resolve(name: str, overrides: dict[str, str] | None = None) -> str:
     versions = dict(AVM_VERSIONS)
     if overrides:
         versions.update(overrides)
-    
+
     if name not in versions:
         available_resources = ", ".join(sorted(versions.keys()))
-        raise KeyError(f"AVM resource '{name}' not supported. Available resources: {available_resources}")
-    
+        raise KeyError(
+            f"AVM resource '{name}' not supported. Available resources: {available_resources}"
+        )
+
     return f"br/public:avm/res/{name}:{versions[name]}"

@@ -16,6 +16,8 @@ _jwks_client: PyJWKClient | None = None
 def _get_jwks_client() -> PyJWKClient:
     global _jwks_client
     if _jwks_client is None:
+        if not JWKS_URL:
+            raise ValueError("JWKS_URL is required but not configured")
         _jwks_client = PyJWKClient(JWKS_URL)
     return _jwks_client
 

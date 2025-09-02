@@ -2,18 +2,18 @@ from __future__ import annotations
 
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Any, Generic, TypeVar
+from typing import Generic, TypeVar
 
 from app.ai.agents.types import AgentContext, ExecutionPlan, ExecutionResult
+
+__all__ = ["Agent", "AgentContext", "AgentStatus", "AgentMetrics"]
 from app.observability.agent_tracing import get_agent_tracer
 
 TState = TypeVar("TState")
 TResult = TypeVar("TResult")
-
-
 
 
 class AgentStatus(Enum):
@@ -36,7 +36,7 @@ class AgentMetrics:
 
 
 class Agent(ABC, Generic[TState, TResult]):
-    def __init__(self, context: AgentContext | None = None):
+    def __init__(self, context: AgentContext | None = None) -> None:
         self.context = context or AgentContext()
         self.status = AgentStatus.IDLE
         self.metrics = AgentMetrics()
@@ -66,34 +66,37 @@ class Agent(ABC, Generic[TState, TResult]):
                 async with self.tracer.trace_operation("plan", {"goal": goal[:100]}):
                     plan = await self.plan(goal)
                 planning_time = (time.perf_counter() - planning_start) * 1000
-                
+
                 self.status = AgentStatus.EXECUTING
                 execution_start = time.perf_counter()
                 async with self.tracer.trace_operation(
-                    "execute", 
-                    {"plan.steps": len(plan.steps) if hasattr(plan, 'steps') else 0}
+                    "execute", {"plan.steps": len(plan.steps) if hasattr(plan, "steps") else 0}
                 ):
                     result = await self.execute(plan)
                 execution_time = (time.perf_counter() - execution_start) * 1000
-                
+
                 self._update_metrics(
-                    success=result.success, planning_time=planning_time, execution_time=execution_time
+                    success=result.success,
+                    planning_time=planning_time,
+                    execution_time=execution_time,
                 )
                 self.status = AgentStatus.COMPLETED if result.success else AgentStatus.FAILED
-                
+
                 self.tracer.track_agent_metrics(
                     "run", planning_time + execution_time, result.success
                 )
                 span.set_attribute("result.success", result.success)
                 span.set_attribute("planning_time_ms", planning_time)
                 span.set_attribute("execution_time_ms", execution_time)
-                
+
             except (RuntimeError, ValueError, TypeError, AttributeError) as e:
                 self.status = AgentStatus.FAILED
                 self._update_metrics(success=False)
                 span.set_attribute("result.success", False)
                 span.set_attribute("error.message", str(e))
-                return ExecutionResult(success=False, error=str(e), execution_time=datetime.utcnow())
+                return ExecutionResult(
+                    success=False, error=str(e), execution_time=datetime.utcnow()
+                )
             else:
                 return result
 

@@ -19,7 +19,7 @@ class ResourceGroupEmitter:
         mod = modref("resource/resource-group")
         name = r["name"]
         location = r.get("location", "location")
-        
+
         return [
             f"module rg_{idx} '{mod}' = {{",
             f"  name: 'rg_{idx}'",

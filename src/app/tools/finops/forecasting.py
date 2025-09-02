@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import date as date_type
 from datetime import datetime, timedelta
 from statistics import NormalDist
-from typing import Any, TypedDict
+from typing import Any, Protocol, TypedDict
 
 import numpy as np
 from numpy.typing import NDArray
@@ -39,6 +39,14 @@ BALANCED_OPTIMIZATION_THRESHOLD = 10.0
 
 def _z_score(confidence_level: float) -> float:
     return float(NormalDist().inv_cdf((1.0 + confidence_level) / 2.0))
+
+
+class ForecastModel(Protocol):
+    """Protocol for forecasting models."""
+
+    def predict(self, X: NDArray[np.floating]) -> NDArray[np.floating]:
+        """Predict values based on input features."""
+        ...
 
 
 @dataclass
@@ -292,7 +300,7 @@ class ForecastingService:
 
     def _fit_trend_model(
         self, X: NDArray[np.floating], y: NDArray[np.floating]
-    ) -> tuple[LinearRegression, float]:
+    ) -> tuple[ForecastModel, float]:
         model = LinearRegression()
         model.fit(X, y)
         r2_score = float(model.score(X, y))
@@ -300,7 +308,7 @@ class ForecastingService:
 
     def _fit_seasonal_model(
         self, X: NDArray[np.floating], y: NDArray[np.floating]
-    ) -> tuple[SeasonalModelWrapper, float]:
+    ) -> tuple[ForecastModel, float]:
         poly_features = PolynomialFeatures(degree=3)
         X_poly = poly_features.fit_transform(X)
         model = LinearRegression()

@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from app.ai.nlu.embeddings_classifier import EmbeddingsClassifierService
@@ -48,9 +48,24 @@ class UnifiedParseResult:
     def to_orchestrator_args(self) -> dict[str, Any] | None:
         try:
             from app.common.envs import normalize_env
-        except Exception:
-
-            def normalize_env(v: str) -> str:
+        except Exception as e:
+            from app.core.logging import get_logger
+            
+            logger = get_logger(__name__)
+            logger.warning(
+                "normalize_env_import_failed",
+                error=str(e),
+                error_type=type(e).__name__,
+                using_fallback=True
+            )
+            
+            def normalize_env(value: str) -> str:  # type: ignore[misc]
+                logger.debug(
+                    "normalize_env_fallback_used",
+                    fallback_value="dev",
+                    input_value=value,
+                    reason="failed to import normalize_env from app.common.envs"
+                )
                 return "dev"
 
         rtype = self.resource_type
@@ -99,22 +114,78 @@ class UnifiedParseResult:
 
 
 def _to_scores_list(x: Any) -> list[float]:
+    from app.core.logging import get_logger
+    
+    logger = get_logger(__name__)
+    
     try:
         import numpy as np
 
         if isinstance(x, np.ndarray):
-            return cast("list[float]", x.tolist()[0])
-    except Exception:
-        pass
-    if hasattr(x, "detach"):
+            try:
+                result = x.tolist()
+                if isinstance(result, list) and result:
+                    if isinstance(result[0], list):
+                        return cast("list[float]", result[0])
+                    return cast("list[float]", result)
+                logger.warning(
+                    "numpy_array_empty_or_invalid",
+                    array_shape=getattr(x, 'shape', 'unknown'),
+                    result_type=type(result).__name__
+                )
+                return []
+            except Exception as e:
+                logger.warning(
+                    "numpy_array_conversion_failed",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    array_shape=getattr(x, 'shape', 'unknown')
+                )
+                return []
+    except ImportError as e:
+        logger.debug(
+            "numpy_import_failed",
+            error=str(e),
+            fallback_processing=True
+        )
+    except Exception as e:
+        logger.warning(
+            "numpy_processing_unexpected_error",
+            error=str(e),
+            error_type=type(e).__name__
+        )
+
+    if hasattr(x, "detach"):  # PyTorch tensor
         try:
             return cast("list[float]", x.detach().cpu().tolist()[0])
-        except Exception:
+        except Exception as e:
+            logger.warning(
+                "pytorch_tensor_conversion_failed",
+                error=str(e),
+                error_type=type(e).__name__,
+                tensor_type=type(x).__name__
+            )
             return []
+            
     if isinstance(x, list):
-        if x and isinstance(x[0], list):
-            return cast("list[float]", x[0])
-        return cast("list[float]", x)
+        try:
+            if x and isinstance(x[0], list):
+                return cast("list[float]", x[0])
+            return cast("list[float]", x)
+        except (IndexError, TypeError) as e:
+            logger.warning(
+                "list_conversion_failed",
+                error=str(e),
+                error_type=type(e).__name__,
+                list_length=len(x) if hasattr(x, '__len__') else 'unknown'
+            )
+            return []
+    
+    logger.debug(
+        "scores_conversion_no_handler",
+        input_type=type(x).__name__,
+        fallback_empty_list=True
+    )
     return []
 
 
@@ -135,23 +206,28 @@ class unified_nlu_parser:
         local_model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
     ) -> None:
         from app.ai.nlu.patterns import get_nlu_patterns
-        
+
         patterns = get_nlu_patterns()
         self.location_patterns: list[tuple[re.Pattern[str], str]] = [
             (re.compile(p, re.IGNORECASE), loc) for p, loc in patterns.location_patterns
         ]
         self.resource_patterns: dict[str, list[re.Pattern[str]]] = {
-            k: [re.compile(p, re.IGNORECASE) for p in v] for k, v in patterns.resource_patterns.items()
+            k: [re.compile(p, re.IGNORECASE) for p in v]
+            for k, v in patterns.resource_patterns.items()
         }
         self.intent_patterns: dict[DeploymentIntent, list[re.Pattern[str]]] = {
-            DeploymentIntent(k): [re.compile(p, re.IGNORECASE) for p in v] 
+            DeploymentIntent(k): [re.compile(p, re.IGNORECASE) for p in v]
             for k, v in patterns.intent_patterns.items()
         }
         self.keyword_hints = patterns.keyword_hints
         self.contextual_resources = patterns.contextual_resources
-        self.in_context_patterns = [re.compile(p, re.IGNORECASE) for p in patterns.in_context_patterns]
-        self.compliance_patterns = {k: re.compile(v, re.IGNORECASE) for k, v in patterns.compliance_patterns.items()}
-        
+        self.in_context_patterns = [
+            re.compile(p, re.IGNORECASE) for p in patterns.in_context_patterns
+        ]
+        self.compliance_patterns = {
+            k: re.compile(v, re.IGNORECASE) for k, v in patterns.compliance_patterns.items()
+        }
+
         self._emb: EmbeddingsClassifierService | None = None
         if use_embeddings:
             self._emb = self._load_embeddings_service(
@@ -177,36 +253,103 @@ class unified_nlu_parser:
         )
 
     def parse(self, text: str) -> UnifiedParseResult:
-        t = text.lower().strip()
-        intent = self._detect_intent(t)
-        rtype = self._detect_resource_type(t)
-        rname = self._extract_resource_name(t, rtype)
-        params = self._extract_parameters(t, rtype)
-        if rname and "name" not in params:
-            params["name"] = rname
-        ctx = self._build_context(t, params)
-        adv = self._build_advanced_context(t, intent, rtype)
-        conf = self._confidence(t, intent, rtype, bool(rname))
-        emb_scores: list[float] | None = None
-        if self._emb:
-            try:
-                probs = self._emb.predict_proba([text])
-                emb_scores = _to_scores_list(probs)
-            except Exception:
-                emb_scores = None
-        action = self._action(intent, rtype)
-        return UnifiedParseResult(
-            text=text,
-            intent=intent,
-            confidence=conf,
-            resource_type=rtype,
-            resource_name=rname,
-            action=action,
-            parameters=params,
-            context=ctx,
-            advanced_context=adv,
-            embeddings_scores=emb_scores,
-        )
+        from app.core.logging import get_logger
+        
+        logger = get_logger(__name__)
+        
+        try:
+            t = text.lower().strip()
+            
+            logger.debug(
+                "nlu_parse_started",
+                text_length=len(text),
+                normalized_length=len(t),
+                has_embeddings=self._emb is not None
+            )
+            
+            intent = self._detect_intent(t)
+            rtype = self._detect_resource_type(t)
+            rname = self._extract_resource_name(t, rtype)
+            params = self._extract_parameters(t, rtype)
+            
+            if rname and "name" not in params:
+                params["name"] = rname
+                logger.debug("nlu_resource_name_added", resource_name=rname)
+                
+            ctx = self._build_context(t, params)
+            adv = self._build_advanced_context(t, intent, rtype)
+            conf = self._confidence(t, intent, rtype, bool(rname))
+            
+            emb_scores: list[float] | None = None
+            if self._emb:
+                try:
+                    probs = self._emb.predict_proba([text])
+                    emb_scores = _to_scores_list(probs)
+                    logger.debug(
+                        "nlu_embeddings_processed",
+                        scores_length=len(emb_scores) if emb_scores else 0,
+                        embeddings_available=True
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "nlu_embeddings_failed",
+                        error=str(e),
+                        error_type=type(e).__name__,
+                        fallback_none=True
+                    )
+                    emb_scores = None
+            else:
+                logger.debug("nlu_no_embeddings_service", embeddings_available=False)
+                
+            action = self._action(intent, rtype)
+            
+            result = UnifiedParseResult(
+                text=text,
+                intent=intent,
+                confidence=conf,
+                resource_type=rtype,
+                resource_name=rname,
+                action=action,
+                parameters=params,
+                context=ctx,
+                advanced_context=adv,
+                embeddings_scores=emb_scores,
+            )
+            
+            logger.info(
+                "nlu_parse_completed",
+                intent=intent.value,
+                resource_type=rtype,
+                confidence=conf,
+                has_resource_name=bool(rname),
+                parameters_count=len(params),
+                context_keys=len(ctx),
+                advanced_context_keys=len(adv)
+            )
+            
+            return result
+            
+        except Exception as e:
+            logger.error(
+                "nlu_parse_failed",
+                error=str(e),
+                error_type=type(e).__name__,
+                text_preview=text[:100] if text else "",
+                fallback_generic=True
+            )
+            
+            return UnifiedParseResult(
+                text=text,
+                intent=DeploymentIntent.create,
+                confidence=0.0,
+                resource_type="generic",
+                resource_name=None,
+                action="create",
+                parameters={},
+                context={"error": str(e), "fallback": True},
+                advanced_context={},
+                embeddings_scores=None,
+            )
 
     def parse_action(self, text: str) -> tuple[str, dict[str, Any]]:
         r = self.parse(text)
@@ -227,13 +370,14 @@ class unified_nlu_parser:
 
     def _detect_resource_type(self, text: str) -> str:
         from app.core.logging import get_logger
+
         logger = get_logger(__name__)
-        
+
         scores: dict[str, int] = {}
         contextual_resources = {"resource_group"}
-        
+
         logger.debug("NLU resource type detection", text=text[:100])
-        
+
         for rtype, pats in self.resource_patterns.items():
             s = 0
             for pat in pats:
@@ -243,41 +387,43 @@ class unified_nlu_parser:
                     if rtype not in contextual_resources:
                         start_pos = match.start()
                         create_verbs = r"\b(?:create|make|new|provision|deploy|setup|add)\b"
-                        text_before_match = text[:start_pos + 50]
+                        text_before_match = text[: start_pos + 50]
                         if re.search(create_verbs, text_before_match):
                             s += 10
-            
+
             for hint in self.keyword_hints.get(rtype, []):
                 if hint in text:
                     hint_score = 1
                     if rtype not in self.contextual_resources:
                         create_verbs = r"\b(?:create|make|new|provision|deploy|setup|add)\b"
                         hint_pos = text.find(hint)
-                        text_before_hint = text[:hint_pos + len(hint) + 50]
+                        text_before_hint = text[: hint_pos + len(hint) + 50]
                         if re.search(create_verbs, text_before_hint):
                             hint_score += 5
                     s += hint_score
-            
+
             if rtype in self.contextual_resources:
                 for pattern in self.in_context_patterns:
                     if pattern.search(text):
                         s = min(s, 3)
                         break
-            
+
             if s > 0:
                 scores[rtype] = s
                 logger.debug("NLU scoring", resource_type=rtype, score=s, text_snippet=text[:50])
-                
+
         if not scores:
             logger.warning("NLU no resource type detected", text=text[:100])
             return "generic"
-            
+
         best_type = max(scores, key=lambda k: scores[k])
-        logger.info("NLU resource type selected", 
-                   selected_type=best_type, 
-                   selected_score=scores[best_type],
-                   all_scores=dict(scores),
-                   text=text[:100])
+        logger.info(
+            "NLU resource type selected",
+            selected_type=best_type,
+            selected_score=scores[best_type],
+            all_scores=dict(scores),
+            text=text[:100],
+        )
         return best_type
 
     def _extract_resource_name(self, text: str, rtype: str) -> str | None:

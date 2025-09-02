@@ -4,7 +4,7 @@ import difflib
 import importlib
 import re
 from collections.abc import Callable, Iterable
-from typing import Any
+from typing import Any, cast
 
 ActionFn = Callable[..., Any]
 
@@ -156,10 +156,11 @@ def _resolve(binding: str) -> ActionFn:
     if not sep:
         raise ImportError(f"invalid binding: {binding}")
     mod = importlib.import_module(mod_name)
-    fn = getattr(mod, attr, None)
+    fn: Any = getattr(mod, attr, None)
     if not callable(fn):
         raise ImportError(f"callable not found: {binding}")
-    return fn
+    # We've validated that fn is callable, so it's safe to cast it to ActionFn
+    return cast(ActionFn, fn)
 
 
 def _ensure_loaded() -> None:

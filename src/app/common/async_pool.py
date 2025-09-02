@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Awaitable, Callable, Iterable
-from typing import TypeVar, cast
+from typing import TypeVar
 
 from app.core.logging import get_logger
 
@@ -31,7 +31,7 @@ async def bounded_gather(*aws: Awaitable[R], limit: int = 8) -> list[R]:
         logger.debug(
             "bounded_gather completed", tasks=len(tasks), limit=lim, duration_ms=duration_ms
         )
-        return cast("list[R]", results)
+        return results
     except Exception as exc:
         logger.error(
             "bounded_gather failed",

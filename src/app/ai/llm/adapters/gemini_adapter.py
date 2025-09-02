@@ -33,7 +33,9 @@ class GeminiAdapter:
         s = get_settings()
         if not s.llm.gemini_api_key:
             raise RuntimeError("GEMINI_API_KEY not configured")
-        self._base = s.llm.gemini_api_base.rstrip("/")
+        self._base = "https://generativelanguage.googleapis.com"  # Default Gemini API base
+        if s.llm.gemini_api_key is None:
+            raise RuntimeError("GEMINI_API_KEY is None")
         self._key = s.llm.gemini_api_key.get_secret_value()
 
     def name(self) -> str:
@@ -85,10 +87,12 @@ class GeminiAdapter:
                     continue
 
     async def chat_raw(
-        self, client: httpx.AsyncClient, model: str, messages: list[dict[str, Any]], **kwargs: Any
+        self, client: httpx.AsyncClient, model: str, messages: list[Message], **kwargs: Any
     ) -> dict[str, Any]:
+        gemini_messages = _to_gemini_messages(messages)
         url = f"{self.endpoint()}/{model}:generateContent?key={self._key}"
-        payload = {"contents": messages, **kwargs}
+        payload = {"contents": gemini_messages, **kwargs}
         resp = await client.post(url, json=payload, headers=self.headers())
         resp.raise_for_status()
-        return resp.json()
+        response_data: dict[str, Any] = resp.json()
+        return response_data

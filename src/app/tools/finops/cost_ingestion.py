@@ -62,7 +62,7 @@ class CostIngestionService:
         self._cost_client: CostManagementClient | None = None
         self._consumption_client: ConsumptionManagementClient | None = None
         self._consumption_client_sub_id: str | None = None
-        self._cache: dict[str, tuple[Any, float]] = {}
+        self._cache: dict[str, tuple[list[dict[str, Any]], float]] = {}
         self._cache_ttl: float = 3600.0
 
     def _get_cost_client(self) -> CostManagementClient:
@@ -398,3 +398,43 @@ class CostIngestionService:
                 "contact_roles": getattr(notification, "contact_roles", []),
             }
         return extracted
+
+    async def get_reservation_recommendations(self, scope: str) -> list[dict[str, Any]]:
+        """Get reservation recommendations for the given scope."""
+        client = self._get_consumption_client()
+        try:
+            recommendations = await asyncio.to_thread(
+                client.reservation_recommendations.list,
+                resource_scope=scope,
+                filter="properties/scope eq 'Single'",
+            )
+
+            result = []
+            for rec in recommendations:
+                recommendation_data = {
+                    "location": getattr(rec, "location", None),
+                    "sku_name": getattr(rec, "sku_name", None),
+                    "term": getattr(rec, "term", None),
+                    "cost_with_no_reserved_instances": getattr(
+                        rec, "cost_with_no_reserved_instances", 0
+                    ),
+                    "recommended_quantity": getattr(rec, "recommended_quantity", 0),
+                    "total_cost_with_reserved_instances": getattr(
+                        rec, "total_cost_with_reserved_instances", 0
+                    ),
+                    "net_savings": getattr(rec, "net_savings", 0),
+                    "first_usage_date": _to_iso(getattr(rec, "first_usage_date", None)),
+                    "scope": getattr(rec, "scope", None),
+                    "look_back_period": getattr(rec, "look_back_period", None),
+                    "instance_flexibility_ratio": getattr(rec, "instance_flexibility_ratio", None),
+                    "instance_flexibility_group": getattr(rec, "instance_flexibility_group", None),
+                    "normalized_size": getattr(rec, "normalized_size", None),
+                }
+                result.append(recommendation_data)
+
+            return result
+
+        except AzureError as e:
+            if "not found" in str(e).lower() or "no recommendations" in str(e).lower():
+                return []
+            raise ExternalServiceException(f"Failed to get reservation recommendations: {e}") from e

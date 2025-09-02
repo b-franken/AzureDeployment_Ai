@@ -1,6 +1,7 @@
 from typing import Any, Literal
 
 from pydantic import ConfigDict, Field, model_validator
+
 from app.core.schemas.base import BaseSchema
 from app.core.schemas.mixins import AzureMixin, ValidationMixin
 from app.core.schemas.registry import register_schema
@@ -21,7 +22,6 @@ class WebAppPlanModel(BaseSchema):
 class WebAppParameters(BaseSchema, AzureMixin):
     model_config = ConfigDict(extra="forbid")
     resource_group: str
-    location: str
     name: str
     runtime: str | None = None
     plan: WebAppPlanModel
@@ -32,7 +32,6 @@ class WebAppParameters(BaseSchema, AzureMixin):
 class StorageParameters(BaseSchema, AzureMixin):
     model_config = ConfigDict(extra="forbid")
     resource_group: str
-    location: str
     name: str
     sku: str | None = None
     access_tier: Literal["Hot", "Cool"] = "Hot"
@@ -43,7 +42,6 @@ class StorageParameters(BaseSchema, AzureMixin):
 class AksParameters(BaseSchema, AzureMixin):
     model_config = ConfigDict(extra="forbid")
     resource_group: str
-    location: str
     name: str
     dns_prefix: str
     node_count: int = 2
@@ -54,7 +52,6 @@ class AksParameters(BaseSchema, AzureMixin):
 class AcrParameters(BaseSchema, AzureMixin):
     model_config = ConfigDict(extra="forbid")
     resource_group: str
-    location: str
     name: str
     sku: str = "Basic"
     admin_user_enabled: bool = True
@@ -65,7 +62,6 @@ class AcrParameters(BaseSchema, AzureMixin):
 class ApimParameters(BaseSchema, AzureMixin):
     model_config = ConfigDict(extra="forbid")
     resource_group: str
-    location: str
     name: str
     sku_name: str = "Developer"
     capacity: int = 1
@@ -78,7 +74,6 @@ class ApimParameters(BaseSchema, AzureMixin):
 class EventHubParameters(BaseSchema, AzureMixin):
     model_config = ConfigDict(extra="forbid")
     resource_group: str
-    location: str
     name: str
     tier: Literal["Basic", "Standard", "Premium"] = "Standard"
     capacity: int = 1

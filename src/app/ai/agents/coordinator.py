@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -12,9 +13,11 @@ from app.ai.agents.types import ExecutionPlan, ExecutionResult, PlanStep, StepRe
 from app.ai.generator import generate_response
 from app.ai.tools_router import maybe_call_tool
 
+logger = logging.getLogger(__name__)
+
 
 class CoordinatorAgent(Agent[dict[str, Any], dict[str, Any]]):
-    def __init__(self, context: AgentContext | None = None):
+    def __init__(self, context: AgentContext | None = None) -> None:
         super().__init__(context)
         self.orchestrator = OrchestrationAgent(context)
         self.reactive = ReactiveAgent(context)
@@ -74,63 +77,86 @@ class CoordinatorAgent(Agent[dict[str, Any], dict[str, Any]]):
                 result = await agent.execute(plan)
                 if result.success:
                     return StepResult(
-                        step_name=step.name,
+                        step_name=step.name or "provision_step",
                         success=True,
                         output=getattr(result, "result", None),
                     )
                 return StepResult(
-                    step_name=step.name,
+                    step_name=step.name or "provision_step",
                     success=False,
                     error=getattr(result, "error", "provisioning failed"),
                 )
             try:
-                output = await maybe_call_tool(step.tool, step.args or {})
-                return StepResult(step_name=step.name, success=True, output=output)
+                # Convert tool call to text format for maybe_call_tool
+                import json
+
+                tool_input = f"Use {step.tool or 'unknown_tool'}"
+                if step.args:
+                    tool_input += f" with args: {json.dumps(step.args)}"
+                output = await maybe_call_tool(tool_input, enable_tools=True)
+                return StepResult(step_name=step.name or "tool_step", success=True, output=output)
             except Exception as e:
-                return StepResult(step_name=step.name, success=False, error=str(e))
+                return StepResult(step_name=step.name or "tool_step", success=False, error=str(e))
 
         if step.type == StepType.MESSAGE:
-            return StepResult(step_name=step.name, success=True, output=step.content or "")
+            return StepResult(
+                step_name=step.name or "message_step", success=True, output=step.content or ""
+            )
 
-        if step.type == StepType.SEQUENCE:
+        if step.type in (StepType.SEQUENCE, StepType.SEQUENTIAL):
             seq_results: list[StepResult] = []
             for s in step.children or []:
                 r = await self._run_step(s)
                 seq_results.append(r)
                 if not r.success:
                     return StepResult(
-                        step_name=step.name, success=False, children=seq_results, error=r.error
+                        step_name=step.name or "sequence_step",
+                        success=False,
+                        children=seq_results,
+                        error=r.error,
                     )
-            return StepResult(step_name=step.name, success=True, children=seq_results)
+            return StepResult(
+                step_name=step.name or "sequence_step", success=True, children=seq_results
+            )
 
         if step.type == StepType.PARALLEL:
             tasks = [self._run_step(s) for s in step.children or []]
-            done = await asyncio.gather(*tasks, return_exceptions=True)
+            done_results = await asyncio.gather(*tasks, return_exceptions=True)
             par_results: list[StepResult] = []
             ok = True
-            for r in done:
-                if isinstance(r, StepResult):
-                    par_results.append(r)
-                    ok = ok and r.success
+            for result in done_results:  # type: ignore[assignment]
+                if isinstance(result, StepResult):
+                    par_results.append(result)
+                    ok = ok and result.success
                 else:
-                    par_results.append(StepResult(step_name=step.name, success=False, error=str(r)))
+                    par_results.append(
+                        StepResult(
+                            step_name=step.name or "unknown", success=False, error=str(result)
+                        )
+                    )
                     ok = False
-            return StepResult(step_name=step.name, success=ok, children=par_results)
+            return StepResult(
+                step_name=step.name or "parallel_step", success=ok, children=par_results
+            )
 
         if step.type == StepType.AGENT:
-            plan = await self.orchestrator.plan(step.description or step.name)
+            plan = await self.orchestrator.plan(step.description or step.name or "execute")
             result = await self.orchestrator.execute(plan)
             if result.success:
                 return StepResult(
-                    step_name=step.name,
+                    step_name=step.name or "agent_step",
                     success=True,
                     output=getattr(result, "result", None),
                 )
             return StepResult(
-                step_name=step.name, success=False, error=getattr(result, "error", "agent failed")
+                step_name=step.name or "agent_step",
+                success=False,
+                error=getattr(result, "error", "agent failed"),
             )
 
-        return StepResult(step_name=step.name, success=False, error="unsupported step type")
+        return StepResult(
+            step_name=step.name or "unknown_step", success=False, error="unsupported step type"
+        )
 
     def _extract_coordination_plan(self, analysis: str, goal: str) -> list[PlanStep]:
         try:
@@ -152,13 +178,16 @@ class CoordinatorAgent(Agent[dict[str, Any], dict[str, Any]]):
                         tool=item.get("tool"),
                         args=item.get("args"),
                         content=item.get("content"),
-                        children=None,
                     )
                 )
             if steps:
                 return steps
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(
+                "Failed to parse coordination plan: %s (analysis_length=%d)",
+                str(e),
+                len(analysis) if analysis else 0,
+            )
 
         fallback: list[PlanStep] = []
         text = analysis.lower()

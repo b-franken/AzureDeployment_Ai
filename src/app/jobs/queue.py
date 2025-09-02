@@ -64,7 +64,7 @@ class JobQueue:
         self.max_workers = max_workers
         self.poll_interval = poll_interval
         self.handlers: dict[str, Callable[[Job], Coroutine[Any, Any, Any]]] = {}
-        self.workers: list[asyncio.Task] = []
+        self.workers: list[asyncio.Task[Any]] = []
         self._running = False
         self._lock = asyncio.Lock()
 

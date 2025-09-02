@@ -15,7 +15,7 @@ from app.ai.validation.llm_models import (
 
 __all__ = [
     "LLMProvider",
-    "MessageRole", 
+    "MessageRole",
     "LLMMessage",
     "LLMRequest",
     "LLMResponse",

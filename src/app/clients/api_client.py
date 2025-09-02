@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Sequence
+from typing import cast
 
 import httpx
 
@@ -66,7 +67,8 @@ async def chat(
         if not stream:
             r = await client.post("/api/chat", json=payload, headers=headers)
             r.raise_for_status()
-            return r.json()["output"]
+            response_data = r.json()
+            return cast(str, response_data.get("output", ""))
         async with client.stream(
             "POST", "/api/chat", json=payload, params={"stream": "true"}, headers=headers
         ) as resp:
@@ -98,4 +100,5 @@ async def review(
         headers = await _ensure_auth(client)
         r = await client.post("/api/review", json=payload, headers=headers)
         r.raise_for_status()
-        return r.json()["output"]
+        response_data = r.json()
+        return cast(str, response_data.get("output", ""))

@@ -84,11 +84,14 @@ class BaseRepository[T](ABC):
         if where:
             conditions = " AND ".join(f"{k} = ${i + 1}" for i, k in enumerate(where.keys()))
             query = f"SELECT COUNT(*) FROM {self.table_name} WHERE {conditions}"
-            return await self.db.fetchval(query, *where.values())
+            count_result: int = await self.db.fetchval(query, *where.values())
+            return count_result
         query = f"SELECT COUNT(*) FROM {self.table_name}"
-        return await self.db.fetchval(query)
+        total_count: int = await self.db.fetchval(query)
+        return total_count
 
     async def exists(self, where: dict[str, Any]) -> bool:
         conditions = " AND ".join(f"{k} = ${i + 1}" for i, k in enumerate(where.keys()))
         query = f"SELECT EXISTS(SELECT 1 FROM {self.table_name} WHERE {conditions})"
-        return await self.db.fetchval(query, *where.values())
+        result: bool = await self.db.fetchval(query, *where.values())
+        return result

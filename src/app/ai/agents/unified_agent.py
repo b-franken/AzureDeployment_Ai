@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Protocol, runtime_checkable
@@ -9,6 +10,9 @@ from app.ai.agents.base import Agent, AgentContext
 from app.ai.agents.types import ExecutionPlan, ExecutionResult, PlanStep, StepResult, StepType
 from app.ai.llm.factory import get_provider_and_model
 from app.ai.tools_router import maybe_call_tool
+from app.ai.types import Message
+
+logger = logging.getLogger(__name__)
 
 
 class AgentCapability(Enum):
@@ -32,7 +36,7 @@ class UnifiedAgent(Agent[dict[str, Any], dict[str, Any]]):
     capabilities: set[AgentCapability] = field(default_factory=set)
     plugins: list[AgentPlugin] = field(default_factory=list)
 
-    def __init__(self, context: AgentContext | None = None):
+    def __init__(self, context: AgentContext | None = None) -> None:
         super().__init__(context)
         self.capabilities = {AgentCapability.ORCHESTRATION}
         self.plugins = []
@@ -47,12 +51,9 @@ class UnifiedAgent(Agent[dict[str, Any], dict[str, Any]]):
 
     async def plan(self, goal: str) -> ExecutionPlan:
         llm, model = await get_provider_and_model()
-        messages = [
-            {"role": "system", "content": "You are an intelligent DevOps agent."},
-            {
-                "role": "user",
-                "content": self._build_prompt(goal),
-            },
+        messages: list[Message] = [
+            Message(role="system", content="You are an intelligent DevOps agent."),
+            Message(role="user", content=self._build_prompt(goal)),
         ]
         raw = await llm.chat(model, messages)
         steps = self._parse_plan(raw, goal)
@@ -65,9 +66,11 @@ class UnifiedAgent(Agent[dict[str, Any], dict[str, Any]]):
 
     async def execute(self, plan: ExecutionPlan) -> ExecutionResult[dict[str, Any]]:
         tasks: list[asyncio.Task[ExecutionResult[dict[str, Any]]]] = []
-        
+
         if AgentCapability.ORCHESTRATION in self.capabilities:
-            async with self.tracer.trace_operation("orchestration", {"capability": "orchestration"}):
+            async with self.tracer.trace_operation(
+                "orchestration", {"capability": "orchestration"}
+            ):
                 tasks.append(asyncio.create_task(self._execute_orchestration(plan)))
         if AgentCapability.PROVISIONING in self.capabilities:
             async with self.tracer.trace_operation("provisioning", {"capability": "provisioning"}):
@@ -77,11 +80,11 @@ class UnifiedAgent(Agent[dict[str, Any], dict[str, Any]]):
                 tasks.append(asyncio.create_task(self._execute_monitoring(plan)))
 
         async with self.tracer.trace_operation(
-            "capability_execution", 
-            {"capabilities_count": len(self.capabilities), "tasks_count": len(tasks)}
+            "capability_execution",
+            {"capabilities_count": len(self.capabilities), "tasks_count": len(tasks)},
         ):
             done = await asyncio.gather(*tasks, return_exceptions=True)
-        
+
         merged = self._merge_results(done)
         for p in self.plugins:
             merged = await p.process_result(merged)
@@ -124,8 +127,10 @@ class UnifiedAgent(Agent[dict[str, Any], dict[str, Any]]):
                 )
             if steps:
                 return steps
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(
+                "Failed to generate plan steps: %s (goal: %s)", str(e), goal[:100] if goal else None
+            )
         return [
             PlanStep(
                 type=StepType.MESSAGE,
@@ -141,7 +146,12 @@ class UnifiedAgent(Agent[dict[str, Any], dict[str, Any]]):
         try:
             for step in plan.steps:
                 if step.type == StepType.TOOL and step.tool:
-                    output = await maybe_call_tool(step.tool, step.args or {}, return_json=True)
+                    import json
+
+                    tool_input = f"Use {step.tool}"
+                    if step.args:
+                        tool_input += f" with args: {json.dumps(step.args)}"
+                    output = await maybe_call_tool(tool_input, enable_tools=True, return_json=True)
                     results.append(
                         StepResult(
                             step_name=step.name or step.type.value, success=True, output=output
@@ -179,9 +189,11 @@ class UnifiedAgent(Agent[dict[str, Any], dict[str, Any]]):
             return ExecutionResult(success=False, error=str(e), step_results=results)
 
     async def _execute_provisioning(self, plan: ExecutionPlan) -> ExecutionResult[dict[str, Any]]:
+        logger.debug("Executing provisioning plan with %d steps", len(plan.steps))
         return ExecutionResult(success=True, result={"provisioning": "completed"})
 
     async def _execute_monitoring(self, plan: ExecutionPlan) -> ExecutionResult[dict[str, Any]]:
+        logger.debug("Executing monitoring plan with %d steps", len(plan.steps))
         return ExecutionResult(success=True, result={"monitoring": "ok"})
 
     def _merge_results(self, results: list[Any]) -> ExecutionResult[dict[str, Any]]:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter
 
 from app.core.config import settings
@@ -8,7 +10,7 @@ router = APIRouter()
 
 
 @router.get("/status")
-async def status() -> dict:
+async def status() -> dict[str, Any]:
     return {
         "version": settings.app_version,
         "environment": settings.environment,

@@ -15,6 +15,7 @@ from opentelemetry import trace
 
 from app.core.logging import get_logger
 from app.tools.azure.clients import Clients, get_clients
+
 from .emitters import EMITTERS
 from .emitters.aks import AksEmitter
 from .emitters.cosmos import CosmosEmitter
@@ -72,13 +73,15 @@ class BicepAvmBackend:
         self, ctx: ProvisionContext, spec: dict[str, Any], dry_run: bool = True
     ) -> PlanPreview:
         with tracer.start_as_current_span("avm_backend.plan") as span:
-            span.set_attributes({
-                "avm.subscription_id": ctx.subscription_id,
-                "avm.resource_group": ctx.resource_group,
-                "avm.dry_run": dry_run,
-                "avm.resources_count": len(spec.get("resources", []))
-            })
-            
+            span.set_attributes(
+                {
+                    "avm.subscription_id": ctx.subscription_id,
+                    "avm.resource_group": ctx.resource_group,
+                    "avm.dry_run": dry_run,
+                    "avm.resources_count": len(spec.get("resources", [])),
+                }
+            )
+
             validation_results = self._validate_spec(spec)
             if not validation_results["valid"]:
                 raise ValueError(f"Invalid specification: {validation_results['errors']}")
@@ -98,7 +101,9 @@ class BicepAvmBackend:
                     what_if_result = await self._execute_what_if(clients, ctx, str(bicep_path))
                     what_if = self._format_what_if_result(what_if_result)
                 except Exception as e:
-                    logger.warning("What-if analysis failed", exc_info=True, extra={"error": str(e)})
+                    logger.warning(
+                        "What-if analysis failed", exc_info=True, extra={"error": str(e)}
+                    )
                     what_if = f"What-if analysis failed: {e!s}"
 
                 cost_estimate = self._cost_estimator.estimate_monthly_cost(spec)
@@ -114,29 +119,31 @@ class BicepAvmBackend:
 
     async def apply(self, ctx: ProvisionContext, bicep_file: str) -> dict[str, Any]:
         with tracer.start_as_current_span("avm_backend.apply") as span:
-            span.set_attributes({
-                "avm.subscription_id": ctx.subscription_id,
-                "avm.resource_group": ctx.resource_group,
-                "avm.bicep_file": bicep_file
-            })
-            
+            span.set_attributes(
+                {
+                    "avm.subscription_id": ctx.subscription_id,
+                    "avm.resource_group": ctx.resource_group,
+                    "avm.bicep_file": bicep_file,
+                }
+            )
+
             try:
                 start_time = time.time()
                 clients = await get_clients(ctx.subscription_id)
                 deployment_name = f"avm-deployment-{int(time.time())}"
-                
+
                 template_content = Path(bicep_file).read_text(encoding="utf-8")
                 template_json = self._compile_bicep_to_json(template_content)
-                
+
                 logger.info(
                     "Starting AVM deployment via ResourceManagementClient",
                     extra={
                         "deployment_name": deployment_name,
                         "resource_group": ctx.resource_group,
-                        "subscription_id": ctx.subscription_id
-                    }
+                        "subscription_id": ctx.subscription_id,
+                    },
                 )
-                
+
                 poller = await asyncio.to_thread(
                     clients.res.deployments.begin_create_or_update,
                     ctx.resource_group,
@@ -145,48 +152,64 @@ class BicepAvmBackend:
                         "properties": {
                             "template": template_json,
                             "mode": DeploymentMode.incremental,
-                            "parameters": {}
+                            "parameters": {},
                         }
-                    }
+                    },
                 )
-                
+
                 result = await asyncio.to_thread(poller.result)
                 duration_seconds = time.time() - start_time
-                
-                if result and hasattr(result, 'properties') and result.properties.provisioning_state == "Succeeded":
+
+                if (
+                    result
+                    and hasattr(result, "properties")
+                    and result.properties.provisioning_state == "Succeeded"
+                ):
                     logger.info(
                         "AVM deployment succeeded",
                         extra={
                             "deployment_name": deployment_name,
                             "duration_seconds": duration_seconds,
-                            "deployment_id": getattr(result, 'id', '')
-                        }
+                            "deployment_id": getattr(result, "id", ""),
+                        },
                     )
                     return {
                         "status": "succeeded",
-                        "deployment_id": getattr(result, 'id', ''),
-                        "outputs": getattr(result.properties, 'outputs', {}) if hasattr(result, 'properties') else {},
+                        "deployment_id": getattr(result, "id", ""),
+                        "outputs": (
+                            getattr(result.properties, "outputs", {})
+                            if hasattr(result, "properties")
+                            else {}
+                        ),
                         "duration": f"{duration_seconds:.1f}s",
                     }
-                
+
                 logger.error(
                     "AVM deployment failed",
                     extra={
                         "deployment_name": deployment_name,
-                        "provisioning_state": getattr(result.properties, 'provisioning_state', 'Unknown') if hasattr(result, 'properties') else 'Unknown'
-                    }
+                        "provisioning_state": (
+                            getattr(result.properties, "provisioning_state", "Unknown")
+                            if hasattr(result, "properties")
+                            else "Unknown"
+                        ),
+                    },
                 )
                 return {
-                    "status": "failed", 
-                    "message": getattr(result.properties, 'status_message', 'Deployment failed') if hasattr(result, 'properties') else 'Deployment failed'
+                    "status": "failed",
+                    "message": (
+                        getattr(result.properties, "status_message", "Deployment failed")
+                        if hasattr(result, "properties")
+                        else "Deployment failed"
+                    ),
                 }
-                
+
             except Exception as e:
                 logger.error("AVM deployment error", exc_info=True, extra={"error": str(e)})
                 return {"status": "error", "message": str(e)}
 
     async def plan_from_nlu(
-        self, nlu_result, ctx: ProvisionContext, dry_run: bool = True
+        self, nlu_result: Any, ctx: ProvisionContext, dry_run: bool = True
     ) -> PlanPreview:
         spec = self._mapper.map_nlu_to_avm(nlu_result)
 
@@ -328,11 +351,13 @@ class BicepAvmBackend:
             visit(node)
         return stack
 
-    async def _execute_what_if(self, clients: Clients, ctx: ProvisionContext, bicep_file: str) -> Any:
+    async def _execute_what_if(
+        self, clients: Clients, ctx: ProvisionContext, bicep_file: str
+    ) -> Any:
         deployment_name = f"avm-what-if-{int(time.time())}"
         template_content = Path(bicep_file).read_text(encoding="utf-8")
         template_json = self._compile_bicep_to_json(template_content)
-        
+
         poller = await asyncio.to_thread(
             clients.res.deployments.begin_what_if,
             ctx.resource_group,
@@ -341,114 +366,128 @@ class BicepAvmBackend:
                 "properties": {
                     "template": template_json,
                     "mode": DeploymentMode.incremental,
-                    "parameters": {}
+                    "parameters": {},
                 }
-            }
+            },
         )
-        
+
         return await asyncio.to_thread(poller.result)
 
     def _format_what_if_result(self, result: Any) -> str:
         if not result:
             return "What-if analysis completed with no changes"
-        
+
         changes = []
         for change in getattr(result, "changes", []) or []:
             change_type = getattr(change, "change_type", "Unknown")
             resource_id = getattr(change, "resource_id", "Unknown resource")
             changes.append(f"  {change_type}: {resource_id}")
-        
+
         if not changes:
             return "What-if analysis completed with no changes"
-        
+
         return "What-if analysis results:\n" + "\n".join(changes)
 
-    def _add_outputs(self, w: BicepWriter, resources: list[dict[str, Any]], emitted_resources: dict[str, int]) -> None:
+    def _add_outputs(
+        self, w: BicepWriter, resources: list[dict[str, Any]], emitted_resources: dict[str, int]
+    ) -> None:
         """Add output definitions for deployed resources."""
         if not resources:
             return
-            
+
         w.line("")
         w.line("// Outputs")
-        
+
         for resource in resources:
             resource_type = resource.get("type")
             resource_name = resource.get("name", "resource")
             resource_id = self._get_resource_id(resource)
-            
+
             if resource_id not in emitted_resources:
                 continue
-                
+
             idx = emitted_resources[resource_id]
-            
+
             if resource_type == "web_stack":
                 w.line(f"output webapp_{idx}_id string = site_{idx}.outputs.resourceId")
                 w.line(f"output webapp_{idx}_name string = site_{idx}.outputs.name")
                 w.line(f"output webapp_{idx}_hostname string = site_{idx}.outputs.defaultHostname")
                 w.line(f"output webapp_{idx}_plan_id string = plan_{idx}.id")
-                
+
             elif resource_type == "storage_account":
                 w.line(f"output storage_{idx}_id string = sa_{idx}.outputs.resourceId")
                 w.line(f"output storage_{idx}_name string = sa_{idx}.outputs.name")
-                w.line(f"output storage_{idx}_primary_blob_endpoint string = sa_{idx}.outputs.primaryBlobEndpoint")
-                
+                w.line(
+                    f"output storage_{idx}_primary_blob_endpoint string = "
+                    f"sa_{idx}.outputs.primaryBlobEndpoint"
+                )
+
             elif resource_type == "aks_cluster":
                 w.line(f"output aks_{idx}_id string = aks_{idx}.outputs.resourceId")
                 w.line(f"output aks_{idx}_name string = aks_{idx}.outputs.name")
                 w.line(f"output aks_{idx}_fqdn string = aks_{idx}.outputs.controlPlaneFQDN")
-                
+
             elif resource_type == "key_vault":
                 w.line(f"output keyvault_{idx}_id string = kv_{idx}.outputs.resourceId")
                 w.line(f"output keyvault_{idx}_name string = kv_{idx}.outputs.name")
                 w.line(f"output keyvault_{idx}_uri string = kv_{idx}.outputs.uri")
-                
+
             elif resource_type == "sql_server":
                 w.line(f"output sqlserver_{idx}_id string = sqlsrv_{idx}.id")
                 w.line(f"output sqlserver_{idx}_name string = sqlsrv_{idx}.name")
-                w.line(f"output sqlserver_{idx}_fqdn string = sqlsrv_{idx}.properties.fullyQualifiedDomainName")
-                
+                w.line(
+                    f"output sqlserver_{idx}_fqdn string = "
+                    f"sqlsrv_{idx}.properties.fullyQualifiedDomainName"
+                )
+
             elif resource_type == "cosmos_account":
                 w.line(f"output cosmos_{idx}_id string = cosmos_{idx}.id")
                 w.line(f"output cosmos_{idx}_name string = cosmos_{idx}.name")
-                w.line(f"output cosmos_{idx}_endpoint string = cosmos_{idx}.properties.documentEndpoint")
-                
+                w.line(
+                    f"output cosmos_{idx}_endpoint string = "
+                    f"cosmos_{idx}.properties.documentEndpoint"
+                )
+
             elif resource_type == "vnet":
                 w.line(f"output vnet_{idx}_id string = vnet_{idx}.outputs.resourceId")
                 w.line(f"output vnet_{idx}_name string = vnet_{idx}.outputs.name")
-                
+
             else:
                 # Generic output for unknown resource types
-                safe_name = resource_type.replace("-", "_").replace(".", "_")
-                w.line(f"output {safe_name}_{idx}_id string = '{resource_name} deployed'")
-                w.line(f"output {safe_name}_{idx}_name string = '{resource_name}'")
+                if resource_type:
+                    safe_name = str(resource_type).replace("-", "_").replace(".", "_")
+                    w.line(f"output {safe_name}_{idx}_id string = '{resource_name} deployed'")
+                    w.line(f"output {safe_name}_{idx}_name string = '{resource_name}'")
 
     def _compile_bicep_to_json(self, bicep_content: str) -> dict[str, Any]:
         try:
             import subprocess
             import tempfile
-            
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.bicep', delete=False) as f:
+
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".bicep", delete=False) as f:
                 f.write(bicep_content)
                 bicep_path = f.name
-            
+
             result = subprocess.run(
-                ['az', 'bicep', 'build', '--file', bicep_path, '--stdout'],
+                ["az", "bicep", "build", "--file", bicep_path, "--stdout"],
                 capture_output=True,
                 text=True,
-                check=True
+                check=True,
             )
-            
+
             Path(bicep_path).unlink()
-            return json.loads(result.stdout)
-            
+            from typing import cast
+
+            return cast(dict[str, Any], json.loads(result.stdout))
+
         except (subprocess.CalledProcessError, FileNotFoundError, json.JSONDecodeError) as e:
             logger.warning(f"Bicep compilation failed, using template as-is: {e}")
             try:
-                return json.loads(bicep_content)
+                return cast(dict[str, Any], json.loads(bicep_content))
             except json.JSONDecodeError:
                 return {
                     "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
                     "contentVersion": "1.0.0.0",
                     "resources": [],
-                    "outputs": {}
+                    "outputs": {},
                 }

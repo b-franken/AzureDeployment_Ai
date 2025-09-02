@@ -1,19 +1,20 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 from app.tools.base import ToolResult
 
 # Import the cache function to store rich outputs
 try:
-    from app.api.services import cache_rich_output
+    from app.api.services.chat_service import cache_rich_output
 except ImportError:
 
     def cache_rich_output(correlation_id: str, output: str) -> None:
         pass  # Fallback if import fails
 
 
-def ok(summary: str, obj: dict | str = "") -> ToolResult:
+def ok(summary: str, obj: dict[str, Any] | str = "") -> ToolResult:
     if isinstance(obj, dict) and "infrastructure_code" in obj:
         formatted_output = format_deployment_preview(obj)
         # Cache the rich output for potential use by services layer
@@ -29,7 +30,7 @@ def ok(summary: str, obj: dict | str = "") -> ToolResult:
     }
 
 
-def format_deployment_preview(data: dict) -> str:
+def format_deployment_preview(data: dict[str, Any]) -> str:
     lines = [
         f"**{data.get('summary', 'Deployment Preview')}**",
         "",
@@ -120,5 +121,5 @@ def err(summary: str, msg: str) -> ToolResult:
     return {"ok": False, "summary": summary, "output": msg}
 
 
-def dry(summary: str, payload: dict) -> ToolResult:
+def dry(summary: str, payload: dict[str, Any]) -> ToolResult:
     return ok(summary, {"dry_run": True, **payload})

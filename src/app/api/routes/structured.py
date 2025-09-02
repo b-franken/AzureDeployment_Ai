@@ -3,9 +3,14 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter, HTTPException
-from jsonschema import Draft202012Validator, SchemaError, ValidationError
+from jsonschema import (
+    Draft202012Validator,
+    SchemaError,
+    ValidationError,
+)
 
 from app.ai.llm.factory import get_provider_and_model
+from app.ai.types import Message
 from app.api.schemas import StructuredChatRequest, StructuredChatResponse
 
 router = APIRouter()
@@ -27,13 +32,13 @@ async def structured(req: StructuredChatRequest) -> StructuredChatResponse:
             status_code=400, detail="Structured output not supported by this provider."
         )
 
-    messages = [{"role": "user", "content": req.input}]
+    messages: list[Message] = [{"role": "user", "content": req.input}]
     response_format = {
         "type": "json_schema",
         "json_schema": {"name": "StructuredOutput", "schema": req.schema_},
     }
 
-    raw = await llm.chat_raw(  # type: ignore[attr-defined]
+    raw = await llm.chat_raw(
         model=model,
         messages=messages,
         tool_choice="none",

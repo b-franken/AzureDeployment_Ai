@@ -6,6 +6,7 @@ from enum import Enum
 from typing import Any
 
 from app.tools.finops.cost_ingestion import CostIngestionService
+from app.tools.finops.cost_ingestion import ResourceCost as RawResourceCost
 from app.tools.finops.forecasting import ForecastingService
 from app.tools.finops.optimization import (
     OptimizationRecommendation,
@@ -36,7 +37,7 @@ class ResourceCategory(Enum):
 
 
 @dataclass
-class ResourceCost:
+class AnalyzedResourceCost:
     resource_id: str
     resource_name: str
     resource_type: str
@@ -100,8 +101,8 @@ class CostManagementSystem:
         )
         resource_ids = [r["id"] for r in resources]
 
-        resource_costs: dict[str, dict[str, Any]] = await self.cost_ingestion.get_resource_costs(
-            scope, resource_ids, start_date, end_date
+        raw_resource_costs: dict[str, RawResourceCost] = (
+            await self.cost_ingestion.get_resource_costs(scope, resource_ids, start_date, end_date)
         )
 
         usage_by_resource: dict[str, float] = {}
@@ -128,18 +129,18 @@ class CostManagementSystem:
             except (TypeError, ValueError):
                 continue
 
-        costs: list[ResourceCost] = []
+        costs: list[AnalyzedResourceCost] = []
         period_days = (end_date - start_date).days or 1
         for resource in resources:
             resource_id = resource["id"]
-            cost_info = resource_costs.get(resource_id, {})
+            cost_info = raw_resource_costs.get(resource_id, {})
             period_cost = float(cost_info.get("cost_usd", 0.0))
             if resource_id in usage_by_resource:
                 period_cost = usage_by_resource[resource_id]
             daily_cost = period_cost / period_days
             monthly_cost = daily_cost * 30.0
 
-            resource_cost = ResourceCost(
+            resource_cost = AnalyzedResourceCost(
                 resource_id=resource_id,
                 resource_name=resource.get("name", ""),
                 resource_type=resource.get("type", ""),
@@ -457,26 +458,26 @@ class CostManagementSystem:
             return ResourceCategory.BACKUP
         return ResourceCategory.OTHER
 
-    def _group_by_category(self, costs: list[ResourceCost]) -> dict[str, float]:
+    def _group_by_category(self, costs: list[AnalyzedResourceCost]) -> dict[str, float]:
         grouped: dict[str, float] = {}
         for cost in costs:
             category = cost.category.value
             grouped[category] = grouped.get(category, 0.0) + cost.monthly_cost
         return grouped
 
-    def _group_by_location(self, costs: list[ResourceCost]) -> dict[str, float]:
+    def _group_by_location(self, costs: list[AnalyzedResourceCost]) -> dict[str, float]:
         grouped: dict[str, float] = {}
         for cost in costs:
             grouped[cost.location] = grouped.get(cost.location, 0.0) + cost.monthly_cost
         return grouped
 
-    def _group_by_resource_type(self, costs: list[ResourceCost]) -> dict[str, float]:
+    def _group_by_resource_type(self, costs: list[AnalyzedResourceCost]) -> dict[str, float]:
         grouped: dict[str, float] = {}
         for cost in costs:
             grouped[cost.resource_type] = grouped.get(cost.resource_type, 0.0) + cost.monthly_cost
         return grouped
 
-    def _group_by_tags(self, costs: list[ResourceCost]) -> dict[str, dict[str, float]]:
+    def _group_by_tags(self, costs: list[AnalyzedResourceCost]) -> dict[str, dict[str, float]]:
         grouped: dict[str, dict[str, float]] = {}
         for cost in costs:
             for tag_key, tag_value in cost.tags.items():
@@ -487,21 +488,23 @@ class CostManagementSystem:
                 )
         return grouped
 
-    def _group_by_department(self, costs: list[ResourceCost]) -> dict[str, float]:
+    def _group_by_department(self, costs: list[AnalyzedResourceCost]) -> dict[str, float]:
         grouped: dict[str, float] = {}
         for cost in costs:
             dept = cost.tags.get("department", "unassigned")
             grouped[dept] = grouped.get(dept, 0.0) + cost.monthly_cost
         return grouped
 
-    def _group_by_project(self, costs: list[ResourceCost]) -> dict[str, float]:
+    def _group_by_project(self, costs: list[AnalyzedResourceCost]) -> dict[str, float]:
         grouped: dict[str, float] = {}
         for cost in costs:
             project = cost.tags.get("project", "unassigned")
             grouped[project] = grouped.get(project, 0.0) + cost.monthly_cost
         return grouped
 
-    def _get_top_expensive(self, costs: list[ResourceCost], limit: int) -> list[dict[str, Any]]:
+    def _get_top_expensive(
+        self, costs: list[AnalyzedResourceCost], limit: int
+    ) -> list[dict[str, Any]]:
         sorted_costs = sorted(costs, key=lambda c: c.monthly_cost, reverse=True)
         return [
             {
@@ -525,7 +528,7 @@ class CostAnalyzer:
         resources: list[dict[str, Any]],
         start_date: datetime,
         end_date: datetime,
-    ) -> list[ResourceCost]:
+    ) -> list[AnalyzedResourceCost]:
         if not resources:
             return []
 
@@ -533,20 +536,20 @@ class CostAnalyzer:
         scope = f"/subscriptions/{subscription_id}"
 
         resource_ids = [r["id"] for r in resources]
-        resource_costs: dict[str, dict[str, Any]] = await self.cost_ingestion.get_resource_costs(
-            scope, resource_ids, start_date, end_date
+        raw_resource_costs: dict[str, RawResourceCost] = (
+            await self.cost_ingestion.get_resource_costs(scope, resource_ids, start_date, end_date)
         )
 
-        costs: list[ResourceCost] = []
+        costs: list[AnalyzedResourceCost] = []
         period_days = (end_date - start_date).days or 1
         for resource in resources:
             resource_id = resource["id"]
-            cost_info = resource_costs.get(resource_id, {})
+            cost_info = raw_resource_costs.get(resource_id, {})
             period_cost = float(cost_info.get("cost_usd", 0.0))
             daily_cost = period_cost / period_days
             monthly_cost = daily_cost * 30.0
 
-            cost = ResourceCost(
+            cost = AnalyzedResourceCost(
                 resource_id=resource_id,
                 resource_name=resource.get("name", ""),
                 resource_type=resource.get("type", ""),
@@ -642,7 +645,7 @@ class CostForecaster:
             anomalies=list(forecast.anomalies),
         )
 
-    async def analyze_trends(self, costs: list[ResourceCost]) -> dict[str, Any]:
+    async def analyze_trends(self, costs: list[AnalyzedResourceCost]) -> dict[str, Any]:
         monthly_totals = [c.monthly_cost for c in costs]
         if len(monthly_totals) < 2:
             return {
@@ -723,7 +726,7 @@ class ChargebackSystem:
 
     async def generate_report(
         self,
-        costs: list[ResourceCost],
+        costs: list[AnalyzedResourceCost],
         allocation_method: str,
         period: tuple[datetime, datetime],
     ) -> dict[str, Any]:

@@ -4,6 +4,9 @@ from collections import OrderedDict
 from collections.abc import Sequence
 from typing import Any, Protocol
 
+import numpy as np
+from numpy.typing import NDArray
+
 
 class CacheTierOptimizer(Protocol):
     async def predict_index(self, key: str, n_levels: int) -> int: ...
@@ -46,7 +49,7 @@ class EwmaOptimizer:
 
 
 class ProbaModel(Protocol):
-    def predict_proba(self, texts: Sequence[str]) -> Sequence[Sequence[float]]: ...
+    def predict_proba(self, texts: Sequence[str]) -> NDArray[np.floating[Any]]: ...
 
 
 class EmbeddingsTierOptimizer:

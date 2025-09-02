@@ -35,7 +35,6 @@ class _AzureExceptionsProto(Protocol):
 
 
 try:
-    # type: ignore[import-not-found]
     import azure.core.exceptions as _azure_mod
 except Exception:
     _azure_mod = None  # type: ignore[assignment]

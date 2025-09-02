@@ -60,7 +60,7 @@ class RequestTracker:
         if elapsed > 0.0:
             self.tokens = min(
                 float(self.capacity),
-                float(self.tokens) + self.rate * elapsed,  # type: ignore[operator]
+                float(self.tokens) + self.rate * elapsed,
             )
             self.last_refill = now
         self.last_seen = now

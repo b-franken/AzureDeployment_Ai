@@ -31,7 +31,7 @@ class HealthMonitor:
         self.results: dict[str, ComponentHealth] = {}
         self.check_interval = 30
         self._running = False
-        self._task: asyncio.Task | None = None
+        self._task: asyncio.Task[None] | None = None
 
     def register_check(self, name: str, check_fn: Callable[[], Awaitable[Any]]) -> None:
         self.checks[name] = check_fn

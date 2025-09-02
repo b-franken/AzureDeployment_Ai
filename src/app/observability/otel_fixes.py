@@ -36,8 +36,7 @@ def suppress_otel_deprecation_warnings() -> None:
         module="websockets.*",
     )
 
-    logger.debug(
-        "OpenTelemetry deprecation warnings suppressed for production")
+    logger.debug("OpenTelemetry deprecation warnings suppressed for production")
 
 
 def patch_instrumentation_scope() -> None:
@@ -48,15 +47,17 @@ def patch_instrumentation_scope() -> None:
     in places where we have control, while maintaining backwards compatibility.
     """
     try:
-        from opentelemetry.sdk.trace import TracerProvider
-        from opentelemetry.sdk.trace.instrumentation_scope import InstrumentationScope
-        from opentelemetry.sdk._logs import LoggerProvider
-        from opentelemetry.sdk._logs.instrumentation_scope import InstrumentationScope as LogInstrumentationScope
-        
-        # Update any deprecated usage patterns we can control
-        # This ensures we use modern APIs where possible
-        logger.info("InstrumentationScope patching applied for modern OpenTelemetry APIs")
-        
+        # Test if modern APIs are available without using them
+        import importlib.util
+
+        log_scope_spec = importlib.util.find_spec("opentelemetry.sdk._logs.instrumentation_scope")
+        trace_spec = importlib.util.find_spec("opentelemetry.sdk.trace")
+
+        if log_scope_spec and trace_spec:
+            # Update any deprecated usage patterns we can control
+            # This ensures we use modern APIs where possible
+            logger.info("InstrumentationScope patching applied for modern OpenTelemetry APIs")
+
     except ImportError:
         # Fallback to suppression if modern APIs not available
         suppress_otel_deprecation_warnings()
@@ -73,7 +74,7 @@ def patch_instrumentation_scope() -> None:
             instrumenting_library_version: str = "",
             tracer_provider: Any = None,
             schema_url: str = "",
-        ):
+        ) -> Any:
             """
             Patched get_tracer that ensures proper InstrumentationScope parameters.
             """
@@ -87,7 +88,7 @@ def patch_instrumentation_scope() -> None:
 
         import opentelemetry.trace
 
-        opentelemetry.trace.get_tracer = patched_get_tracer
+        opentelemetry.trace.get_tracer = patched_get_tracer  # type: ignore[assignment]
 
         logger.debug("InstrumentationScope patch applied successfully")
 
@@ -134,8 +135,7 @@ def ensure_proper_otel_initialization() -> None:
         logger.info("OpenTelemetry initialization optimizations applied")
 
     except Exception as e:
-        logger.error(
-            f"Failed to apply OpenTelemetry initialization fixes: {e}")
+        logger.error(f"Failed to apply OpenTelemetry initialization fixes: {e}")
 
 
 ensure_proper_otel_initialization()

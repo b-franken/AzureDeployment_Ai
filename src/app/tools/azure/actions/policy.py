@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, cast
+from typing import Any
 
 from azure.core.credentials import AccessToken, TokenCredential
 from azure.core.credentials_async import AsyncTokenCredential
@@ -22,10 +22,7 @@ class _AsyncToSyncCredential(TokenCredential):
         loop = asyncio.new_event_loop()
         try:
             asyncio.set_event_loop(loop)
-            return cast(
-                "AccessToken",
-                loop.run_until_complete(self._async_cred.get_token(*scopes, **kwargs)),
-            )
+            return loop.run_until_complete(self._async_cred.get_token(*scopes, **kwargs))
         finally:
             loop.close()
 

@@ -14,7 +14,9 @@ class StepType(Enum):
     DECISION = "decision"
     PARALLEL = "parallel"
     SEQUENTIAL = "sequential"
+    SEQUENCE = "sequential"  # Alias for SEQUENTIAL
     CONDITIONAL = "conditional"
+    AGENT = "agent"
 
 
 @dataclass
@@ -25,11 +27,13 @@ class PlanStep:
     tool: str | None = None
     args: dict[str, Any] | None = None
     content: str | None = None
+    agent: str | None = None
     dependencies: list[str] = field(default_factory=list)
     conditions: dict[str, Any] | None = None
     timeout_seconds: float = 60.0
     retry_count: int = 0
     max_retries: int = 3
+    children: list[PlanStep] | None = field(default_factory=lambda: None)
 
 
 @dataclass
@@ -49,6 +53,7 @@ class StepResult:
     error: str | None = None
     duration_ms: float = 0.0
     retries_used: int = 0
+    children: list[StepResult] | None = field(default_factory=lambda: None)
 
 
 @dataclass

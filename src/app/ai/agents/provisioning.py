@@ -1,20 +1,20 @@
 from __future__ import annotations
 
 import datetime
-from typing import Any
+from typing import Any, cast
 
-from opentelemetry import trace
 from pydantic import BaseModel
 
 from app.ai.agents.base import Agent, AgentContext
-from app.observability.app_insights import app_insights
 from app.ai.agents.types import ExecutionPlan, ExecutionResult, PlanStep, StepResult, StepType
 from app.ai.intelligence.dependency_analyzer import DependencyAnalyzer
 from app.ai.intelligence.resource_intelligence import ResourceIntelligence
 from app.ai.nlu import parse_provision_request
 from app.core.logging import get_logger
-from app.tools.registry import ensure_tools_loaded, get_tool
 from app.observability.agent_tracing import get_agent_tracer
+from app.observability.app_insights import app_insights
+from app.tools.base import ToolResult
+from app.tools.registry import ensure_tools_loaded, get_tool
 
 logger = get_logger(__name__)
 tracer = get_agent_tracer("ProvisioningAgent")
@@ -41,7 +41,7 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
             self.config = ProvisioningAgentConfig(**config)
         else:
             self.config = ProvisioningAgentConfig()
-        
+
         self.dependency_analyzer = DependencyAnalyzer()
         self.resource_intelligence = ResourceIntelligence()
         ensure_tools_loaded()
@@ -53,7 +53,7 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
                 "user_id": self.user_id,
                 "goal_length": len(goal),
                 "environment": self.context.environment if self.context else "dev",
-            }
+            },
         ) as span:
             parsed = parse_provision_request(goal)
             env = self.context.environment if self.context else "dev"
@@ -67,7 +67,7 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
                 environment=env,
                 confidence=parsed.confidence,
             )
-            
+
             app_insights.track_custom_event(
                 "provisioning_agent_plan_start",
                 {
@@ -78,8 +78,8 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
                     "confidence": parsed.confidence,
                     "goal_length": len(goal),
                     "cloud_RoleName": "ProvisioningAgent",
-                    "service_name": "ai.agents.provisioning"
-                }
+                    "service_name": "ai.agents.provisioning",
+                },
             )
 
             primary_resource = {
@@ -94,19 +94,23 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
             )
 
             all_resources = [primary_resource] + intelligence_result.inferred_resources
-            dependency_plan = await self.dependency_analyzer.analyze_dependencies(all_resources, env)
-
-            optimized_plan, optimization_metrics = await self.dependency_analyzer.optimize_for_parallel_deployment(
-                dependency_plan
+            dependency_plan = await self.dependency_analyzer.analyze_dependencies(
+                all_resources, env
             )
 
-            span.set_attributes({
-                "resources_count": len(all_resources),
-                "inferred_resources": len(intelligence_result.inferred_resources),
-                "deployment_groups": len(optimized_plan.deployment_groups),
-                "parallel_opportunities": optimization_metrics["parallel_operations"],
-                "estimated_time_seconds": optimization_metrics["optimized_time_seconds"],
-            })
+            optimized_plan, optimization_metrics = (
+                await self.dependency_analyzer.optimize_for_parallel_deployment(dependency_plan)
+            )
+
+            span.set_attributes(
+                {
+                    "resources_count": len(all_resources),
+                    "inferred_resources": len(intelligence_result.inferred_resources),
+                    "deployment_groups": len(optimized_plan.deployment_groups),
+                    "parallel_opportunities": optimization_metrics["parallel_operations"],
+                    "estimated_time_seconds": optimization_metrics["optimized_time_seconds"],
+                }
+            )
 
             steps = await self._build_intelligent_steps(
                 parsed, all_resources, optimized_plan, intelligence_result, env, dry_run
@@ -121,7 +125,7 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
                 warnings_count=len(intelligence_result.warnings),
                 recommendations_count=len(intelligence_result.recommendations),
             )
-            
+
             app_insights.track_custom_event(
                 "provisioning_agent_plan_completed",
                 {
@@ -135,8 +139,8 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
                     "recommendations_count": len(intelligence_result.recommendations),
                     "environment": env,
                     "cloud_RoleName": "ProvisioningAgent",
-                    "service_name": "ai.agents.provisioning"
-                }
+                    "service_name": "ai.agents.provisioning",
+                },
             )
 
             return ExecutionPlan(
@@ -163,7 +167,9 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
                         "warnings": intelligence_result.warnings,
                         "dependency_plan": {
                             "groups_count": len(optimized_plan.deployment_groups),
-                            "estimated_time_seconds": optimization_metrics["optimized_time_seconds"],
+                            "estimated_time_seconds": (
+                                optimization_metrics["optimized_time_seconds"]
+                            ),
                             "parallel_opportunities": optimization_metrics["parallel_operations"],
                             "critical_path": optimized_plan.critical_path,
                         },
@@ -181,8 +187,8 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
             {
                 "user_id": self.user_id,
                 "steps_count": len(plan.steps),
-                "environment": self.context.environment if self.context else "dev"
-            }
+                "environment": self.context.environment if self.context else "dev",
+            },
         ) as span:
             app_insights.track_custom_event(
                 "provisioning_agent_execute_start",
@@ -191,8 +197,8 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
                     "steps_count": len(plan.steps),
                     "environment": self.context.environment if self.context else "dev",
                     "cloud_RoleName": "ProvisioningAgent",
-                    "service_name": "ai.agents.provisioning"
-                }
+                    "service_name": "ai.agents.provisioning",
+                },
             )
 
             start_time = time.perf_counter()
@@ -216,19 +222,23 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
                         exc_info=True,
                     )
                     step_results.append(
-                        StepResult(step_name=step.name or step.type.value, success=False, error=str(e))
+                        StepResult(
+                            step_name=step.name or step.type.value, success=False, error=str(e)
+                        )
                     )
                     break
 
             success = all(r.success for r in step_results)
             duration_ms = (time.perf_counter() - start_time) * 1000
-            
-            span.set_attributes({
-                "execution_success": success,
-                "steps_executed": len(step_results),
-                "duration_ms": duration_ms
-            })
-            
+
+            span.set_attributes(
+                {
+                    "execution_success": success,
+                    "steps_executed": len(step_results),
+                    "duration_ms": duration_ms,
+                }
+            )
+
             app_insights.track_custom_event(
                 "provisioning_agent_execute_completed",
                 {
@@ -238,8 +248,8 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
                     "duration_ms": duration_ms,
                     "environment": self.context.environment if self.context else "dev",
                     "cloud_RoleName": "ProvisioningAgent",
-                    "service_name": "ai.agents.provisioning"
-                }
+                    "service_name": "ai.agents.provisioning",
+                },
             )
 
             return ExecutionResult(
@@ -264,11 +274,16 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
                     args = self._resolve_args(step.args or {}, context)
                     output = await tool.run(**args)
                 else:
-                    output = await self._mock_tool_execution(step.tool, step.args or {})
+                    mock_result = await self._mock_tool_execution(step.tool, step.args or {})
+                    output = (
+                        cast(ToolResult, mock_result)
+                        if isinstance(mock_result, dict)
+                        else {"ok": True, "summary": str(mock_result), "output": str(mock_result)}
+                    )
             elif step.type == StepType.MESSAGE:
-                output = {"message": step.content or ""}
+                output = {"ok": True, "summary": "message", "output": step.content or ""}
             else:
-                output = {"status": "completed"}
+                output = {"ok": True, "summary": "completed", "output": "completed"}
             duration = (time.perf_counter() - start_time) * 1000
             return StepResult(
                 step_name=step.name or step.type.value,
@@ -342,14 +357,16 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
 
         for group_index, deployment_group in enumerate(deployment_plan.deployment_groups):
             group_name = f"deploy_group_{group_index}"
-            
+
             if len(deployment_group) == 1:
                 resource_dep = deployment_group[0]
                 steps.append(
                     PlanStep(
                         type=StepType.TOOL,
                         name=f"deploy_{resource_dep.resource_name}",
-                        description=f"Deploy {resource_dep.resource_type}: {resource_dep.resource_name}",
+                        description=(
+                            f"Deploy {resource_dep.resource_type}: " f"{resource_dep.resource_name}"
+                        ),
                         tool="provision_orchestrator",
                         args={
                             "resource_type": resource_dep.resource_type,
@@ -357,7 +374,11 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
                             "environment": environment,
                             "dry_run": dry_run,
                         },
-                        dependencies=([f"deploy_group_{group_index - 1}"] if group_index > 0 else ["validate_intelligent_request"]),
+                        dependencies=(
+                            [f"deploy_group_{group_index - 1}"]
+                            if group_index > 0
+                            else ["validate_intelligent_request"]
+                        ),
                         timeout_seconds=resource_dep.estimated_deploy_time_seconds + 60,
                     )
                 )
@@ -370,7 +391,10 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
                         PlanStep(
                             type=StepType.TOOL,
                             name=step_name,
-                            description=f"Deploy {resource_dep.resource_type}: {resource_dep.resource_name} (parallel)",
+                            description=(
+                                f"Deploy {resource_dep.resource_type}: "
+                                f"{resource_dep.resource_name} (parallel)"
+                            ),
                             tool="provision_orchestrator",
                             args={
                                 "resource_type": resource_dep.resource_type,
@@ -379,17 +403,24 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
                                 "dry_run": dry_run,
                                 "parallel_execution": True,
                             },
-                            dependencies=([f"deploy_group_{group_index - 1}"] if group_index > 0 else ["validate_intelligent_request"]),
+                            dependencies=(
+                                [f"deploy_group_{group_index - 1}"]
+                                if group_index > 0
+                                else ["validate_intelligent_request"]
+                            ),
                             timeout_seconds=resource_dep.estimated_deploy_time_seconds + 60,
                         )
                     )
-                
+
                 steps.append(
                     PlanStep(
                         type=StepType.MESSAGE,
                         name=group_name,
                         description=f"Parallel deployment group {group_index} completed",
-                        content=f"Successfully deployed {len(deployment_group)} resources in parallel",
+                        content=(
+                            f"Successfully deployed {len(deployment_group)} "
+                            "resources in parallel"
+                        ),
                         dependencies=parallel_steps,
                     )
                 )
@@ -428,7 +459,10 @@ class ProvisioningAgent(Agent[dict[str, Any], dict[str, Any]]):
                     type=StepType.MESSAGE,
                     name="intelligence_recommendations",
                     description="Resource intelligence recommendations",
-                    content=f"Consider these {len(intelligence_result.recommendations)} recommendations for optimal deployment",
+                    content=(
+                        f"Consider these {len(intelligence_result.recommendations)} "
+                        "recommendations for optimal deployment"
+                    ),
                     dependencies=["verify_intelligent_deployment"],
                 )
             )

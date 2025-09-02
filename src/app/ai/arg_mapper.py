@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, cast
 
 from jsonschema import Draft202012Validator, ValidationError
 
 from app.ai.llm.factory import get_provider_and_model
 from app.ai.tools_definitions import _to_openai_tool_schema
+from app.ai.types import Message
 
 
 async def map_args_with_function_call(
@@ -32,9 +33,9 @@ async def map_args_with_function_call(
         json_schema=schema,
     )
 
-    messages = [{"role": "user", "content": user_input}]
+    messages: list[Message] = [{"role": "user", "content": user_input}]
 
-    raw = await llm.chat_raw(  # type: ignore[attr-defined]
+    raw = await llm.chat_raw(
         model=selected_model,
         messages=messages,
         tools=[tool_def],
@@ -66,6 +67,6 @@ async def map_args_with_function_call(
             except ValidationError as e:
                 raise ValueError(f"Tool argument schema validation failed: {e.message}") from e
 
-            return args_obj
+            return cast(dict[str, Any], args_obj)
 
     return {}

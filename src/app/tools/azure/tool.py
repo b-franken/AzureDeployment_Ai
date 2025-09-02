@@ -86,9 +86,16 @@ class AzureProvision(Tool):
         "additionalProperties": True,
     }
 
-    async def run(self, action: str, **kwargs: Any) -> ToolResult:
+    async def run(self, **kwargs: Any) -> ToolResult:
         try:
             params = dict(kwargs)
+            action = params.pop("action", "")
+            if not action:
+                return {
+                    "ok": False,
+                    "summary": "Missing required parameter",
+                    "output": "Action parameter is required",
+                }
             logger.info("Azure provision tool called with action='%s' params=%s", action, params)
 
             env_in = str(params.get("env") or params.get("environment") or "dev")
@@ -160,14 +167,21 @@ class AzureProvision(Tool):
                     "deployment_id": deployment_id,
                     "action": canonical_action,
                     "status": "deployment_preview",
-                    "summary": f"Ready to deploy {get_resource_display_name(canonical_action)} '{params.get('name', 'resource')}' in {params.get('location', 'westeurope')}",
+                    "summary": (
+                        f"Ready to deploy {get_resource_display_name(canonical_action)} "
+                        f"'{params.get('name', 'resource')}' in "
+                        f"{params.get('location', 'westeurope')}"
+                    ),
                     "resource_details": resource_preview,
                     "cost_estimate": cost_estimate,
                     "infrastructure_code": {"bicep": bicep_code, "terraform": terraform_code},
                     "validation": validation_summary,
                     "next_steps": [
                         "Review the deployment details and infrastructure code above",
-                        "To proceed with deployment, confirm with: 'deploy confirmed' or 'execute deployment'",
+                        (
+                            "To proceed with deployment, confirm with: 'deploy confirmed' or "
+                            "'execute deployment'"
+                        ),
                         "To cancel: 'cancel deployment' or 'abort'",
                     ],
                     "warning": "This will create real Azure resources and may incur costs",
@@ -239,7 +253,10 @@ class AzureProvision(Tool):
                 "deployment_id": deployment_id,
                 "action": canonical_action,
                 "status": "deployment_completed",
-                "summary": f"Successfully deployed {get_resource_display_name(canonical_action)} '{params.get('name', 'resource')}' in {params.get('location', 'westeurope')}",
+                "summary": (
+                    f"Successfully deployed {get_resource_display_name(canonical_action)} "
+                    f"'{params.get('name', 'resource')}' in {params.get('location', 'westeurope')}"
+                ),
                 "parameters": params,
                 "result": payload,
                 "environment": env,

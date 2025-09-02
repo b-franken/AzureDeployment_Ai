@@ -128,6 +128,13 @@ def build_credential(cfg: AzureConfig | None = None, use_cache: bool = True) -> 
                 raise ValueError(
                     "tenant_id, client_id and client_secret are required for service_principal"
                 )
+            if cfg.tenant_id is None or cfg.client_id is None or cfg.client_secret is None:
+                raise ValueError("Required credentials cannot be None for service principal")
+
+            assert cfg.tenant_id is not None
+            assert cfg.client_id is not None
+            assert cfg.client_secret is not None
+
             credential = ClientSecretCredential(
                 tenant_id=cfg.tenant_id,
                 client_id=cfg.client_id,
@@ -141,6 +148,11 @@ def build_credential(cfg: AzureConfig | None = None, use_cache: bool = True) -> 
         elif cfg.auth_mode == "device_code":
             if not cfg.tenant_id:
                 raise ValueError("tenant_id is required for device_code authentication")
+            if cfg.client_id is None:
+                raise ValueError("client_id cannot be None for device_code authentication")
+
+            assert cfg.client_id is not None
+
             credential = DeviceCodeCredential(
                 tenant_id=cfg.tenant_id,
                 client_id=cfg.client_id,
@@ -219,6 +231,13 @@ async def build_async_credential(
                 raise ValueError(
                     "tenant_id, client_id and client_secret are required for service_principal"
                 )
+            if cfg.tenant_id is None or cfg.client_id is None or cfg.client_secret is None:
+                raise ValueError("Required credentials cannot be None for service principal")
+
+            assert cfg.tenant_id is not None
+            assert cfg.client_id is not None
+            assert cfg.client_secret is not None
+
             credential = ClientSecretCredentialAsync(
                 tenant_id=cfg.tenant_id,
                 client_id=cfg.client_id,
@@ -234,6 +253,11 @@ async def build_async_credential(
         elif cfg.auth_mode == "device_code":
             if not cfg.tenant_id:
                 raise ValueError("tenant_id is required for device_code authentication")
+            if cfg.client_id is None:
+                raise ValueError("client_id cannot be None for device_code authentication")
+
+            assert cfg.client_id is not None
+
             sync_dc = DeviceCodeCredential(
                 tenant_id=cfg.tenant_id,
                 client_id=cfg.client_id,

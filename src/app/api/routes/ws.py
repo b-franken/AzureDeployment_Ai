@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
 
@@ -11,9 +12,10 @@ from opentelemetry.trace import Status, StatusCode
 from pydantic import BaseModel, Field
 
 from app.ai.llm.factory import get_provider_and_model
+from app.ai.types import Message
 from app.core.logging import get_logger
-from app.core.streams import streaming_handler
 from app.core.schemas.domains.deployment import DeploymentEvent
+from app.core.streams import streaming_handler
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -70,8 +72,12 @@ async def chat_ws(ws: WebSocket) -> None:
                 logger.info("ws_chat_request", provider=provider or "auto", model=model or "auto")
                 try:
                     llm, selected = await get_provider_and_model(provider or None, model or None)
-                    messages = list(init.memory) + [{"role": "user", "content": init.input_}]
-                    async for piece in llm.chat_stream(selected, messages):
+                    messages: list[Message] = list(init.memory) + [
+                        {"role": "user", "content": init.input_}
+                    ]  # type: ignore[assignment]
+                    # Type assertion to help mypy understand this is an async iterator
+                    stream_iterator: AsyncIterator[str] = await llm.chat_stream(selected, messages)
+                    async for piece in stream_iterator:
                         await ws.send_json({"type": "delta", "data": piece})
                     await ws.send_json({"type": "done"})
                 except Exception as e:

@@ -1,29 +1,35 @@
 from __future__ import annotations
-from .resources import ResourceManager
-from app.tools.registry import ensure_tools_loaded, list_tools
-from app.platform.audit.logger import AuditLogger
-from app.mcp.tools.what_if import register as register_what_if
-from app.mcp.tools.security_advisor import register_security_advisor_tool
-from app.mcp.tools.integrated_analytics import register_integrated_analytics_tool
-from app.mcp.tools.cost_intelligence import register_cost_intelligence_tool
-from app.mcp.schemas import AzureQueryParams, DeploymentRequest, ToolExecutionRequest
-from app.mcp.extensions import register_extensions
-from app.core.streams import StreamingHandler
-from app.core.cache.dependency import get_cache
-from app.ai.tools_router import ToolExecutionContext, maybe_call_tool
-from fastmcp import Context, FastMCP
-from azure.mgmt.resourcegraph.models import QueryRequest, QueryRequestOptions
-from azure.mgmt.resourcegraph import ResourceGraphClient
-from azure.identity import AzureCliCredential, ChainedTokenCredential, ManagedIdentityCredential
-from typing import Any, Literal, cast
-from datetime import datetime, timedelta
-import re
-import os
-import logging
-import json
-import asyncio
 
+import asyncio
+import json
+import logging
+import os
+import re
+from datetime import datetime, timedelta
+from typing import Any, Literal, cast
+
+from azure.identity import AzureCliCredential, ChainedTokenCredential, ManagedIdentityCredential
+from azure.mgmt.resourcegraph import ResourceGraphClient  # type: ignore[import-untyped]
+from azure.mgmt.resourcegraph.models import (  # type: ignore[import-untyped]
+    QueryRequest,
+    QueryRequestOptions,
+)
+from fastmcp import Context, FastMCP
+
+from app.ai.tools_router import ToolExecutionContext, maybe_call_tool
+from app.core.cache.dependency import get_cache
+from app.core.streams import StreamingHandler
+from app.mcp.extensions import register_extensions
+from app.mcp.schemas import AzureQueryParams, DeploymentRequest, ToolExecutionRequest
+from app.mcp.tools.cost_intelligence import register_cost_intelligence_tool
+from app.mcp.tools.integrated_analytics import register_integrated_analytics_tool
+from app.mcp.tools.security_advisor import register_security_advisor_tool
+from app.mcp.tools.what_if import register as register_what_if
 from app.observability.otel_fixes import ensure_proper_otel_initialization
+from app.platform.audit.logger import AuditLogger
+from app.tools.registry import ensure_tools_loaded, list_tools
+
+from .resources import ResourceManager
 
 ensure_proper_otel_initialization()
 
@@ -64,9 +70,9 @@ class MCPServer:
         self._setup_resources()
         self._setup_prompts()
         register_extensions(self)
-        register_what_if(self.mcp)
+        register_what_if(self.mcp)  # type: ignore[arg-type]
         register_integrated_analytics_tool(self.mcp)
-        register_security_advisor_tool(self.mcp)
+        register_security_advisor_tool(self.mcp)  # type: ignore[arg-type]
         register_cost_intelligence_tool(self.mcp)
         await self._register_vector_intelligence_tools()
         logger.info("MCP server created", extra={"event": "mcp_created"})
@@ -98,7 +104,7 @@ class MCPServer:
                 user_id=user_id,
                 subscription_id=request.subscription_id,
                 resource_group=request.resource_group,
-                environment=request.environment,
+                environment=cast(Literal["dev", "tst", "acc", "prod"], request.environment),
                 correlation_id=request.correlation_id,
                 audit_enabled=request.audit_enabled,
                 cost_limit=request.cost_limit,
@@ -172,8 +178,7 @@ class MCPServer:
         ) -> dict[str, Any]:
             logger.info(
                 "Deploy infrastructure",
-                extra={"event": "deploy_start",
-                       "deployment_id": request.deployment_id},
+                extra={"event": "deploy_start", "deployment_id": request.deployment_id},
             )
             try:
                 if request.validate_only:
@@ -206,8 +211,7 @@ class MCPServer:
             except Exception as e:
                 logger.exception(
                     "Deploy infrastructure failed",
-                    extra={"event": "deploy_error",
-                           "deployment_id": request.deployment_id},
+                    extra={"event": "deploy_error", "deployment_id": request.deployment_id},
                 )
                 return {
                     "status": "failed",
@@ -236,12 +240,10 @@ class MCPServer:
                 result = await self._execute_azure_query(params)
                 if params.cache_ttl > 0:
                     await self.cache.set(cache_key, result, ttl=params.cache_ttl)
-                logger.info("Azure query executed", extra={
-                            "event": "azure_query_success"})
+                logger.info("Azure query executed", extra={"event": "azure_query_success"})
                 return result
             except Exception as e:
-                logger.exception("Azure query failed", extra={
-                                 "event": "azure_query_error"})
+                logger.exception("Azure query failed", extra={"event": "azure_query_error"})
                 return {"error": str(e), "data": [], "count": 0, "total_records": 0}
 
         @self.mcp.tool(
@@ -258,8 +260,7 @@ class MCPServer:
             except Exception:
                 logger.exception(
                     "Stream logs failed",
-                    extra={"event": "stream_logs_error",
-                           "deployment_id": deployment_id},
+                    extra={"event": "stream_logs_error", "deployment_id": deployment_id},
                 )
                 yield json.dumps({"level": "error", "message": "stream_failed"})
 
@@ -284,8 +285,7 @@ class MCPServer:
             except Exception:
                 logger.exception(
                     "Get resources failed",
-                    extra={"event": "resources_error",
-                           "subscription_id": subscription_id},
+                    extra={"event": "resources_error", "subscription_id": subscription_id},
                 )
                 return {
                     "subscription_id": subscription_id,
@@ -307,8 +307,7 @@ class MCPServer:
             except Exception:
                 logger.exception(
                     "Get costs failed",
-                    extra={"event": "costs_error",
-                           "subscription_id": subscription_id},
+                    extra={"event": "costs_error", "subscription_id": subscription_id},
                 )
                 return {
                     "subscription_id": subscription_id,
@@ -330,8 +329,7 @@ class MCPServer:
                     for t in tools
                 ]
             except Exception:
-                logger.exception("List tools failed", extra={
-                                 "event": "tools_error"})
+                logger.exception("List tools failed", extra={"event": "tools_error"})
                 return []
 
         @self.mcp.resource("deployments://{state}")
@@ -341,12 +339,10 @@ class MCPServer:
                     return []
                 return await self.resource_manager.get_active_deployments()
             except Exception:
-                logger.exception("List deployments failed", extra={
-                                 "event": "deployments_error"})
+                logger.exception("List deployments failed", extra={"event": "deployments_error"})
                 return []
 
-        logger.info("Resources registered", extra={
-                    "event": "resources_registered"})
+        logger.info("Resources registered", extra={"event": "resources_registered"})
 
     def _setup_prompts(self) -> None:
         @self.mcp.prompt("infrastructure_deployment")
@@ -391,8 +387,7 @@ class MCPServer:
                 "5. Propose auto-shutdown schedules\n"
             )
 
-        logger.info("Prompts registered", extra={
-                    "event": "prompts_registered"})
+        logger.info("Prompts registered", extra={"event": "prompts_registered"})
 
     async def _validate_deployment(self, request: DeploymentRequest) -> dict[str, Any]:
         validations = {
@@ -424,17 +419,14 @@ class MCPServer:
             await stream.send(f"Starting: {step_name}")
             try:
                 result = await step_func(request)
-                results.append(
-                    {"step": step_name, "status": "success", "result": result})
+                results.append({"step": step_name, "status": "success", "result": result})
                 await stream.send(f"Completed: {step_name}")
             except Exception as e:
-                results.append(
-                    {"step": step_name, "status": "failed", "error": str(e)})
+                results.append({"step": step_name, "status": "failed", "error": str(e)})
                 await stream.send(f"Failed: {step_name} - {e!s}")
                 if not request.continue_on_error:
                     break
-        status = "completed" if all(
-            r["status"] == "success" for r in results) else "failed"
+        status = "completed" if all(r["status"] == "success" for r in results) else "failed"
         return {
             "deployment_id": request.deployment_id,
             "status": status,
@@ -448,8 +440,7 @@ class MCPServer:
             query=params.kql,
             subscriptions=params.subscriptions or self._get_allowed_subscriptions(),
             options=(
-                QueryRequestOptions(
-                    top=params.top, skip=params.skip, skip_token=params.skip_token)
+                QueryRequestOptions(top=params.top, skip=params.skip, skip_token=params.skip_token)
                 if params.top or params.skip or params.skip_token
                 else None
             ),
@@ -467,8 +458,7 @@ class MCPServer:
 
     def _get_resource_graph_client(self) -> ResourceGraphClient:
         if not hasattr(self, "_rg_client"):
-            cred = ChainedTokenCredential(
-                ManagedIdentityCredential(), AzureCliCredential())
+            cred = ChainedTokenCredential(ManagedIdentityCredential(), AzureCliCredential())
             self._rg_client = ResourceGraphClient(cred)
         return self._rg_client
 
@@ -487,16 +477,13 @@ class MCPServer:
             name = str(r.get("name", "")).strip()
             rtype = str(r.get("type", "")).strip()
             if not name or not rtype:
-                invalid.append(
-                    {"scope": "resource", "name": name or "", "type": rtype or ""})
+                invalid.append({"scope": "resource", "name": name or "", "type": rtype or ""})
                 continue
             if name in seen:
-                invalid.append(
-                    {"scope": "duplicate", "name": name, "type": rtype})
+                invalid.append({"scope": "duplicate", "name": name, "type": rtype})
             seen.add(name)
             if not pattern.match(name):
-                invalid.append(
-                    {"scope": "format", "name": name, "type": rtype})
+                invalid.append({"scope": "format", "name": name, "type": rtype})
         passed = len(invalid) == 0
         return {
             "passed": passed,
@@ -519,18 +506,14 @@ class MCPServer:
                 https_only = bool(props.get("https_only", True))
                 tls = str(props.get("minimum_tls_version", "1.2"))
                 if not https_only:
-                    enforced.append(
-                        {"name": name, "policy": "https_only", "value": True})
+                    enforced.append({"name": name, "policy": "https_only", "value": True})
                 if tls not in {"1.2", "1.3"}:
-                    enforced.append(
-                        {"name": name, "policy": "minimum_tls_version", "value": "1.2"})
+                    enforced.append({"name": name, "policy": "minimum_tls_version", "value": "1.2"})
             if rtype == "storage_account":
-                allow_public = bool(
-                    props.get("allow_blob_public_access", False))
+                allow_public = bool(props.get("allow_blob_public_access", False))
                 if allow_public:
                     enforced.append(
-                        {"name": name, "policy": "allow_blob_public_access",
-                            "value": False}
+                        {"name": name, "policy": "allow_blob_public_access", "value": False}
                     )
         passed = not missing_tags and not enforced
         return {"passed": passed, "details": {"missing_tags": missing_tags, "enforced": enforced}}
@@ -544,17 +527,14 @@ class MCPServer:
             vnet = str(props.get("vnet_id", "")).strip()
             if subnet:
                 if "/subnets/" not in subnet:
-                    issues.append(
-                        {"name": name, "issue": "invalid_subnet_ref"})
+                    issues.append({"name": name, "issue": "invalid_subnet_ref"})
                 if not subnet.startswith("/subscriptions/"):
-                    issues.append(
-                        {"name": name, "issue": "subnet_not_fully_qualified"})
+                    issues.append({"name": name, "issue": "subnet_not_fully_qualified"})
             if vnet:
                 if "/virtualNetworks/" not in vnet:
                     issues.append({"name": name, "issue": "invalid_vnet_ref"})
                 if not vnet.startswith("/subscriptions/"):
-                    issues.append(
-                        {"name": name, "issue": "vnet_not_fully_qualified"})
+                    issues.append({"name": name, "issue": "vnet_not_fully_qualified"})
         return {"passed": len(issues) == 0, "details": {"issues": issues}}
 
     async def _check_resource_quotas(self, request: DeploymentRequest) -> dict[str, Any]:
@@ -573,8 +553,7 @@ class MCPServer:
         over: list[dict[str, Any]] = []
         for rtype, cnt in counts.items():
             if rtype in limit and cnt > limit[rtype]:
-                over.append(
-                    {"type": rtype, "count": cnt, "limit": limit[rtype]})
+                over.append({"type": rtype, "count": cnt, "limit": limit[rtype]})
         return {"passed": len(over) == 0, "details": {"usage": counts, "exceeded": over}}
 
     async def _estimate_deployment_cost(self, request: DeploymentRequest) -> dict[str, Any]:
@@ -599,8 +578,7 @@ class MCPServer:
             else:
                 cost = 0.0
             total += cost
-            breakdown.append(
-                {"name": name, "type": rtype, "monthly_cost": cost})
+            breakdown.append({"name": name, "type": rtype, "monthly_cost": cost})
         return {"monthly_cost": total, "currency": "USD", "items": breakdown}
 
     async def _get_deployment_recommendations(self, request: DeploymentRequest) -> list[str]:
@@ -616,8 +594,7 @@ class MCPServer:
         return str(uuid.uuid4())
 
     async def _init_deployment(self, request: DeploymentRequest) -> dict[str, Any]:
-        required = ["subscription_id",
-                    "resource_group", "location", "resources"]
+        required = ["subscription_id", "resource_group", "location", "resources"]
         for key in required:
             if not getattr(request, key, None):
                 raise ValueError(f"missing_required_field:{key}")
@@ -657,8 +634,7 @@ class MCPServer:
                 if "/subnets/" in subnet and subnet.startswith("/subscriptions/"):
                     configured += 1
                 else:
-                    checks.append(
-                        {"name": str(r.get("name", "")), "issue": "invalid_subnet"})
+                    checks.append({"name": str(r.get("name", "")), "issue": "invalid_subnet"})
         return {"network_configured": configured, "issues": checks}
 
     async def _apply_security(self, request: DeploymentRequest) -> dict[str, Any]:
@@ -667,10 +643,8 @@ class MCPServer:
             rtype = str(r.get("type", "")).lower()
             name = str(r.get("name", ""))
             if rtype == "web_app":
-                applied.append(
-                    {"name": name, "setting": "https_only", "value": True})
-                applied.append(
-                    {"name": name, "setting": "minimum_tls_version", "value": "1.2"})
+                applied.append({"name": name, "setting": "https_only", "value": True})
+                applied.append({"name": name, "setting": "minimum_tls_version", "value": "1.2"})
             if rtype == "storage_account":
                 applied.append(
                     {"name": name, "setting": "allow_blob_public_access", "value": False}
@@ -707,60 +681,27 @@ class MCPServer:
         }
 
     async def _register_vector_intelligence_tools(self) -> None:
-        try:
-            from app.startup.vector_integration import get_vector_startup
+        """Register vector intelligence tools for AI-powered analysis and search.
 
-            vector_startup = await get_vector_startup()
-            if vector_startup.is_initialized():
-                vector_tools = await vector_startup.get_mcp_vector_tools()
-                if vector_tools:
-                    tool_definitions = vector_tools.get_tool_definitions()
-
-                    for tool_def in tool_definitions:
-                        @self.mcp.tool(
-                            name=tool_def.name,
-                            description=tool_def.description
-                        )
-                        async def vector_tool_wrapper(context: Context, **kwargs):
-                            correlation_id = kwargs.get(
-                                "correlation_id", f"mcp_vector_{datetime.utcnow().timestamp()}")
-                            return await vector_tools.execute_tool(
-                                tool_name=tool_def.name,
-                                parameters=kwargs,
-                                correlation_id=correlation_id
-                            )
-
-                    logger.info(
-                        f"Registered {len(tool_definitions)} vector intelligence tools")
-                else:
-                    logger.warning("Vector tools not available")
-            else:
-                logger.info(
-                    "Vector system not initialized, skipping vector tools registration")
-        except ImportError as e:
-            if "app.startup" in str(e):
-                logger.info(
-                    "Vector startup module not available, skipping vector intelligence tools")
-            else:
-                logger.error(
-                    f"Failed to register vector intelligence tools: {e}")
-        except Exception as e:
-            logger.error(f"Failed to register vector intelligence tools: {e}")
+        Currently disabled as the vector integration module is not implemented.
+        This method serves as a placeholder for future vector search capabilities.
+        """
+        logger.info(
+            "Vector intelligence tools registration skipped - module not implemented",
+            extra={"event": "vector_tools_skip", "reason": "module_not_implemented"},
+        )
+        return
 
     def run(self) -> None:
-        logger.info("Starting MCP server", extra={
-                    "event": "mcp_run", "transport": self.transport})
+        logger.info("Starting MCP server", extra={"event": "mcp_run", "transport": self.transport})
         try:
             self.mcp.run(transport=self.transport)
         except EOFError:
-            logger.info("MCP server stopped: stdio closed",
-                        extra={"event": "mcp_stdio_closed"})
+            logger.info("MCP server stopped: stdio closed", extra={"event": "mcp_stdio_closed"})
         except KeyboardInterrupt:
-            logger.info("MCP server interrupted", extra={
-                        "event": "mcp_interrupted"})
+            logger.info("MCP server interrupted", extra={"event": "mcp_interrupted"})
         except Exception:
-            logger.exception("MCP server crashed", extra={
-                             "event": "mcp_crash"})
+            logger.exception("MCP server crashed", extra={"event": "mcp_crash"})
             raise
 
 
@@ -773,8 +714,7 @@ async def amain() -> MCPServer:
         server = await MCPServer.create(transport=transport)
         return server
     except Exception:
-        logger.exception("MCP server failed to start",
-                         extra={"event": "mcp_start_error"})
+        logger.exception("MCP server failed to start", extra={"event": "mcp_start_error"})
         raise
 
 

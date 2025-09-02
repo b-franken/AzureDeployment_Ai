@@ -47,7 +47,7 @@ def init_tracing(service_name: str = "devops-ai-api") -> None:
         logger.warning("HTTPX instrumentation failed", extra={"error": str(exc)}, exc_info=True)
 
     try:
-        AsyncPGInstrumentor().instrument()
+        AsyncPGInstrumentor().instrument()  # type: ignore[no-untyped-call]
     except Exception as exc:
         logger.warning("AsyncPG instrumentation failed", extra={"error": str(exc)}, exc_info=True)
 

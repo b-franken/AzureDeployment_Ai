@@ -8,7 +8,7 @@ from mcp.server.fastmcp import Context, FastMCP
 def register(mcp: FastMCP) -> None:
     @mcp.prompt("provision_from_catalog")
     async def provision_from_catalog(
-        context: Context,
+        context: Context,  # type: ignore[type-arg]
         pattern_id: str,
         name: str,
         location: str = "westeurope",

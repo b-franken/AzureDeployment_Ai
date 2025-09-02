@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .base import VectorProvider, VectorSearchResult, VectorQuery
+from .base import VectorProvider, VectorQuery, VectorSearchResult
 from .chroma import ChromaProvider
 from .pinecone import PineconeProvider
 

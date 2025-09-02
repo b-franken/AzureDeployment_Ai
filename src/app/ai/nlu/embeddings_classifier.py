@@ -106,7 +106,9 @@ class EmbeddingsClassifierService:
         Z = Z.astype(np.float32, copy=False)
         expZ = np.exp(Z)
         P = expZ / expZ.sum(axis=1, keepdims=True)
-        return P.astype(np.float32)
+        from typing import cast
+
+        return cast(NDArray[np.float32], P.astype(np.float32))
 
     def fit(
         self,

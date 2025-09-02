@@ -3,8 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from opentelemetry import trace
-
 from app.core.logging import get_logger
 from app.observability.agent_tracing import get_agent_tracer
 
@@ -109,18 +107,21 @@ class ResourceIntelligence:
         }
 
     async def analyze_resource_requirements(
-        self, primary_resource: dict[str, Any], environment: str = "dev", user_preferences: dict[str, Any] | None = None
+        self,
+        primary_resource: dict[str, Any],
+        environment: str = "dev",
+        user_preferences: dict[str, Any] | None = None,
     ) -> ResourceIntelligenceResult:
         preferences = user_preferences or {}
-        
+
         async with tracer.trace_operation(
             "analyze_resource_requirements",
             {
                 "resource_type": primary_resource.get("type", "unknown"),
                 "resource_name": primary_resource.get("name", "unnamed"),
                 "environment": environment,
-                "operation.type": "analysis_start"
-            }
+                "operation.type": "analysis_start",
+            },
         ) as analysis_span:
             logger.info(
                 "Starting resource intelligence analysis",
@@ -128,17 +129,23 @@ class ResourceIntelligence:
                 resource_name=primary_resource.get("name"),
                 environment=environment,
             )
-            
-            inferred = await self._infer_required_resources(primary_resource, environment, preferences)
+
+            inferred = await self._infer_required_resources(
+                primary_resource, environment, preferences
+            )
             recommendations = await self._generate_recommendations(primary_resource, environment)
             warnings = self._validate_resource_configuration(primary_resource, environment)
-            adjustments = self._suggest_configuration_adjustments(primary_resource, environment, preferences)
+            adjustments = self._suggest_configuration_adjustments(
+                primary_resource, environment, preferences
+            )
 
-            analysis_span.set_attributes({
-                "inferred_resources_count": len(inferred),
-                "recommendations_count": len(recommendations),
-                "warnings_count": len(warnings),
-            })
+            analysis_span.set_attributes(
+                {
+                    "inferred_resources_count": len(inferred),
+                    "recommendations_count": len(recommendations),
+                    "warnings_count": len(warnings),
+                }
+            )
 
             result = ResourceIntelligenceResult(
                 inferred_resources=inferred,
@@ -154,12 +161,7 @@ class ResourceIntelligence:
                 warnings_count=len(warnings),
             )
 
-            tracer.track_agent_metrics(
-                "resource_analysis", 
-                0.0, 
-                True, 
-                len(inferred)
-            )
+            tracer.track_agent_metrics("resource_analysis", 0.0, True, len(inferred))
 
             return result
 
@@ -174,61 +176,69 @@ class ResourceIntelligence:
             if not preferences.get("skip_app_service_plan", False):
                 plan_name = primary_resource.get("app_service_plan") or f"{resource_name}-plan"
                 plan_sku = self._determine_app_service_sku(environment, preferences)
-                
-                inferred.append({
-                    "type": "app_service_plan",
-                    "name": plan_name,
-                    "sku": plan_sku,
-                    "location": primary_resource.get("location", "westeurope"),
-                    "os_type": primary_resource.get("os_type", "Linux"),
-                    "reason": "Required for Web App hosting",
-                })
+
+                inferred.append(
+                    {
+                        "type": "app_service_plan",
+                        "name": plan_name,
+                        "sku": plan_sku,
+                        "location": primary_resource.get("location", "westeurope"),
+                        "os_type": primary_resource.get("os_type", "Linux"),
+                        "reason": "Required for Web App hosting",
+                    }
+                )
 
         elif resource_type in ["aks_cluster", "microsoft.containerservice/managedclusters"]:
             if not preferences.get("existing_vnet"):
                 vnet_name = f"{resource_name}-vnet"
                 subnet_name = f"{resource_name}-subnet"
-                
-                inferred.extend([
-                    {
-                        "type": "virtual_network",
-                        "name": vnet_name,
-                        "address_space": ["10.0.0.0/16"],
-                        "location": primary_resource.get("location", "westeurope"),
-                        "reason": "Network isolation for AKS cluster",
-                    },
-                    {
-                        "type": "subnet",
-                        "name": subnet_name,
-                        "vnet_name": vnet_name,
-                        "address_prefix": "10.0.1.0/24",
-                        "reason": "Dedicated subnet for AKS nodes",
-                    },
-                ])
+
+                inferred.extend(
+                    [
+                        {
+                            "type": "virtual_network",
+                            "name": vnet_name,
+                            "address_space": ["10.0.0.0/16"],
+                            "location": primary_resource.get("location", "westeurope"),
+                            "reason": "Network isolation for AKS cluster",
+                        },
+                        {
+                            "type": "subnet",
+                            "name": subnet_name,
+                            "vnet_name": vnet_name,
+                            "address_prefix": "10.0.1.0/24",
+                            "reason": "Dedicated subnet for AKS nodes",
+                        },
+                    ]
+                )
 
             if environment in ["staging", "prod"] and not preferences.get("skip_monitoring"):
                 workspace_name = f"{resource_name}-logs"
-                inferred.append({
-                    "type": "log_analytics_workspace",
-                    "name": workspace_name,
-                    "sku": "PerGB2018",
-                    "retention_days": 90 if environment == "prod" else 30,
-                    "location": primary_resource.get("location", "westeurope"),
-                    "reason": "Required for AKS monitoring and logging",
-                })
+                inferred.append(
+                    {
+                        "type": "log_analytics_workspace",
+                        "name": workspace_name,
+                        "sku": "PerGB2018",
+                        "retention_days": 90 if environment == "prod" else 30,
+                        "location": primary_resource.get("location", "westeurope"),
+                        "reason": "Required for AKS monitoring and logging",
+                    }
+                )
 
         elif resource_type in ["sql_database", "microsoft.sql/servers/databases"]:
             server_name = primary_resource.get("server_name")
             if not server_name:
                 server_name = f"{resource_name}-server"
-                inferred.append({
-                    "type": "sql_server",
-                    "name": server_name,
-                    "admin_username": "sqladmin",
-                    "location": primary_resource.get("location", "westeurope"),
-                    "version": "12.0",
-                    "reason": "Required SQL Server instance for database",
-                })
+                inferred.append(
+                    {
+                        "type": "sql_server",
+                        "name": server_name,
+                        "admin_username": "sqladmin",
+                        "location": primary_resource.get("location", "westeurope"),
+                        "version": "12.0",
+                        "reason": "Required SQL Server instance for database",
+                    }
+                )
 
         return inferred
 
@@ -240,15 +250,15 @@ class ResourceIntelligence:
         resource_name = primary_resource.get("name", "unnamed")
 
         complementary = self._complementary_resources.get(resource_type, [])
-        
+
         for comp_resource in complementary:
             should_recommend = True
-            
+
             if comp_resource["type"] == "application_insights" and environment == "dev":
                 should_recommend = comp_resource["priority"] == "high"
             elif comp_resource["type"] == "key_vault" and environment == "dev":
                 should_recommend = False
-            
+
             if should_recommend:
                 rec = ResourceRecommendation(
                     resource_type=comp_resource["type"],
@@ -256,7 +266,9 @@ class ResourceIntelligence:
                     reason=comp_resource["reason"],
                     priority=comp_resource["priority"],
                     configuration=comp_resource.get("configuration", {}),
-                    estimated_cost_impact=self._estimate_cost_impact(comp_resource["type"], environment),
+                    estimated_cost_impact=self._estimate_cost_impact(
+                        comp_resource["type"], environment
+                    ),
                 )
                 recommendations.append(rec)
 
@@ -277,28 +289,32 @@ class ResourceIntelligence:
 
         return recommendations
 
-    def _validate_resource_configuration(self, resource: dict[str, Any], environment: str) -> list[str]:
+    def _validate_resource_configuration(
+        self, resource: dict[str, Any], environment: str
+    ) -> list[str]:
         warnings: list[str] = []
         resource_type = resource.get("type", "").lower()
-        
+
         if resource_type in ["webapp"] and environment == "prod":
             if not resource.get("https_only", True):
                 warnings.append("Production Web Apps should enforce HTTPS only")
-            
+
             if not resource.get("backup_enabled"):
                 warnings.append("Production Web Apps should have backup enabled")
 
         elif resource_type in ["aks_cluster"]:
             if environment == "prod" and resource.get("node_count", 1) < 3:
-                warnings.append("Production AKS clusters should have at least 3 nodes for high availability")
-            
+                warnings.append(
+                    "Production AKS clusters should have at least 3 nodes for high availability"
+                )
+
             if not resource.get("network_policy"):
                 warnings.append("AKS clusters should use network policies for security")
 
         elif resource_type in ["sql_server"]:
             if not resource.get("firewall_rules"):
                 warnings.append("SQL Server should have firewall rules configured")
-            
+
             if environment == "prod" and not resource.get("geo_backup_enabled"):
                 warnings.append("Production SQL Servers should have geo-redundant backup enabled")
 
@@ -309,7 +325,7 @@ class ResourceIntelligence:
     ) -> dict[str, Any]:
         adjustments: dict[str, Any] = {}
         resource_type = resource.get("type", "").lower()
-        
+
         if resource_type in ["webapp"]:
             if environment == "dev" and not preferences.get("preserve_sku"):
                 adjustments["sku"] = "F1"
@@ -331,11 +347,12 @@ class ResourceIntelligence:
 
     def _determine_app_service_sku(self, environment: str, preferences: dict[str, Any]) -> str:
         if preferences.get("sku"):
-            return preferences["sku"]
-        
+            sku: str = preferences["sku"]
+            return sku
+
         sku_map = {
             "dev": "F1",
-            "staging": "S1", 
+            "staging": "S1",
             "prod": "P1v2",
         }
         return sku_map.get(environment, "B1")
@@ -353,5 +370,5 @@ class ResourceIntelligence:
             ("storage_account", "dev"): "low",
             ("storage_account", "prod"): "medium",
         }
-        
+
         return cost_matrix.get((resource_type, environment), "unknown")

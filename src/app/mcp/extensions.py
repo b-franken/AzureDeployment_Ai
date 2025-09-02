@@ -178,7 +178,7 @@ async def _fetch_network_usages(
 def register_extensions(server: Any) -> None:
     mcp = server.mcp
 
-    @mcp.resource("azure://quotas/{subscription_id}/{location}")
+    @mcp.resource("azure://quotas/{subscription_id}/{location}")  # type: ignore[misc]
     async def get_quotas(context: Context, subscription_id: str, location: str) -> dict[str, Any]:
         start = time.perf_counter()
         logger.info(

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 from app.common.async_pool import bounded_gather
+from app.tools.base import ToolResult
 
 from .base import ApplyResult, Backend, PlanResult
+
+if TYPE_CHECKING:
+    from app.tools.azure.tool import AzureProvision
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +44,7 @@ class Action(TypedDict):
 
 class SdkBackend(Backend):
     def __init__(self) -> None:
-        self.azure = None
+        self.azure: AzureProvision | None = None
         self._ensure_azure_tool()
         self._concurrency = 8
 
@@ -291,8 +295,10 @@ class SdkBackend(Backend):
         results: dict[str, Any] = {"steps": []}
         for stage in stages:
 
-            async def _run_one(a: Action) -> dict[str, Any]:
+            async def _run_one(a: Action) -> ToolResult:
                 try:
+                    if self.azure is None:
+                        return {"ok": False, "summary": "Azure SDK not initialized"}
                     return await self.azure.run(action=a["action"], **a["args"])
                 except Exception as e:
                     return {"ok": False, "summary": "exception", "output": str(e)}

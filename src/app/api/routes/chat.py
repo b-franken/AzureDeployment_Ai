@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
+from types import ModuleType
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Request, Response
@@ -12,6 +13,7 @@ from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
 from app.ai.llm.factory import get_provider_and_model
+from app.ai.types import Message
 from app.api.schemas import ChatRequest, ChatRequestV2, ChatResponse
 from app.api.services import run_chat
 from app.core.config import settings
@@ -21,6 +23,8 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
 
+auth_module: ModuleType | None = None
+AUTH_AVAILABLE = False
 try:
     from app.api.routes import auth as auth_module
 
@@ -58,10 +62,16 @@ async def get_optional_user(request: Request) -> dict[str, Any]:
     return {"email": "token-user", "roles": ["user"], "subscription_id": None, "is_active": True}
 
 
-def get_user_email(user: dict[str, Any] | Any) -> str:
+def get_user_email(user: dict[str, Any]) -> str:
+    """Extract user email from user dict with fallback."""
     if isinstance(user, dict):
-        return user.get("email", "anonymous")
-    return getattr(user, "email", "anonymous")
+        email = user.get("email")
+        if isinstance(email, str):
+            return email
+        logger.warning("User email is not a string, using anonymous")
+        return "anonymous"
+    logger.warning("User is not a dict, using anonymous")
+    return "anonymous"
 
 
 @router.post("", response_model=None)
@@ -186,7 +196,7 @@ async def _stream_plain_chat(req: ChatRequest, user: dict[str, Any]) -> AsyncGen
         try:
             llm, model = await get_provider_and_model(req.provider, req.model)
             memory = [m.model_dump() for m in req.memory or []]
-            messages = [{"role": m["role"], "content": m["content"]} for m in memory]
+            messages: list[Message] = [{"role": m["role"], "content": m["content"]} for m in memory]
             messages.append({"role": "user", "content": req.input})
             if not hasattr(llm, "chat_stream"):
                 text = await run_chat(
@@ -205,7 +215,11 @@ async def _stream_plain_chat(req: ChatRequest, user: dict[str, Any]) -> AsyncGen
                     await asyncio.sleep(0)
                 yield b"data: [DONE]\n\n"
                 return
-            async for token in llm.chat_stream(model=model, messages=messages):
+            # Type assertion to help mypy understand this is an async iterator
+            stream_iterator: AsyncIterator[str] = await llm.chat_stream(
+                model=model, messages=messages
+            )
+            async for token in stream_iterator:
                 if token:
                     yield f"data: {token}\n\n".encode()
                     await asyncio.sleep(0)

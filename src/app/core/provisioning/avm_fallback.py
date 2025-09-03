@@ -159,7 +159,10 @@ class AVMStrategy(ProvisioningStrategy):
                         # Log apply operation for observability with type-safe attribute access
                         apply_success = False
                         if isinstance(apply_result, dict):
-                            apply_success = apply_result.get("status") == "succeeded"
+                            apply_success = (
+                                apply_result.get("status") == "succeeded" or
+                                bool(apply_result.get("deployment_id"))
+                            )
                         else:
                             apply_success = getattr(apply_result, "success", False)
 
@@ -168,9 +171,53 @@ class AVMStrategy(ProvisioningStrategy):
                             bicep_path=plan_result.bicep_path,
                             apply_success=apply_success,
                             apply_result_type=type(apply_result).__name__,
+                            apply_result_keys=(
+                                list(apply_result.keys()) if isinstance(apply_result, dict) else []
+                            ),
                         )
-                        # Use plan result as preview (apply_result contains deployment details)
+                        
+                        # Use plan_result as the primary result since it contains the preview info
+                        # Apply result mainly contains deployment confirmation
                         result = plan_result
+                        
+                        logger.info(
+                            "Merging apply result with plan result",
+                            plan_result_type=type(plan_result).__name__,
+                            apply_result_type=type(apply_result).__name__,
+                            plan_is_dict=isinstance(plan_result, dict),
+                            apply_is_dict=isinstance(apply_result, dict),
+                            plan_keys=(
+                                list(plan_result.keys()) 
+                                if isinstance(plan_result, dict) 
+                                else []
+                            ),
+                            apply_keys=(
+                                list(apply_result.keys()) 
+                                if isinstance(apply_result, dict) 
+                                else []
+                            ),
+                        )
+                        
+                        # Add apply result info as metadata if it's a dict
+                        if isinstance(apply_result, dict):
+                            if isinstance(result, dict):
+                                # If both are dicts, merge them
+                                result.update(apply_result)
+                                result["apply_result"] = apply_result
+                                
+                                logger.info(
+                                    "Merged apply result into plan result",
+                                    merged_keys=list(result.keys()),
+                                    has_status=("status" in result),
+                                    has_deployment_id=("deployment_id" in result),
+                                    status_value=result.get("status"),
+                                )
+                            elif hasattr(result, "__dict__"):
+                                # Add apply_result as an attribute if result is an object
+                                if isinstance(result, dict):
+                                    result["apply_result"] = apply_result
+                                else:
+                                    setattr(result, "apply_result", apply_result)  # noqa: B010
                     else:
                         raise Exception("Failed to generate bicep template for deployment")
                     operation_type = "apply"
@@ -178,14 +225,59 @@ class AVMStrategy(ProvisioningStrategy):
                 execution_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
 
                 # Type-safe success determination with comprehensive logging
+                logger.info(
+                    "Starting AVM success evaluation",
+                    strategy_name=self.name,
+                    operation_type=operation_type,
+                    result_type=type(result).__name__,
+                    is_dict=isinstance(result, dict),
+                    execution_time_ms=execution_time,
+                )
+                
                 success = False
                 if isinstance(result, dict):
-                    success = result.get("status") == "succeeded"
-                    logger.debug(
-                        "AVM result success check from dict",
-                        result_status=result.get("status"),
+                    # Check multiple status indicators for success
+                    status = result.get("status")
+                    has_deployment_id = bool(result.get("deployment_id"))
+                    has_bicep_path = bool(result.get("bicep_path"))
+                    
+                    # For apply operations, also check the apply_result data
+                    apply_result_data = result.get("apply_result", {})
+                    apply_status = (
+                        apply_result_data.get("status") 
+                        if isinstance(apply_result_data, dict) 
+                        else None
+                    )
+                    apply_deployment_id = (
+                        bool(apply_result_data.get("deployment_id")) 
+                        if isinstance(apply_result_data, dict) 
+                        else False
+                    )
+                    
+                    success = (
+                        status == "succeeded" or 
+                        apply_status == "succeeded" or
+                        has_deployment_id or 
+                        apply_deployment_id or
+                        (operation_type == "plan" and has_bicep_path)
+                    )
+                    
+                    logger.info(
+                        "AVM result success evaluation",
+                        strategy_name=self.name,
+                        result_status=status,
+                        apply_status=apply_status,
+                        has_deployment_id=has_deployment_id,
+                        apply_deployment_id=apply_deployment_id,
+                        has_bicep_path=has_bicep_path,
+                        operation_type=operation_type,
                         success=success,
                         result_keys=list(result.keys()),
+                        apply_result_keys=(
+                            list(apply_result_data.keys()) 
+                            if isinstance(apply_result_data, dict) 
+                            else []
+                        ),
                     )
                 else:
                     success = getattr(result, "success", False)
@@ -334,6 +426,13 @@ class AVMStrategy(ProvisioningStrategy):
 
                     span.set_status(Status(StatusCode.OK))
 
+                    logger.info(
+                        "Creating AVM success ExecutionResult",
+                        strategy_name=self.name,
+                        execution_time_ms=execution_time,
+                        resources_count=len(resources_affected),
+                    )
+                    
                     return ExecutionResult.success_result(
                         strategy=self.name,
                         data=result,
@@ -554,6 +653,14 @@ class SDKFallbackStrategy(ProvisioningStrategy):
 
                     span.set_status(Status(StatusCode.OK))
 
+                    logger.info(
+                        "Creating SDK fallback success ExecutionResult",
+                        strategy_name=self.name,
+                        execution_time_ms=execution_time,
+                        resources_count=len(resources_affected),
+                        fallback_reason="AVM strategy failed",
+                    )
+                    
                     return ExecutionResult.success_result(
                         strategy=self.name,
                         data=data,
@@ -618,6 +725,11 @@ class SDKFallbackStrategy(ProvisioningStrategy):
 
         try:
             params = self._build_action_parameters(nlu_result, context, action_name)
+            
+            # Add clients using central azure auth
+            from app.tools.azure.clients import get_clients
+            clients = await get_clients(context.subscription_id)
+            params["clients"] = clients
 
             if dry_run:
                 plan_data = {
@@ -715,13 +827,13 @@ class SDKFallbackStrategy(ProvisioningStrategy):
 
     def _build_storage_params(
         self, params: dict[str, Any], context: ProvisionContext
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any]:        
         return {
             "subscription_id": context.subscription_id,
             "resource_group": params.get("resource_group")
             or context.resource_group
             or "default-rg",
-            "storage_name": params.get("name")
+            "name": params.get("name")
             or f"{context.name_prefix}storage{context.environment}",
             "location": params.get("location") or context.location or "westeurope",
             "sku": params.get("sku")

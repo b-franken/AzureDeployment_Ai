@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import importlib
+import os
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
+
+from app.ai.nlu.embeddings_clients import OpenAIClient
+from app.core.logging import get_logger
 
 from .base import VectorProvider, VectorQuery, VectorSearchResponse, VectorSearchResult
 
@@ -84,6 +88,7 @@ _chromadb_module: Any = None
 _settings_class: Any = None
 
 tracer = trace.get_tracer(__name__)
+logger = get_logger(__name__)
 
 
 class ChromaProvider(VectorProvider):
@@ -91,6 +96,8 @@ class ChromaProvider(VectorProvider):
         super().__init__(config)
         self._client: Any = None
         self._collections: dict[str, Any] = {}
+        self._embedding_client: OpenAIClient | None = None
+        self._embedding_dimension = 1536
 
     async def initialize(self) -> None:
         with tracer.start_as_current_span("vectordatabase_initialize") as span:
@@ -115,6 +122,18 @@ class ChromaProvider(VectorProvider):
                     )
 
                 self._client.heartbeat()
+                
+                # Initialize embedding client
+                api_key = os.getenv("OPENAI_API_KEY")
+                if api_key:
+                    self._embedding_client = OpenAIClient(
+                        model=os.getenv("VECTOR_EMBEDDING_MODEL", "text-embedding-3-small"),
+                        api_key=api_key,
+                        dimensions=self._embedding_dimension,
+                    )
+                else:
+                    logger.warning("OpenAI API key not found, text queries will not work properly")
+                
                 self._initialized = True
 
                 span.set_attributes(
@@ -123,6 +142,9 @@ class ChromaProvider(VectorProvider):
                         "vectordatabase.port": port,
                         "vectordatabase.persistent": bool(self.config.get("persistent_path")),
                         "vectordatabase.initialized": True,
+                        "vectordatabase.embedding_client_available": (
+                            self._embedding_client is not None
+                        ),
                     }
                 )
                 span.set_status(Status(StatusCode.OK))
@@ -295,16 +317,40 @@ class ChromaProvider(VectorProvider):
                         ),
                     )
                 else:
-                    results = collection.query(
-                        query_texts=[query.query_text],
-                        n_results=query.limit,
-                        where=where_clause,
-                        include=(
-                            ["documents", "metadatas", "distances", "embeddings"]
-                            if query.include_metadata
-                            else ["documents", "distances"]
-                        ),
-                    )
+                    if self._embedding_client and query.query_text:
+                        try:
+                            embeddings = self._embedding_client.encode([query.query_text])
+                            if embeddings is not None and len(embeddings) > 0:
+                                results = collection.query(
+                                    query_embeddings=[embeddings[0].tolist()],
+                                    n_results=query.limit,
+                                    where=where_clause,
+                                    include=(
+                                        ["documents", "metadatas", "distances", "embeddings"]
+                                        if query.include_metadata
+                                        else ["documents", "distances"]
+                                    ),
+                                )
+                            else:
+                                raise ValueError("Failed to generate query embeddings")
+                        except Exception as e:
+                            logger.error(f"Failed to generate embeddings for query: {e}")
+                            results = {
+                                "ids": [[]],
+                                "documents": [[]],
+                                "distances": [[]],
+                                "metadatas": [[]],
+                            }
+                    else:
+                        logger.warning(
+                            "No embedding client available or query text, returning empty results"
+                        )
+                        results = {
+                            "ids": [[]],
+                            "documents": [[]],
+                            "distances": [[]],
+                            "metadatas": [[]],
+                        }
 
                 search_results = []
                 if results["ids"] and results["ids"][0]:

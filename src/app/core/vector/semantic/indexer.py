@@ -436,25 +436,70 @@ class ResourceIndexer:
         return "\n".join(content_parts)
 
     async def _generate_embedding(self, content: str) -> list[float]:
-        # Placeholder for embedding generation
-        # In a real implementation, this would call an embedding service
-        # like OpenAI, Azure Cognitive Services, or a local model
-        import hashlib
-        import struct
+        import os
+        
+        from app.ai.nlu.embeddings_clients import OpenAIClient
+        
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            self.logger.warning(
+                "OpenAI API key not found, using fallback embedding generation",
+                content_length=len(content),
+            )
+            import hashlib
+            import struct
 
-        hash_bytes = hashlib.sha256(content.encode()).digest()
-        embedding = []
+            hash_bytes = hashlib.sha256(content.encode()).digest()
+            embedding = []
 
-        for i in range(0, min(len(hash_bytes), self.embedding_dimension * 4), 4):
-            chunk = hash_bytes[i : i + 4]
-            if len(chunk) == 4:
-                value = struct.unpack("f", chunk)[0]
-                embedding.append(float(value))
+            for i in range(0, min(len(hash_bytes), self.embedding_dimension * 4), 4):
+                chunk = hash_bytes[i : i + 4]
+                if len(chunk) == 4:
+                    value = struct.unpack("f", chunk)[0]
+                    embedding.append(float(value))
 
-        while len(embedding) < self.embedding_dimension:
-            embedding.append(0.0)
+            while len(embedding) < self.embedding_dimension:
+                embedding.append(0.0)
 
-        return embedding[: self.embedding_dimension]
+            return embedding[: self.embedding_dimension]
+        
+        try:
+            client = OpenAIClient(
+                model=os.getenv("VECTOR_EMBEDDING_MODEL", "text-embedding-3-small"),
+                api_key=api_key,
+                dimensions=self.embedding_dimension,
+            )
+            
+            embeddings = client.encode([content])
+            if embeddings is not None and len(embeddings) > 0:
+                embedding_list: list[float] = embeddings[0].tolist()
+                return embedding_list
+            else:
+                raise ValueError("Failed to generate embeddings")
+                
+        except Exception as e:
+            self.logger.error(
+                "Failed to generate OpenAI embeddings, using fallback",
+                error=str(e),
+                content_length=len(content),
+            )
+            
+            import hashlib
+            import struct
+
+            hash_bytes = hashlib.sha256(content.encode()).digest()
+            embedding = []
+
+            for i in range(0, min(len(hash_bytes), self.embedding_dimension * 4), 4):
+                chunk = hash_bytes[i : i + 4]
+                if len(chunk) == 4:
+                    value = struct.unpack("f", chunk)[0]
+                    embedding.append(float(value))
+
+            while len(embedding) < self.embedding_dimension:
+                embedding.append(0.0)
+
+            return embedding[: self.embedding_dimension]
 
     async def get_indexer_stats(self) -> dict[str, Any]:
         with tracer.start_as_current_span("indexer_stats") as span:

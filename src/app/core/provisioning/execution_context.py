@@ -156,6 +156,18 @@ class ExecutionResult(BaseSchema):
         output: Any = None,
     ) -> ExecutionResult:
         with tracer.start_as_current_span("execution_result_success") as span:
+            # Add logging to track strategy setting
+            from app.core.logging import get_logger
+            logger = get_logger(__name__)
+            logger.info(
+                "Creating ExecutionResult.success_result",
+                strategy_used=strategy,
+                execution_time_ms=execution_time,
+                resources_count=len(resources or []),
+                has_data=data is not None,
+                data_type=type(data).__name__ if data is not None else None,
+            )
+            
             result = cls(
                 success=True,
                 strategy_used=strategy,
@@ -209,6 +221,18 @@ class ExecutionResult(BaseSchema):
             return result
 
     def to_tool_result(self) -> dict[str, Any]:
+        # Add logging to track final tool result formatting
+        from app.core.logging import get_logger
+        logger = get_logger(__name__)
+        logger.info(
+            "Converting ExecutionResult to tool result",
+            success=self.success,
+            strategy_used=self.strategy_used,
+            execution_time_ms=self.execution_time_ms,
+            resources_count=len(self.resources_affected),
+            is_preview=(self.strategy_used == "preview_generation"),
+        )
+        
         if (
             self.success
             and self.strategy_used == "preview_generation"

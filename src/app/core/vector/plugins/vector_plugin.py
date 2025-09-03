@@ -125,6 +125,32 @@ class VectorDatabasePlugin(Plugin):
                     embedding_dimension=self.config.configuration.get("dimension", 1536),
                 )
 
+                # Ensure azure_resources collection exists
+                dimension = self.config.configuration.get("dimension", 1536)
+                collection_created = await default_provider.create_collection(
+                    collection_name="azure_resources",
+                    dimension=dimension,
+                    metadata={
+                        "description": "Azure resource and deployment data for semantic search",
+                        "embedding_model": self.config.configuration.get(
+                            "embedding_model", "text-embedding-3-small"
+                        ),
+                        "auto_created_by": "vector_plugin",
+                    }
+                )
+                
+                if collection_created:
+                    self.logger.info(
+                        "Created azure_resources collection", 
+                        collection_name="azure_resources", 
+                        dimension=dimension
+                    )
+                else:
+                    # Collection might already exist, that's OK
+                    self.logger.debug(
+                        "azure_resources collection already exists or creation skipped"
+                    )
+
                 embedding_model = self.config.configuration.get("embedding_model")
                 span.set_attributes(
                     {

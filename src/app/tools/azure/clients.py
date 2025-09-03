@@ -208,8 +208,7 @@ async def _dispose(clients: Clients) -> None:
         # Log but don't propagate disposal errors as they're not critical
         logger.warning(
             "azure_clients.dispose_error",
-            extra={"subscription_id": clients.subscription_id,
-                   "error": str(exc)},
+            extra={"subscription_id": clients.subscription_id, "error": str(exc)},
             exc_info=True,
         )
 
@@ -246,8 +245,7 @@ async def _build_clients(sid: str) -> tuple[Clients, int]:
         )
         logger.debug(
             "azure_clients.build.end",
-            extra={"subscription_id": sid,
-                   "expires_in_s": expiry - int(time.time())},
+            extra={"subscription_id": sid, "expires_in_s": expiry - int(time.time())},
         )
         return clients, expiry
     except Exception as exc:
@@ -271,8 +269,7 @@ async def _build_clients(sid: str) -> tuple[Clients, int]:
             )
         logger.error(
             "azure_clients.build.error",
-            extra={"subscription_id": sid, "error_type": type(
-                exc).__name__, "error": str(exc)},
+            extra={"subscription_id": sid, "error_type": type(exc).__name__, "error": str(exc)},
             exc_info=True,
         )
         raise
@@ -289,12 +286,10 @@ async def get_clients(subscription_id: str | None) -> Clients:
                 # Schedule disposal asynchronously to avoid blocking
                 asyncio.create_task(_dispose(clients))
                 _CACHE.pop(sid, None)
-                logger.debug("azure_clients.cache.expired",
-                             extra={"subscription_id": sid})
+                logger.debug("azure_clients.cache.expired", extra={"subscription_id": sid})
             else:
                 _CACHE.move_to_end(sid)
-                logger.debug("azure_clients.cache.hit",
-                             extra={"subscription_id": sid})
+                logger.debug("azure_clients.cache.hit", extra={"subscription_id": sid})
                 return clients
 
         # Build new clients
@@ -308,14 +303,12 @@ async def get_clients(subscription_id: str | None) -> Clients:
                 _, (old_clients, _) = _CACHE.popitem(last=False)
                 asyncio.create_task(_dispose(old_clients))
 
-            logger.debug("azure_clients.cache.miss",
-                         extra={"subscription_id": sid})
+            logger.debug("azure_clients.cache.miss", extra={"subscription_id": sid})
             return clients
         except Exception as exc:
             logger.error(
                 "azure_clients.get_clients.error",
-                extra={"subscription_id": sid, "error_type": type(
-                    exc).__name__, "error": str(exc)},
+                extra={"subscription_id": sid, "error_type": type(exc).__name__, "error": str(exc)},
                 exc_info=True,
             )
             raise

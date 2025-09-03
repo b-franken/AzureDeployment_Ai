@@ -325,7 +325,7 @@ def _maybe_wrap_approval(
             return wrapped
     except Exception as e:
         from app.core.logging import get_logger
-        
+
         logger = get_logger(__name__)
         logger.warning(
             "Cost threshold check failed",
@@ -1008,7 +1008,7 @@ async def maybe_call_tool(
 ) -> str:
     from app.core.config import settings
     from app.core.logging import get_logger
-    
+
     logger = get_logger(__name__)
     logger.info(
         "maybe_call_tool called",
@@ -1119,7 +1119,7 @@ async def maybe_call_tool(
                 )
             except Exception as e:
                 from app.core.logging import get_logger
-                
+
                 logger = get_logger(__name__)
                 logger.warning(
                     "Direct tool parsing failed",

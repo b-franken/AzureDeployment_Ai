@@ -53,9 +53,9 @@ class AksEmitter:
             for pool in node_pools:
                 logger.debug(
                     "Processing node pool",
-                    pool_name=pool.get('name'),
-                    vm_size=pool.get('vm_size'),
-                    count=pool.get('count'),
+                    pool_name=pool.get("name"),
+                    vm_size=pool.get("vm_size"),
+                    count=pool.get("count"),
                 )
                 lines.extend(
                     [

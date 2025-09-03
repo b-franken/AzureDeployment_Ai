@@ -31,7 +31,7 @@ async def senior_review(
     )
     prompt = f"{REVIEW_PROMPT}\n\n---\nUser: {user_input}\nAssistant: {assistant_reply}"
     logger.debug("Generated review prompt", prompt_length=len(prompt))
-    
+
     try:
         review_result = await generate_response(prompt, memory=[], model=model, provider=provider)
         logger.info("Senior review completed successfully", review_length=len(review_result))

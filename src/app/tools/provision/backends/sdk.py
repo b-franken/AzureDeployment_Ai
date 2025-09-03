@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 from app.common.async_pool import bounded_gather
-from app.tools.base import ToolResult
 from app.core.logging import get_logger
+from app.tools.base import ToolResult
 
 from .base import ApplyResult, Backend, PlanResult
 

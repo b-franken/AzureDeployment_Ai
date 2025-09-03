@@ -23,8 +23,8 @@ from app.core.exceptions import (
     ResourceNotFoundException,
     ValidationException,
 )
-from app.tools.azure.clients import AzureOperationError
 from app.core.logging import get_logger
+from app.tools.azure.clients import AzureOperationError
 
 
 class _AzureExceptionsProto(Protocol):

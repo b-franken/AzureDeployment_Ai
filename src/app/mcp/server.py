@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import os
 import re
 from datetime import datetime, timedelta
@@ -18,6 +17,7 @@ from fastmcp import Context, FastMCP
 
 from app.ai.tools_router import ToolExecutionContext, maybe_call_tool
 from app.core.cache.dependency import get_cache
+from app.core.logging import get_logger
 from app.core.streams import StreamingHandler
 from app.mcp.extensions import register_extensions
 from app.mcp.schemas import AzureQueryParams, DeploymentRequest, ToolExecutionRequest
@@ -26,7 +26,6 @@ from app.mcp.tools.integrated_analytics import register_integrated_analytics_too
 from app.mcp.tools.security_advisor import register_security_advisor_tool
 from app.mcp.tools.what_if import register as register_what_if
 from app.observability.otel_fixes import ensure_proper_otel_initialization
-from app.core.logging import get_logger
 from app.platform.audit.logger import AuditLogger
 from app.tools.registry import ensure_tools_loaded, list_tools
 

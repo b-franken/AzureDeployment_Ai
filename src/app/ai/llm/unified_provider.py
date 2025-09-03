@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import logging
 from collections.abc import AsyncIterator
 from types import TracebackType
 from typing import Any, Protocol, cast, runtime_checkable
@@ -14,6 +13,9 @@ from app.ai.llm.base import LLMProvider
 from app.ai.types import Message
 from app.ai.validation import LLMMessage, MessageRole, ValidationResult
 from app.core.exceptions import ExternalServiceException, retry_on_error
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 @runtime_checkable
@@ -140,7 +142,6 @@ class UnifiedLLMProvider(LLMProvider):
             ]
             last_err: Exception | None = None
 
-            logger = logging.getLogger(__name__)
             logger.debug(f"Processing {len(clean_messages)} messages for model {model}")
             logger.debug(f"Available adapters: {[a.name() for a in self._adapters]}")
 
@@ -206,7 +207,6 @@ class UnifiedLLMProvider(LLMProvider):
             ]
             last_err: Exception | None = None
 
-            logger = logging.getLogger(__name__)
             logger.debug(
                 f"Processing streaming request with {len(clean_messages)} messages "
                 f"for model {model}"
@@ -291,7 +291,6 @@ class UnifiedLLMProvider(LLMProvider):
                     message["name"] = m.name
                 clean.append(message)
 
-            logger = logging.getLogger(__name__)
             logger.debug(
                 f"Processing raw chat request with {len(clean)} messages for model {model}"
             )

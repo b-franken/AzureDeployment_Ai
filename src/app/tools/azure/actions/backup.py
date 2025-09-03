@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import logging
 from datetime import UTC
 
 from azure.core.exceptions import HttpResponseError
 
 from app.core.logging import get_logger
+
 from ..clients import Clients
 from ..utils.credentials import ensure_sync_credential
 from ..validators import validate_name

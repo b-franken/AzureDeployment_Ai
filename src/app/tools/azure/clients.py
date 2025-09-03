@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import logging
 import os
 import time
 from collections import OrderedDict
@@ -11,7 +10,6 @@ from dataclasses import dataclass
 from random import random
 from typing import Any
 
-import structlog
 from azure.core.credentials import TokenCredential
 from azure.core.credentials_async import AsyncTokenCredential
 from azure.core.exceptions import (
@@ -28,15 +26,13 @@ from azure.mgmt.containerregistry.aio import ContainerRegistryManagementClient
 from azure.mgmt.containerservice.aio import ContainerServiceClient
 from azure.mgmt.cosmosdb.aio import CosmosDBManagementClient
 from azure.mgmt.keyvault.aio import KeyVaultManagementClient
-# type: ignore[import-untyped]
-from azure.mgmt.loganalytics.aio import LogAnalyticsManagementClient
+from azure.mgmt.loganalytics.aio import LogAnalyticsManagementClient  # type: ignore[import-untyped]
 from azure.mgmt.msi.aio import ManagedServiceIdentityClient
 from azure.mgmt.network.aio import NetworkManagementClient
 from azure.mgmt.privatedns.aio import PrivateDnsManagementClient
 from azure.mgmt.redis.aio import RedisManagementClient
 from azure.mgmt.resource import ResourceManagementClient
-# type: ignore[import-untyped]
-from azure.mgmt.sql.aio import SqlManagementClient
+from azure.mgmt.sql.aio import SqlManagementClient  # type: ignore[import-untyped]
 from azure.mgmt.storage.aio import StorageManagementClient
 from azure.mgmt.web.aio import WebSiteManagementClient
 
@@ -44,8 +40,7 @@ from app.core.azure_auth import arm_scopes, build_async_credential, build_creden
 from app.core.config import settings
 from app.core.logging import get_logger
 
-logger = structlog.get_logger(__name__)
-std_logger = get_logger(__name__)
+logger = get_logger(__name__)
 
 
 def _sub_id(explicit: str | None) -> str:

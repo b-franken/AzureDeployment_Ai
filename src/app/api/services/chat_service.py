@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import logging
-
-from app.core.logging import get_logger
 import uuid
 from collections.abc import Sequence
 from typing import Any, Literal, cast
@@ -11,6 +8,7 @@ from app.ai.reviewer import senior_review
 from app.ai.tools_router import ToolExecutionContext, maybe_call_tool
 from app.api.services.memory_service import get_memory_service
 from app.core.config import settings
+from app.core.logging import get_logger
 
 # Global cache for capturing rich tool outputs when orchestrator fails
 _rich_output_cache: dict[str, str] = {}

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from collections.abc import Sequence
 from datetime import datetime
 from statistics import fmean, pstdev

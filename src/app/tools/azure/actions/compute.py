@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-import logging
 from collections.abc import Callable
 from typing import Any
 
 from azure.core.exceptions import HttpResponseError
 
 from app.common.async_pool import bounded_gather
-
 from app.core.logging import get_logger
+
 from ..clients import Clients
 from ..validators import validate_name
 

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import logging
 from collections.abc import Awaitable, Callable
 
 import jwt
 from fastapi import FastAPI, Request, Response
+
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)

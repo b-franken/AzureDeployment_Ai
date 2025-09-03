@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import logging
 import uuid
 
 from azure.core.exceptions import HttpResponseError
 
 from app.core.logging import get_logger
+
 from ..clients import Clients
 from ..idempotency import safe_get
 

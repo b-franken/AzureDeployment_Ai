@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import copy
-import logging
 
 from app.core.logging import get_logger
 from app.tools.registry import list_tools

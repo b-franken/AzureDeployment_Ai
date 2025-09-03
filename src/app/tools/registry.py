@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import importlib
-import logging
 import shutil
 import subprocess
 from collections.abc import Sequence

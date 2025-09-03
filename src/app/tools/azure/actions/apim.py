@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from azure.core.exceptions import HttpResponseError
@@ -11,6 +10,7 @@ from azure.mgmt.apimanagement.models import (
 )
 
 from app.core.logging import get_logger
+
 from ..clients import Clients
 from ..utils.credentials import ensure_sync_credential
 

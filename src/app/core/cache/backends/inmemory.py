@@ -6,10 +6,14 @@ from collections import OrderedDict
 from typing import Any
 
 from app.core.cache.base import CacheBackend
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class InMemoryCache(CacheBackend):
     def __init__(self, max_size: int = 10000, default_ttl: int = 300):
+        logger.info("Initializing in-memory cache", max_size=max_size, default_ttl=default_ttl)
         self.max_size = max_size
         self.default_ttl = default_ttl
         self._data: OrderedDict[str, tuple[Any, float]] = OrderedDict()
@@ -31,11 +35,23 @@ class InMemoryCache(CacheBackend):
         async with self._lock:
             seconds = ttl if ttl is not None else self.default_ttl
             expiry = time.time() + seconds if seconds > 0 else 0.0
-            if key in self._data:
+            is_update = key in self._data
+            if is_update:
                 self._data.move_to_end(key)
             self._data[key] = (value, expiry)
+            evicted = 0
             while len(self._data) > self.max_size:
                 self._data.popitem(last=False)
+                evicted += 1
+            if evicted > 0:
+                logger.debug("Cache eviction occurred", evicted_count=evicted)
+            logger.debug(
+                "Cache set operation",
+                key=key[:32],
+                is_update=is_update,
+                ttl=seconds,
+                cache_size=len(self._data),
+            )
             return True
 
     async def delete(self, *keys: str) -> int:
@@ -109,11 +125,17 @@ class InMemoryCache(CacheBackend):
         async with self._lock:
             if pattern is None:
                 n = len(self._data)
+                logger.info("Clearing entire cache", cleared_count=n)
                 self._data.clear()
                 return n
             keys = [k for k in self._data if pattern in k]
             for k in keys:
                 del self._data[k]
+            logger.info(
+                "Pattern-based cache invalidation",
+                pattern=pattern,
+                cleared_count=len(keys),
+            )
             return len(keys)
 
     async def aclose(self) -> None:

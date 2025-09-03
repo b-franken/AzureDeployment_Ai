@@ -10,7 +10,6 @@ Provides REST endpoints for managing user conversation memory including:
 
 from __future__ import annotations
 
-import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -21,8 +20,8 @@ from pydantic import BaseModel, Field
 
 from app.api.routes.chat import get_optional_user, get_user_email
 from app.api.services.memory_service import get_memory_service
-from app.observability.app_insights import app_insights
 from app.core.logging import get_logger
+from app.observability.app_insights import app_insights
 
 router = APIRouter(prefix="/memory", tags=["memory"])
 logger = get_logger(__name__)

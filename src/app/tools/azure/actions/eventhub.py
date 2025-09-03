@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from azure.core.exceptions import HttpResponseError
@@ -9,6 +8,7 @@ from azure.mgmt.eventhub.models import EHNamespace
 from azure.mgmt.eventhub.models import Sku as EventHubSku
 
 from app.core.logging import get_logger
+
 from ..clients import Clients
 from ..utils.credentials import ensure_sync_credential
 

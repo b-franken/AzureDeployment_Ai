@@ -1,7 +1,6 @@
 # src/app/api/routes/auth.py
 from __future__ import annotations
 
-import logging
 import os
 import secrets
 from collections.abc import Awaitable, Callable
@@ -12,6 +11,7 @@ import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
+
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)

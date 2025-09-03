@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import logging
-
 import httpx
 
 from app.ai.llm.factory import get_provider_and_model

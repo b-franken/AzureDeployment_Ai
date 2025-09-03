@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-import logging
 import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any, Literal
-
-from app.core.logging import get_logger
 
 from cryptography.fernet import Fernet
 from pydantic import (
@@ -21,6 +18,8 @@ from pydantic import (
     model_validator,
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 

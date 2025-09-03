@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import uuid
 from typing import Any
 
@@ -11,6 +10,7 @@ from azure.core.credentials_async import AsyncTokenCredential
 from azure.core.exceptions import HttpResponseError
 
 from app.core.logging import get_logger
+
 from ..clients import Clients
 
 logger = get_logger(__name__)

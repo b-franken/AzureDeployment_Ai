@@ -1,7 +1,11 @@
 from collections.abc import Callable, Sequence
 from typing import Any
 
+from app.core.logging import get_logger
+
 from ..writer import BicepWriter
+
+logger = get_logger(__name__)
 
 
 class AksEmitter:
@@ -17,10 +21,17 @@ class AksEmitter:
         modref: Callable[[str], str],
     ) -> Sequence[str]:
         name = r["name"]
+        logger.info("Emitting AKS cluster", name=name, idx=idx)
         dns_prefix = r.get("dns_prefix", name)
         node_pools = r.get("node_pools", [])
         network_profile = r.get("network_profile", {})
         addons = r.get("addons", {})
+        logger.debug(
+            "AKS configuration",
+            node_pools_count=len(node_pools),
+            has_network_profile=bool(network_profile),
+            addons=list(addons.keys()),
+        )
 
         lines = [
             f"resource aks_{idx} 'Microsoft.ContainerService/managedClusters@2023-10-01' = {{",
@@ -37,8 +48,15 @@ class AksEmitter:
         ]
 
         if node_pools:
+            logger.debug("Processing node pools", count=len(node_pools))
             lines.append("    agentPoolProfiles: [")
             for pool in node_pools:
+                logger.debug(
+                    "Processing node pool",
+                    pool_name=pool.get('name'),
+                    vm_size=pool.get('vm_size'),
+                    count=pool.get('count'),
+                )
                 lines.extend(
                     [
                         "      {",
@@ -108,4 +126,5 @@ class AksEmitter:
             ]
         )
 
+        logger.info("AKS cluster emission completed", name=name, lines_generated=len(lines))
         return lines

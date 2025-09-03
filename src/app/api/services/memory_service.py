@@ -7,15 +7,13 @@ making the AI assistant smarter by maintaining context and learning from interac
 
 from __future__ import annotations
 
-import logging
 import time
 from typing import Any
-
-from app.core.logging import get_logger
 
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
+from app.core.logging import get_logger
 from app.memory.storage import AsyncMemoryStore, MessageRole, get_async_store
 from app.observability.app_insights import app_insights
 

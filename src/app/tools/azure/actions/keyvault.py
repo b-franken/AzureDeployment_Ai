@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from collections.abc import Callable
 from typing import Any
 
@@ -10,6 +9,7 @@ from azure.mgmt.keyvault.models import Sku as KvSku
 from azure.mgmt.keyvault.models import VaultCreateOrUpdateParameters, VaultProperties
 
 from app.core.logging import get_logger
+
 from ..clients import Clients
 from ..utils.credentials import ensure_sync_credential
 

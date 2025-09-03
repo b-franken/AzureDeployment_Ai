@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any, Generic, TypeVar, cast
+from typing import Any, cast
 
 import asyncpg
 from opentelemetry import trace
@@ -18,8 +18,6 @@ from redis.asyncio import Redis
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.observability.app_insights import app_insights
-
-T = TypeVar("T", bound=BaseModel)
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -340,7 +338,7 @@ def get_data_layer() -> UnifiedDataLayer:
     return _DATA_LAYER
 
 
-class Repository(Generic[T], ABC):
+class Repository[T: BaseModel](ABC):
     def __init__(
         self, data_layer: UnifiedDataLayer, model_class: type[T], table_name: str | None = None
     ) -> None:

@@ -5,14 +5,12 @@ import json
 import uuid
 from abc import ABC
 from datetime import UTC, datetime
-from typing import Any, ClassVar, Generic, Self, TypeVar
+from typing import Any, ClassVar, Self
 
 import structlog
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_serializer
 
 logger = structlog.get_logger(__name__)
-
-T = TypeVar("T")
 
 
 class BaseSchema(BaseModel, ABC):
@@ -117,7 +115,7 @@ class AuditedSchema(TimestampedSchema):
         return self
 
 
-class PaginatedResponse(BaseSchema, Generic[T]):
+class PaginatedResponse[T](BaseSchema):
     items: list[T] = Field(description="Response items")
     total: int = Field(description="Total item count")
     page: int = Field(ge=1, description="Current page number")

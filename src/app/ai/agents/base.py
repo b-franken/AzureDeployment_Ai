@@ -5,15 +5,11 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Generic, TypeVar
 
 from app.ai.agents.types import AgentContext, ExecutionPlan, ExecutionResult
 
 __all__ = ["Agent", "AgentContext", "AgentStatus", "AgentMetrics"]
 from app.observability.agent_tracing import get_agent_tracer
-
-TState = TypeVar("TState")
-TResult = TypeVar("TResult")
 
 
 class AgentStatus(Enum):
@@ -35,7 +31,7 @@ class AgentMetrics:
     last_execution_time: datetime | None = None
 
 
-class Agent(ABC, Generic[TState, TResult]):
+class Agent[TState, TResult](ABC):
     def __init__(self, context: AgentContext | None = None) -> None:
         self.context = context or AgentContext()
         self.status = AgentStatus.IDLE

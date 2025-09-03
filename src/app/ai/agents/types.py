@@ -3,9 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Generic, Literal, TypeVar
-
-TResult = TypeVar("TResult")
+from typing import Any, Literal
 
 
 class StepType(Enum):
@@ -57,7 +55,7 @@ class StepResult:
 
 
 @dataclass
-class ExecutionResult(Generic[TResult]):
+class ExecutionResult[TResult]:
     success: bool
     result: TResult | None = None
     error: str | None = None

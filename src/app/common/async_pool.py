@@ -3,17 +3,13 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Awaitable, Callable, Iterable
-from typing import TypeVar
 
 from app.core.logging import get_logger
-
-T = TypeVar("T")
-R = TypeVar("R")
 
 logger = get_logger(__name__)
 
 
-async def bounded_gather(*aws: Awaitable[R], limit: int = 8) -> list[R]:
+async def bounded_gather[R](*aws: Awaitable[R], limit: int = 8) -> list[R]:
     if not aws:
         return []
     lim = max(1, int(limit))
@@ -48,7 +44,9 @@ async def bounded_gather(*aws: Awaitable[R], limit: int = 8) -> list[R]:
                 t.cancel()
 
 
-async def amap(fn: Callable[[T], Awaitable[R]], items: Iterable[T], limit: int = 8) -> list[R]:
+async def amap[T, R](
+    fn: Callable[[T], Awaitable[R]], items: Iterable[T], limit: int = 8
+) -> list[R]:
     lim = max(1, int(limit))
     coros: list[Awaitable[R]] = []
     for x in items:

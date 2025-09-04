@@ -623,7 +623,7 @@ async def _openai_tools_orchestrator(
                 model=selected_model,
                 tools_count=len(tools),
             )
-            return f"Failed to process request: {e!s}"
+            return "An internal error occurred while processing the request."
         choices = first.get("choices", [])
         if not choices:
             logger.warning(
